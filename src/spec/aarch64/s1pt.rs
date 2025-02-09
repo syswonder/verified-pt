@@ -1,6 +1,6 @@
 use vstd::prelude::*;
 
-use super::mem::PageTableMem;
+use super::mem::{Frame, FrameAttr, FrameSize, PageTableMem};
 
 verus! {
 
@@ -40,8 +40,6 @@ pub ghost struct GhostPageDescriptor {
     pub ap_user: bool,
     /// Memory attributes index (AttrIndx)
     pub attr_indx: u8,
-    /// Shareability domain
-    pub shareability: Shareability,
     /// Execute Never (XN)
     pub xn: bool,
     /// Contiguous bit hint
@@ -50,15 +48,7 @@ pub ghost struct GhostPageDescriptor {
     pub ns: bool,
 }
 
-/// Shareability domain specification
-#[derive(PartialEq, Eq)]
-pub ghost enum Shareability {
-    NonShareable,
-    OuterShareable,
-    InnerShareable,
-}
-
-/// Abstract definition of page table entry.
+/// Abstract page table entry.
 pub ghost enum GhostPTEntry {
     /// Points to next level page table
     Table(GhostTableDescriptor),
@@ -68,8 +58,9 @@ pub ghost enum GhostPTEntry {
     Empty,
 }
 
-/// Concrete page table entry
+/// Concrete page table entry.
 pub struct PTEntry {
+    /// The 64-bit value of the page table entry.
     pub value: u64,
 }
 
@@ -101,14 +92,6 @@ impl PTEntry {
                 let ap_rw = (value & (1u64 << 7)) != 0;
                 let ap_user = (value & (1u64 << 6)) != 0;
                 let attr_indx = ((value >> 2) & 0x7) as u8;
-                let shareability_val = (value >> 8) & 0x3;
-                let shareability = if shareability_val == 1 {
-                    Shareability::OuterShareable
-                } else if shareability_val == 2 {
-                    Shareability::InnerShareable
-                } else {
-                    Shareability::NonShareable
-                };
                 let xn = (value & (1u64 << 54)) != 0;
                 let contiguous = (value & (1u64 << 52)) != 0;
                 let ns = (value & (1u64 << 5)) != 0;
@@ -121,7 +104,6 @@ impl PTEntry {
                         ap_rw,
                         ap_user,
                         attr_indx,
-                        shareability,
                         xn,
                         contiguous,
                         ns,
@@ -144,81 +126,39 @@ pub open spec fn read_pt_entry(mem: PageTableMem, addr: u64) -> GhostPTEntry {
     PTEntry { value: mem.read(addr) }@
 }
 
-/// Represents a physical memory frame.
-pub struct Frame {
-    /// The base address of the frame.
-    pub base: nat,
-    /// The size of the frame in bytes.
-    pub size: nat,
-}
-
-/// Represents memory access and attribute flags.
-#[derive(PartialEq, Eq)]
-pub struct Flags {
-    /// Whether the memory is readable.
-    pub readable: bool,
-    /// Whether the memory is writable.
-    pub writable: bool,
-    /// Whether the memory is executable in user mode.
-    pub executable_user: bool,
-    /// Whether the memory is executable in kernel mode.
-    pub executable_kernel: bool,
-    /// Whether the memory is accessible in user mode.
-    pub user_accessible: bool,
-    /// Memory attribute index (AttrIndx).
-    pub attr_indx: u8,
-    /// Shareability domain of the memory.
-    pub shareability: Shareability,
-    /// Non-secure bit (NS).
-    pub ns: bool,
-    /// Contiguous bit hint.
-    pub contiguous: bool,
-    /// Dirty bit (DBM).
-    pub dirty: bool,
-    /// Accessed bit (AF).
-    pub accessed: bool,
-}
-
-/// Represents a mapping between a virtual address and a physical frame.
-pub struct PageMapping {
-    /// The physical frame being mapped.
-    pub frame: Frame,
-    /// The flags associated with the mapping.
-    pub flags: Flags,
-}
-
 /// Extract index bits from virtual address for given level (0-3)
 spec fn get_index(addr: u64, level: nat) -> u64 {
     let level_shift = 39 - level * 9;
     (addr >> level_shift) & 0x1FF
 }
 
-/// Compute physical address and flags for page table walk
-spec fn compute_mapping(
+/// Compute physical address and flags for the reached frame
+spec fn compute_frame(
     entry: GhostPageDescriptor,
     level: nat,
     addr: u64,
     user_ok: bool,
     uxn_accum: bool,
     pxn_accum: bool,
-) -> (Frame, Flags) {
-    let page_size = (1 << (12 + 9 * (3 - level as u64))) as u64;
-    let offset_mask: u64 = (page_size - 1) as u64;
+) -> Frame {
+    let size = if level == 3 {
+        FrameSize::Size1G
+    } else if level == 2 {
+        FrameSize::Size64K
+    } else {
+        FrameSize::Size4K
+    };
+    let offset_mask= (size.as_u64() - 1) as u64;
     let base = (entry.addr << 12) | (addr & offset_mask);
-    let flags = Flags {
+    let attr = FrameAttr {
         readable: true,
         writable: entry.ap_rw,
-        executable_user: !(uxn_accum || entry.xn),
-        executable_kernel: !pxn_accum,
+        // NOTE: VMSA-v8 differentiates between user-executable and kernel-executable
+        // We don't have this distinction yet, so we just use the user-executable bit
+        executable: !(uxn_accum || entry.xn),
         user_accessible: user_ok && entry.ap_user,
-        attr_indx: entry.attr_indx,
-        shareability: entry.shareability,
-        ns: entry.ns,
-        contiguous: entry.contiguous,
-        dirty: entry.dirty,
-        accessed: entry.accessed,
     };
-    (Frame { base: base as nat, size: page_size as nat }, flags)
+    Frame { base, size, attr }
 }
 
 /// Recursive helper for page table walk
@@ -230,7 +170,7 @@ pub closed spec fn walk_level(
     user_ok: bool,
     uxn_accum: bool,
     pxn_accum: bool,
-) -> Option<PageMapping>
+) -> Option<Frame>
     decreases level,
 {
     if level == 0 {
@@ -253,15 +193,7 @@ pub closed spec fn walk_level(
                     None  // Block must be at level 1-3, page only at level 1
 
                 } else {
-                    let (frame, flags) = compute_mapping(
-                        page_desc,
-                        level,
-                        addr,
-                        user_ok,
-                        uxn_accum,
-                        pxn_accum,
-                    );
-                    Some(PageMapping { frame, flags })
+                    Some(compute_frame(page_desc, level, addr, user_ok, uxn_accum, pxn_accum))
                 }
             },
             GhostPTEntry::Empty => None,
@@ -272,29 +204,20 @@ pub closed spec fn walk_level(
 /// Hardware behavior of a valid page table walk.
 ///
 /// This function simulates the MMU's page table walk process and checks if the given
-/// virtual address `addr` maps to the specified `page` with the correct flags.
+/// virtual address `addr` maps to the specified `frame` with the correct flags.
 ///
-/// Given a `PageTableMem` `mem`, the predicate is true for those `addr` and `page` where the
-/// MMU's page table walk arrives at an entry mapping the frame `page.frame`, and the `pte.flags`
+/// Given a `PageTableMem` `mem`, the predicate is true for those `addr` and `frame` where the
+/// MMU's page table walk arrives at an entry mapping the frame `frame`, and the `pte.flags`
 /// must reflect the properties along the translation path.
 ///
 /// Support 4-level page tables yet.
-///
-/// # Parameters
-/// - `mem`: The page table memory to walk.
-/// - `addr`: The virtual address to translate.
-/// - `page`: The expected page mapping to validate against.
-///
-/// # Returns
-/// - `true` if the page table walk results in a valid mapping that matches `page`.
-/// - `false` otherwise.
-pub open spec fn page_table_walk(mem: PageTableMem, addr: u64, page: PageMapping) -> bool {
+pub open spec fn page_table_walk(mem: PageTableMem, addr: u64, frame: Frame) -> bool {
     let root_addr = mem.root();
     match walk_level(mem, addr, 4, root_addr, true, false, false) {
-        Some(mapping) => {
-            &&& mapping.frame.base == page.frame.base
-            &&& mapping.frame.size == page.frame.size
-            &&& mapping.flags == page.flags
+        Some(reached) => {
+            &&& reached.base == frame.base
+            &&& reached.size == frame.size
+            &&& reached.attr == frame.attr
         },
         None => false,
     }
