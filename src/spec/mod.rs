@@ -1,1 +1,1 @@
-mod aarch64_hw;
+mod aarch64;
