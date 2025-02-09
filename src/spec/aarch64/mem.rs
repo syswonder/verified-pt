@@ -1,17 +1,19 @@
-use vstd::prelude::{nat, verus};
+use vstd::prelude::*;
 
 verus! {
 
-pub struct PageTableMem {
-
-}
+pub struct PageTableMem {}
 
 impl PageTableMem {
     pub fn new() -> Self {
-        Self {}
+        Self {  }
     }
 
-    pub open spec fn read(&self, addr: nat) -> u64 {
+    pub open spec fn root(self) -> u64 {
+        0
+    }
+
+    pub open spec fn read(&self, addr: u64) -> u64 {
         // TODO: read from memory
         0
     }
