@@ -148,7 +148,7 @@ spec fn compute_frame(
     } else {
         FrameSize::Size4K
     };
-    let offset_mask= (size.as_u64() - 1) as u64;
+    let offset_mask = (size.as_u64() - 1) as u64;
     let base = (entry.addr << 12) | (addr & offset_mask);
     let attr = FrameAttr {
         readable: true,

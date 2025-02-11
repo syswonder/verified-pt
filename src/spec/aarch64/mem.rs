@@ -1,7 +1,19 @@
 //! Defination of memory management structures and functions.
 use vstd::prelude::*;
 
+use super::s1pt::page_table_walk;
+
 verus! {
+
+/// Represents a physical memory frame (Page or Block).
+pub struct Frame {
+    /// The base address of the frame.
+    pub base: u64,
+    /// The size of the frame in bytes.
+    pub size: FrameSize,
+    /// The attributes of the frame.
+    pub attr: FrameAttr,
+}
 
 /// Page & Block size supported by VMSA-v8.
 pub enum FrameSize {
@@ -34,16 +46,6 @@ pub struct FrameAttr {
     pub executable: bool,
     /// Whether the memory is user accessible.
     pub user_accessible: bool,
-}
-
-/// Represents a physical memory frame (Page or Block).
-pub struct Frame {
-    /// The base address of the frame.
-    pub base: u64,
-    /// The size of the frame in bytes.
-    pub size: FrameSize,
-    /// The attributes of the frame.
-    pub attr: FrameAttr,
 }
 
 /// Memory where page table is stored.
@@ -96,6 +98,42 @@ impl PageTableMem {
         // TODO: read from memory
         0
     }
+}
+
+/// Abstract memory state, including
+///
+/// - Common memory: Memory used by the OS and applications.
+/// - Page table memory: Memory used to store page tables.
+/// - TLB: Translation Lookaside Buffer.
+pub struct MemoryState {
+    /// Common memory.
+    mem: Seq<nat>,
+    /// Page table memory.
+    pt_mem: PageTableMem,
+    /// TLB.
+    tlb: Map<nat, Frame>,
+}
+
+impl MemoryState {
+    /// Initial memory state.
+    ///
+    /// The initial state must satisfy the specification.
+    pub open spec fn init() -> bool {
+        // TODO
+        true
+    }
+}
+
+pub spec const MAX_BASE: nat = 0x8000_0000;
+
+/// Serialize the page table memory to a page map.
+pub open spec fn serialize_pt_mem(pt_mem: PageTableMem) -> Map<nat, Frame> {
+    Map::new(
+        |addr: nat|
+            addr < MAX_BASE && exists|frame: Frame| #[trigger]
+                page_table_walk(pt_mem, addr as u64, frame),
+        |addr: nat| choose|pte: Frame| #[trigger] page_table_walk(pt_mem, addr as u64, pte),
+    )
 }
 
 } // verus!

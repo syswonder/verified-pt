@@ -1,3 +1,4 @@
+mod hardware;
 mod mem;
 mod s1pt;
-mod hardware;
+mod s2pt;
