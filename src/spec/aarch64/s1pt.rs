@@ -123,7 +123,7 @@ impl PTEntry {
 /// # Returns
 /// - The abstract representation of the page table entry (`GhostPTEntry`).
 pub open spec fn read_pt_entry(mem: PageTableMem, addr: u64) -> GhostPTEntry {
-    PTEntry { value: mem.read(addr) }@
+    PTEntry { value: mem.spec_read(addr) }@
 }
 
 /// Extract index bits from virtual address for given level (0-3)
@@ -144,7 +144,7 @@ spec fn compute_frame(
     let size = if level == 3 {
         FrameSize::Size1G
     } else if level == 2 {
-        FrameSize::Size64K
+        FrameSize::Size2M
     } else {
         FrameSize::Size4K
     };
