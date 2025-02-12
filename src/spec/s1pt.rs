@@ -201,7 +201,7 @@ pub closed spec fn walk_level(
     }
 }
 
-/// Hardware behavior of a valid page table walk.
+/// Hardware behavior of a valid page table walk process.
 ///
 /// This function simulates the MMU's page table walk process and checks if the given
 /// virtual address `addr` maps to the specified `frame` with the correct flags.
