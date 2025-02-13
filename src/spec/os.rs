@@ -11,11 +11,11 @@
 
 use vstd::prelude::*;
 
-use super::mem::MemoryState;
+use super::mem::OSMemoryState;
 
 verus! {
 
-impl MemoryState {
+impl OSMemoryState {
     
 }
 

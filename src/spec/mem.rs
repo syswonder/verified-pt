@@ -1,4 +1,5 @@
-//! Defination of memory management structures and functions.
+//! Defination of abstract memory state and functions.
+
 use vstd::prelude::*;
 
 use super::s1pt::page_table_walk;
@@ -100,43 +101,43 @@ impl PageTableMem {
     }
 }
 
-/// Abstract Memory State, which includes
+/// OS-level Memory State, which includes
 ///
 /// - Common memory: Memory used by the OS and applications.
 /// - Page table memory: Memory used to store page tables.
 /// - TLB: Translation Lookaside Buffer.
 /// 
-/// The memory state is the operand of the memory state machine. The memory state machine
-/// specifies the behavior of the memory management unit. These specifications are composed
-/// of the following parts:
+/// OS-level memory state is the operand of the OS memory state machine. The memory state
+/// machine specifies the behavior of the memory management unit. These specifications are
+/// composed of the following parts:
 /// 
-/// - Hardware level. This level specifies the behavior of the memory management unit.
+/// - Hardware. This level specifies the behavior of the memory management unit.
 ///   The hardware behavior must be a refinement of the specification.
 /// 
-/// - Page table level. Describing the page table functions’ behavior as a state machine
+/// - Page table. Describing the page table functions’ behavior as a state machine
 ///   operating on an abstract view of the page table.
 /// 
-/// - OS level. The highest level of memory state transition specification, which integrates
+/// - OS. The highest level of memory state transition specification, which integrates
 ///   the hardware level and the page table level, and describeschow the whole memory 
 ///   system behaves.
 /// 
 /// Specifications are defined in corresponding modules.
-pub struct MemoryState {
+pub struct OSMemoryState {
     /// Common memory.
-    mem: Seq<nat>,
+    pub mem: Seq<nat>,
     /// Page table memory.
-    pt_mem: PageTableMem,
+    pub pt_mem: PageTableMem,
     /// TLB.
-    tlb: Map<nat, Frame>,
+    pub tlb: Map<nat, Frame>,
 }
 
-impl MemoryState {
+impl OSMemoryState {
     /// Initial memory state.
     ///
     /// The initial state must satisfy the specification.
-    pub open spec fn init() -> bool {
-        // TODO
-        true
+    pub open spec fn init(self) -> bool {
+        &&& self.tlb.dom() === Set::empty()
+        &&& serialize_pt_mem(self.pt_mem) === Map::empty()
     }
 }
 

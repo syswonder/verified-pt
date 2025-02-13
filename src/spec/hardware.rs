@@ -11,11 +11,11 @@
 
 use vstd::prelude::*;
 
-use super::mem::{Frame, MemoryState};
+use super::mem::{Frame, OSMemoryState};
 
 verus! {
 
-impl MemoryState {
+impl OSMemoryState {
     /// State transition - Common memory read & write operation.
     ///
     /// The pre-state `s1` and post-state `s2` must satisfy the specification

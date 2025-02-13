@@ -1,9 +1,10 @@
 use vstd::prelude::*;
 
 mod hardware;
+mod hl;
+mod mem;
 mod os;
 mod pt;
-mod mem;
 mod s1pt;
 mod s2pt;
 
