@@ -100,11 +100,27 @@ impl PageTableMem {
     }
 }
 
-/// Abstract memory state, including
+/// Abstract Memory State, which includes
 ///
 /// - Common memory: Memory used by the OS and applications.
 /// - Page table memory: Memory used to store page tables.
 /// - TLB: Translation Lookaside Buffer.
+/// 
+/// The memory state is the operand of the memory state machine. The memory state machine
+/// specifies the behavior of the memory management unit. These specifications are composed
+/// of the following parts:
+/// 
+/// - Hardware level. This level specifies the behavior of the memory management unit.
+///   The hardware behavior must be a refinement of the specification.
+/// 
+/// - Page table level. Describing the page table functions’ behavior as a state machine
+///   operating on an abstract view of the page table.
+/// 
+/// - OS level. The highest level of memory state transition specification, which integrates
+///   the hardware level and the page table level, and describeschow the whole memory 
+///   system behaves.
+/// 
+/// Specifications are defined in corresponding modules.
 pub struct MemoryState {
     /// Common memory.
     mem: Seq<nat>,

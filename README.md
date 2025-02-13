@@ -2,7 +2,7 @@
 
 ## Specification
 
-### Hardware
+### Hardware & Memory 
 
 aarch64 architecture, level-3/4 page table, VMSAv8-64 translation system.
 
@@ -19,3 +19,4 @@ Using a state machine to describe hardware behavior.
 
 1. Frame allocator (alloc & dealloc)
 2. Memory read & write operations 
+
