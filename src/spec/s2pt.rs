@@ -71,15 +71,17 @@ impl PTEntry {
             let af = (value & (1 << 10) as u64) != 0;
             let attr_indx = ((value >> 2) & 0x7) as u8;
             let ns = (value & (1 << 5) as u64) != 0;
-            GhostPTEntry::Page(GhostPageDescriptor {
-                addr,
-                is_page: false, // 0x1 indicates Block
-                s2ap,
-                sh,
-                af,
-                attr_indx,
-                ns,
-            })
+            GhostPTEntry::Page(
+                GhostPageDescriptor {
+                    addr,
+                    is_page: false,  // 0x1 indicates Block
+                    s2ap,
+                    sh,
+                    af,
+                    attr_indx,
+                    ns,
+                },
+            )
         } else {
             GhostPTEntry::Empty
         }

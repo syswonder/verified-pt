@@ -1,13 +1,12 @@
 //! High-level memory state machine & high level specifications.
-//! 
+//!
 //! To prove an implementation’s correctness we need to ask what we mean
 //! by correctness. The application specification is a state machine encoding our
-//! answer to that question. 
-//! 
+//! answer to that question.
+//!
 //! This specification represents the proof target. Our implementation running
 //! in the intended environment should refine it. This is demonstrated in part
 //! by the proof that the OS-level state machine refines this specification.
-
 use vstd::prelude::*;
 
 use super::mem::Frame;

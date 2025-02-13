@@ -1,14 +1,13 @@
 //! Hardware-level memory state transition specification.
 //!
-//! The hardware-level state transition is specified by several operations. The actual hardware’s 
+//! The hardware-level state transition is specified by several operations. The actual hardware’s
 //! behavior must be a refinement of this specification.
-//! 
+//!
 //! Hardware state transition step includes:
-//! 
+//!
 //! - Memory read & write
 //! - Page table memory operation
 //! - TLB fill & evict.
-
 use vstd::prelude::*;
 
 use super::mem::{Frame, OSMemoryState};
