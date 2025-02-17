@@ -12,7 +12,7 @@
 //! - ...
 use vstd::prelude::*;
 
-use super::mem::OSMemoryState;
+use super::os::OSMemoryState;
 
 verus! {
 

@@ -16,12 +16,18 @@ verus! {
 /// High level memory state.
 pub struct HlMemoryState {
     /// Word-indexed memory.
-    pub mem: Seq<nat>,
+    pub mem: Map<nat, nat>,
     /// Mappings from virtual addr to physical frames.
     pub mappings: Map<nat, Frame>,
 }
 
 impl HlMemoryState {
+    /// Init state. Empty memory and no mappings.
+    pub open spec fn init(self) -> bool {
+        &&& self.mem === Map::empty()
+        &&& self.mappings === Map::empty()
+    }
+
     /// State transition - Read & Write
     pub open spec fn read_write(s1: Self, s2: Self, vaddr: nat, write: bool) -> bool {
         // TODO
