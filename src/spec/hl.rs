@@ -11,7 +11,7 @@ use vstd::prelude::*;
 
 use super::{
     aligned, between,
-    mem::{Frame, MapOp, ReadOp, UnmapOp, WriteOp},
+    mem::{Frame, FrameSize, MapOp, ReadOp, UnmapOp, WriteOp},
     overlap, word_index,
 };
 
@@ -75,7 +75,7 @@ impl HlMemoryState {
         &&& self.mappings === Map::empty()
     }
 
-    /// State transition - Read
+    /// State transition - Read.
     pub open spec fn read(s1: Self, s2: Self, op: ReadOp, mapping: Option<(nat, Frame)>) -> bool {
         let vmem_word_idx = word_index(op.vaddr);
 
@@ -119,7 +119,7 @@ impl HlMemoryState {
         }
     }
 
-    /// State transition - write
+    /// State transition - write.
     pub open spec fn write(s1: Self, s2: Self, op: WriteOp, mapping: Option<(nat, Frame)>) -> bool {
         let vmem_word_idx = word_index(op.vaddr);
 
@@ -174,10 +174,12 @@ impl HlMemoryState {
             op.frame.size.as_nat(),
         )
         // Base paddr should align to frame size
-        &&& aligned(op.frame.base as nat, op.frame.size.as_nat())
+        &&& aligned(
+            op.frame.base as nat,
+            op.frame.size.as_nat(),
+        )
         // Frame should not overlap with existing pmem
         &&& !s1.overlaps_pmem(op.frame)
-        
         // Check vmem overlapping
         &&& if s1.overlaps_vmem(op.vaddr, op.frame) {
             // Mapping fails
@@ -189,7 +191,8 @@ impl HlMemoryState {
             // Mapping succeeds
             &&& op.result is Ok
             // Update mappings
-            &&& s1.mappings.insert(op.vaddr, op.frame) === s2.mappings
+            &&& s1.mappings.insert(op.vaddr, op.frame)
+                === s2.mappings
             // Memory domain should be updated
             &&& s2.mem.dom() === s2.mem_domain_covered_by_mappings()
         }
@@ -197,8 +200,28 @@ impl HlMemoryState {
 
     /// State transtion - Unmap a virtual address.
     pub open spec fn unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
-        // TODO
-        true
+        // Base vaddr should align to some valid frame size
+        &&& {
+            ||| aligned(op.vaddr, FrameSize::Size4K.as_nat())
+            ||| aligned(op.vaddr, FrameSize::Size2M.as_nat())
+            ||| aligned(op.vaddr, FrameSize::Size1G.as_nat())
+        }
+        // Check mapping
+        &&& if s1.mappings.contains_key(op.vaddr) {
+            // Unmapping succeeds
+            &&& op.result is Ok
+            // Update mappings
+            &&& s1.mappings.remove(op.vaddr)
+                === s2.mappings
+            // Memory domain should be updated
+            &&& s2.mem.dom() === s2.mem_domain_covered_by_mappings()
+        } else {
+            // Unmapping fails
+            &&& op.result is Err
+            // Memory and mappings should be unchanged
+            &&& s1.mem === s2.mem
+            &&& s1.mappings === s2.mappings
+        }
     }
 }
 
