@@ -8,10 +8,9 @@
 //! - Hardware-level operations
 //! - page table map & unmap
 //! - ...
-
-use vstd::prelude::*;
+use super::mem::{interpret_pt_mem, Frame, PageTableMem};
 use super::overlap;
-use super::mem::{PageTableMem, Frame, interpret_pt_mem};
+use vstd::prelude::*;
 
 verus! {
 
@@ -52,7 +51,6 @@ impl OSMemoryState {
     }
 
     /* Invariants */
-
     /// Page table mappings do not overlap in virtual memory.
     pub open spec fn pt_mappings_nonoverlap_in_vmem(self) -> bool {
         forall|base1: nat, frame1: Frame, base2: nat, frame2: Frame|
@@ -84,7 +82,6 @@ impl OSMemoryState {
     }
 
     /* State transition */
-
     /// Initial memory state.
     ///
     /// The initial state must satisfy the specification.

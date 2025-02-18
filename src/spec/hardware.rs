@@ -8,10 +8,9 @@
 //! - Memory read & write
 //! - Page table memory operation
 //! - TLB fill & evict.
-
-use vstd::prelude::*;
 use super::mem::Frame;
 use super::os::OSMemoryState;
+use vstd::prelude::*;
 
 verus! {
 

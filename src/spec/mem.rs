@@ -1,7 +1,6 @@
 //! Defination of abstract memory state and functions.
-
-use vstd::prelude::*;
 use super::s1pt::page_table_walk;
+use vstd::prelude::*;
 
 verus! {
 
@@ -114,6 +113,27 @@ pub open spec fn interpret_pt_mem(pt_mem: PageTableMem) -> Map<nat, Frame> {
                 page_table_walk(pt_mem, addr as u64, frame),
         |addr: nat| choose|pte: Frame| #[trigger] page_table_walk(pt_mem, addr as u64, pte),
     )
+}
+
+/// Memory read & write operation and result. 
+#[allow(inconsistent_fields)]
+pub enum RwOp {
+    /// Read operation.
+    Read { result: ReadResult },
+    /// Write operation.
+    Write { value: nat, result: WriteResult },
+}
+
+/// Memory read result.
+pub enum ReadResult {
+    Ok(nat),
+    PageFault,
+}
+
+/// Memory write result.
+pub enum WriteResult {
+    Ok,
+    PageFault,
 }
 
 } // verus!
