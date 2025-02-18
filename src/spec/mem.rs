@@ -1,13 +1,14 @@
 //! Defination of abstract memory state and functions.
-use super::s1pt::page_table_walk;
 use vstd::prelude::*;
+
+use super::{PAddr, VAddr};
 
 verus! {
 
 /// Represents a physical memory frame (Page or Block).
 pub struct Frame {
     /// The base address of the frame.
-    pub base: u64,
+    pub base: PAddr,
     /// The size of the frame in bytes.
     pub size: FrameSize,
     /// The attributes of the frame.
@@ -78,21 +79,20 @@ impl PageTableMem {
         // TODO: write to memory
     }
 
-    /// Allocate a new physical frame.
-    pub fn alloc(&mut self, size: FrameSize) -> (frame: Frame) {
-        // TODO: allocate a new frame
-        Frame {
-            base: 0,
-            size: size,
-            attr: FrameAttr {
-                readable: true,
-                writable: true,
-                executable: true,
-                user_accessible: true,
-            },
-        }
-    }
-
+    // /// Allocate a new physical frame.
+    // pub open spec fn alloc(&mut self, size: FrameSize) -> (frame: Frame) {
+    //     // TODO: allocate a new frame
+    //     Frame {
+    //         base: PAddr(0),
+    //         size: size,
+    //         attr: FrameAttr {
+    //             readable: true,
+    //             writable: true,
+    //             executable: true,
+    //             user_accessible: true,
+    //         },
+    //     }
+    // }
     /// Deallocate a physical frame.
     pub fn dealloc(&mut self, frame: Frame) {
         // TODO: deallocate a frame
@@ -105,22 +105,10 @@ impl PageTableMem {
     }
 }
 
-pub spec const MAX_BASE: nat = 0x8000_0000;
-
-/// Interpret the page table memory to a page map.
-pub open spec fn interpret_pt_mem(pt_mem: PageTableMem) -> Map<nat, Frame> {
-    Map::new(
-        |addr: nat|
-            addr < MAX_BASE && exists|frame: Frame| #[trigger]
-                page_table_walk(pt_mem, addr as u64, frame),
-        |addr: nat| choose|pte: Frame| #[trigger] page_table_walk(pt_mem, addr as u64, pte),
-    )
-}
-
 /// Memory read operation and result.
 pub struct ReadOp {
     /// Virtual address.
-    pub vaddr: nat,
+    pub vaddr: VAddr,
     /// Read result.
     pub result: Result<nat, ()>,
 }
@@ -128,7 +116,7 @@ pub struct ReadOp {
 /// Memory write operation and result.
 pub struct WriteOp {
     /// Virtual address.
-    pub vaddr: nat,
+    pub vaddr: VAddr,
     /// Value to write.
     pub value: nat,
     /// Write result.
@@ -138,7 +126,7 @@ pub struct WriteOp {
 /// Virtual page map operation and result.
 pub struct MapOp {
     /// Virtual page base address.
-    pub vaddr: nat,
+    pub vaddr: VAddr,
     /// Frame to map.
     pub frame: Frame,
     /// Mapping result.
@@ -148,7 +136,7 @@ pub struct MapOp {
 /// Virtual page unmap operation and result.
 pub struct UnmapOp {
     /// Virtual page base address.
-    pub vaddr: nat,
+    pub vaddr: VAddr,
     /// Unmapping result.
     pub result: Result<(), ()>,
 }

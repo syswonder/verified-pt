@@ -8,8 +8,13 @@
 //! - Hardware-level operations
 //! - page table map & unmap
 //! - ...
-use super::mem::{interpret_pt_mem, Frame, PageTableMem};
-use super::overlap;
+use super::{
+    hl::HlMemoryState,
+    mem::{Frame, PageTableMem},
+    nat_to_u64,
+    s1pt::page_table_walk,
+    PAddr, VAddr, VWordIdx,
+};
 use vstd::prelude::*;
 
 verus! {
@@ -36,35 +41,91 @@ verus! {
 ///
 /// Specifications are defined in corresponding modules.
 pub struct OSMemoryState {
-    /// Common memory.
+    /// Word-indexed physical memory.
     pub mem: Seq<nat>,
     /// Page table memory.
     pub pt_mem: PageTableMem,
     /// TLB.
-    pub tlb: Map<nat, Frame>,
+    pub tlb: Map<VAddr, Frame>,
 }
 
 impl OSMemoryState {
-    /// Interpret the page table memory as a map.
-    pub open spec fn interpret_pt_mem(self) -> Map<nat, Frame> {
-        interpret_pt_mem(self.pt_mem)
+    /// Interpret the page table memory as a map (vaddr -> frame).
+    pub open spec fn interpret_pt_mem(self) -> Map<VAddr, Frame> {
+        let max_base: nat = 0x8000_0000;
+        Map::new(
+            |addr: VAddr|
+                addr.0 < max_base && exists|frame: Frame| #[trigger]
+                    page_table_walk(self.pt_mem, nat_to_u64(addr.0), frame),
+            |addr: VAddr|
+                choose|pte: Frame| #[trigger] page_table_walk(self.pt_mem, nat_to_u64(addr.0), pte),
+        )
+    }
+
+    /// Interpret the common memory as a map (vmem_word_idx -> word value).
+    pub open spec fn interpret_mem(self) -> Map<VWordIdx, nat> {
+        Map::new(
+            |vmem_word_idx: VWordIdx|
+                exists|base: VAddr, frame: Frame|
+                    {
+                        &&& #[trigger] self.all_mappings().contains_pair(base, frame)
+                        &&& vmem_word_idx.addr().between(base, base.offset(frame.size.as_nat()))
+                    },
+            |vmem_word_idx: VWordIdx|
+                {
+                    let (base, frame) = choose|base: VAddr, frame: Frame|
+                        {
+                            &&& #[trigger] self.all_mappings().contains_pair(base, frame)
+                            &&& vmem_word_idx.addr().between(base, base.offset(frame.size.as_nat()))
+                        };
+                    self.mem.index(
+                        vmem_word_idx.addr().translate(base, frame.base).word_idx().as_int(),
+                    )
+                },
+        )
+    }
+
+    /// Collect all page mappings managed by OS memory state.
+    pub open spec fn all_mappings(self) -> Map<VAddr, Frame> {
+        // Collect all mappings in the page table and TLB.
+        Map::new(
+            |base: VAddr| self.tlb.contains_key(base) || self.interpret_pt_mem().contains_key(base),
+            |base: VAddr|
+                {
+                    if self.tlb.contains_key(base) {
+                        self.tlb.index(base)
+                    } else {
+                        self.interpret_pt_mem().index(base)
+                    }
+                },
+        )
+    }
+
+    /// High-level (abstract) view of the OS memory state.
+    pub open spec fn view(self) -> HlMemoryState {
+        HlMemoryState { mem: self.interpret_mem(), mappings: self.all_mappings() }
     }
 
     /* Invariants */
     /// Page table mappings do not overlap in virtual memory.
     pub open spec fn pt_mappings_nonoverlap_in_vmem(self) -> bool {
-        forall|base1: nat, frame1: Frame, base2: nat, frame2: Frame|
+        forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
             self.interpret_pt_mem().contains_pair(base1, frame1)
                 && self.interpret_pt_mem().contains_pair(base2, frame2) ==> ((base1 == base2)
-                || !overlap(base1, frame1.size.as_nat(), base2, frame2.size.as_nat()))
+                || !VAddr::overlap(base1, frame1.size.as_nat(), base2, frame2.size.as_nat()))
     }
 
     /// Page table mappings do not overlap in physical memory.
     pub open spec fn pt_mappings_nonoverlap_in_pmem(self) -> bool {
-        forall|base1: nat, frame1: Frame, base2: nat, frame2: Frame|
+        forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
             self.interpret_pt_mem().contains_pair(base1, frame1)
                 && self.interpret_pt_mem().contains_pair(base2, frame2) ==> ((base1 == base2)
-                || !overlap(base1, frame1.size.as_nat(), base2, frame2.size.as_nat()))
+                || !PAddr::overlap(
+                frame1.base,
+                frame1.size.as_nat(),
+                frame2.base,
+                frame2.size.as_nat(),
+            ))
     }
 
     /// TLB must be a submap of the page table.
@@ -87,7 +148,7 @@ impl OSMemoryState {
     /// The initial state must satisfy the specification.
     pub open spec fn init(self) -> bool {
         &&& self.tlb.dom() === Set::empty()
-        &&& interpret_pt_mem(self.pt_mem) === Map::empty()
+        &&& self.interpret_pt_mem() === Map::empty()
     }
 }
 

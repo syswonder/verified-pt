@@ -1,6 +1,9 @@
 use vstd::prelude::*;
 
-use super::mem::{Frame, FrameAttr, FrameSize, PageTableMem};
+use super::{
+    mem::{Frame, FrameAttr, FrameSize, PageTableMem},
+    PAddr,
+};
 
 verus! {
 
@@ -149,7 +152,7 @@ spec fn compute_frame(
         FrameSize::Size4K
     };
     let offset_mask = (size.as_u64() - 1) as u64;
-    let base = (entry.addr << 12) | (addr & offset_mask);
+    let base = PAddr(((entry.addr << 12) | (addr & offset_mask)) as nat);
     let attr = FrameAttr {
         readable: true,
         writable: entry.ap_rw,

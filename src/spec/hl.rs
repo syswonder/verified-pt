@@ -10,59 +10,61 @@
 use vstd::prelude::*;
 
 use super::{
-    aligned, between,
     mem::{Frame, FrameSize, MapOp, ReadOp, UnmapOp, WriteOp},
-    overlap, word_index,
+    PAddr, VAddr, VWordIdx,
 };
 
 verus! {
 
-/// High level memory state.
+/// High level (abstract) memory state.
 pub struct HlMemoryState {
-    /// Word-indexed memory (vmem_word_idx -> word value).
-    pub mem: Map<nat, nat>,
+    /// Word-indexed virtual memory (vword_idx -> word value).
+    /// 
+    /// We use word-index rather than address. Addresses that are not aligned to word boundaries should
+    /// not be used to access a value, while word-indexes don't face the word-alignment issue.
+    pub mem: Map<VWordIdx, nat>,
     /// Mappings from virtual address to physical frames (virtual page base addr -> physical frame).
     ///
-    /// The key must be the base address of a virtual page i.e. [`key`, `key + frame.size`)
-    /// must be mapped to the same frame.
-    pub mappings: Map<nat, Frame>,
+    /// The key must be the base address of a virtual page i.e. virtual range [`key`, `key + frame.size`)
+    /// must be mapped to the same physical frame.
+    pub mappings: Map<VAddr, Frame>,
 }
 
 impl HlMemoryState {
     /// Virtual memory domain covered by `self.mappings`.
-    pub open spec fn mem_domain_covered_by_mappings(self) -> Set<nat> {
+    pub open spec fn mem_domain_covered_by_mappings(self) -> Set<VWordIdx> {
         Set::new(
-            |vmem_word_idx: nat|
-                exists|base: nat, frame: Frame|
+            |vword_idx: VWordIdx|
+                exists|base: VAddr, frame: Frame|
                     {
                         &&& #[trigger] self.mappings.contains_pair(base, frame)
-                        &&& between(vmem_word_idx * 8, base, base)
+                        &&& vword_idx.addr().between(base, base.offset(frame.size.as_nat()))
                     },
         )
     }
 
     /// If `frame` overlaps with existing physical memory.
     pub open spec fn overlaps_pmem(self, frame: Frame) -> bool {
-        exists|vbase: nat|
+        exists|base: VAddr|
             {
-                &&& #[trigger] self.mappings.contains_key(vbase)
-                &&& overlap(
-                    self.mappings.index(vbase).base as nat,
-                    self.mappings.index(vbase).size.as_nat(),
-                    frame.base as nat,
+                &&& #[trigger] self.mappings.contains_key(base)
+                &&& PAddr::overlap(
+                    self.mappings.index(base).base,
+                    self.mappings.index(base).size.as_nat(),
+                    frame.base,
                     frame.size.as_nat(),
                 )
             }
     }
 
     /// If mapping `(vaddr, frame)` overlaps with existing virtual memory.
-    pub open spec fn overlaps_vmem(self, vaddr: nat, frame: Frame) -> bool {
-        exists|vbase: nat|
+    pub open spec fn overlaps_vmem(self, vaddr: VAddr, frame: Frame) -> bool {
+        exists|base: VAddr|
             {
-                &&& #[trigger] self.mappings.contains_key(vbase)
-                &&& overlap(
-                    vbase,
-                    self.mappings.index(vbase).size.as_nat(),
+                &&& #[trigger] self.mappings.contains_key(base)
+                &&& VAddr::overlap(
+                    base,
+                    self.mappings.index(base).size.as_nat(),
                     vaddr,
                     frame.size.as_nat(),
                 )
@@ -76,9 +78,7 @@ impl HlMemoryState {
     }
 
     /// State transition - Read.
-    pub open spec fn read(s1: Self, s2: Self, op: ReadOp, mapping: Option<(nat, Frame)>) -> bool {
-        let vmem_word_idx = word_index(op.vaddr);
-
+    pub open spec fn read(s1: Self, s2: Self, op: ReadOp, mapping: Option<(VAddr, Frame)>) -> bool {
         // Memory and mappings should be unchanged
         &&& s1.mappings === s2.mappings
         &&& s1.mem === s2.mem
@@ -91,10 +91,9 @@ impl HlMemoryState {
                     frame,
                 )
                 // `vaddr` should be in the virtual page marked by `base`
-                &&& between(
-                    op.vaddr,
+                &&& op.vaddr.between(
                     base,
-                    base + frame.size.as_nat(),
+                    base.offset(frame.size.as_nat()),
                 )
                 // Check frame attributes
                 &&& if !frame.attr.readable || !frame.attr.user_accessible {
@@ -105,13 +104,13 @@ impl HlMemoryState {
                     // Otherwise, the result should be `Ok`
                     &&& op.result is Ok
                     // The value should be the value in the memory at `vmem_word_idx`
-                    &&& op.result.unwrap() === s1.mem[vmem_word_idx]
+                    &&& op.result.unwrap() === s1.mem[op.vaddr.word_idx()]
                 }
             },
             None => {
                 // If `mapping` is `None`, the memory domain should not contain `vmem_word_idx`
                 &&& !s1.mem_domain_covered_by_mappings().contains(
-                    vmem_word_idx,
+                    op.vaddr.word_idx(),
                 )
                 // Result should be `Err`
                 &&& op.result is Err
@@ -120,9 +119,12 @@ impl HlMemoryState {
     }
 
     /// State transition - write.
-    pub open spec fn write(s1: Self, s2: Self, op: WriteOp, mapping: Option<(nat, Frame)>) -> bool {
-        let vmem_word_idx = word_index(op.vaddr);
-
+    pub open spec fn write(
+        s1: Self,
+        s2: Self,
+        op: WriteOp,
+        mapping: Option<(VAddr, Frame)>,
+    ) -> bool {
         // Mappings should be unchanged
         &&& s1.mappings === s2.mappings
         // Check mapping
@@ -134,10 +136,9 @@ impl HlMemoryState {
                     frame,
                 )
                 // `vaddr` should be in the virtual page marked by `base`
-                &&& between(
-                    op.vaddr,
+                &&& op.vaddr.between(
                     base,
-                    base + frame.size.as_nat(),
+                    base.offset(frame.size.as_nat()),
                 )
                 // Check frame attributes
                 &&& if !frame.attr.writable || !frame.attr.user_accessible {
@@ -149,14 +150,14 @@ impl HlMemoryState {
                 } else {
                     // Otherwise, the result should be `Ok`
                     &&& op.result is Ok
-                    // Memory should be updated at `vmem_word_idx` with `value`
-                    &&& s1.mem === s2.mem.insert(vmem_word_idx, op.value)
+                    // Memory should be updated at `vword_idx` with `value`
+                    &&& s1.mem === s2.mem.insert(op.vaddr.word_idx(), op.value)
                 }
             },
             None => {
-                // If `mapping` is `None`, the memory domain should not contain `vmem_word_idx`
+                // If `mapping` is `None`, the memory domain should not contain `vword_idx`
                 &&& !s1.mem_domain_covered_by_mappings().contains(
-                    vmem_word_idx,
+                    op.vaddr.word_idx(),
                 )
                 // And memory should be unchanged
                 &&& s1.mem === s2.mem
@@ -169,13 +170,11 @@ impl HlMemoryState {
     /// State transtion - Map a virtual address to a frame.
     pub open spec fn map(s1: Self, s2: Self, op: MapOp) -> bool {
         // Base vaddr should align to frame size
-        &&& aligned(
-            op.vaddr,
+        &&& op.vaddr.aligned(
             op.frame.size.as_nat(),
         )
         // Base paddr should align to frame size
-        &&& aligned(
-            op.frame.base as nat,
+        &&& op.frame.base.aligned(
             op.frame.size.as_nat(),
         )
         // Frame should not overlap with existing pmem
@@ -202,9 +201,9 @@ impl HlMemoryState {
     pub open spec fn unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
         // Base vaddr should align to some valid frame size
         &&& {
-            ||| aligned(op.vaddr, FrameSize::Size4K.as_nat())
-            ||| aligned(op.vaddr, FrameSize::Size2M.as_nat())
-            ||| aligned(op.vaddr, FrameSize::Size1G.as_nat())
+            ||| op.vaddr.aligned(FrameSize::Size4K.as_nat())
+            ||| op.vaddr.aligned(FrameSize::Size2M.as_nat())
+            ||| op.vaddr.aligned(FrameSize::Size1G.as_nat())
         }
         // Check mapping
         &&& if s1.mappings.contains_key(op.vaddr) {
