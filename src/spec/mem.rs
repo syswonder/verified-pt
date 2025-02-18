@@ -25,7 +25,8 @@ pub enum FrameSize {
 }
 
 impl FrameSize {
-    pub open spec fn to_u64(self) -> u64 {
+    /// Convert to u64.
+    pub open spec fn as_u64(self) -> u64 {
         match self {
             FrameSize::Size4K => 0x1000,
             FrameSize::Size2M => 0x200000,
@@ -33,8 +34,9 @@ impl FrameSize {
         }
     }
 
-    pub open spec fn to_nat(self) -> nat {
-        self.to_u64() as nat
+    /// Convert to nat.
+    pub open spec fn as_nat(self) -> nat {
+        self.as_u64() as nat
     }
 }
 
@@ -115,25 +117,40 @@ pub open spec fn interpret_pt_mem(pt_mem: PageTableMem) -> Map<nat, Frame> {
     )
 }
 
-/// Memory read & write operation and result. 
-#[allow(inconsistent_fields)]
-pub enum RwOp {
-    /// Read operation.
-    Read { result: ReadResult },
-    /// Write operation.
-    Write { value: nat, result: WriteResult },
+/// Memory read operation and result.
+pub struct ReadOp {
+    /// Virtual address.
+    pub vaddr: nat,
+    /// Read result.
+    pub result: Result<nat, ()>,
 }
 
-/// Memory read result.
-pub enum ReadResult {
-    Ok(nat),
-    PageFault,
+/// Memory write operation and result.
+pub struct WriteOp {
+    /// Virtual address.
+    pub vaddr: nat,
+    /// Value to write.
+    pub value: nat,
+    /// Write result.
+    pub result: Result<(), ()>,
 }
 
-/// Memory write result.
-pub enum WriteResult {
-    Ok,
-    PageFault,
+/// Virtual page map operation and result.
+pub struct MapOp {
+    /// Virtual page base address.
+    pub vaddr: nat,
+    /// Frame to map.
+    pub frame: Frame,
+    /// Mapping result.
+    pub result: Result<(), ()>,
+}
+
+/// Virtual page unmap operation and result.
+pub struct UnmapOp {
+    /// Virtual page base address.
+    pub vaddr: nat,
+    /// Unmapping result.
+    pub result: Result<(), ()>,
 }
 
 } // verus!

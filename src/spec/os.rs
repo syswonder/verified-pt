@@ -56,7 +56,7 @@ impl OSMemoryState {
         forall|base1: nat, frame1: Frame, base2: nat, frame2: Frame|
             self.interpret_pt_mem().contains_pair(base1, frame1)
                 && self.interpret_pt_mem().contains_pair(base2, frame2) ==> ((base1 == base2)
-                || !overlap(base1, frame1.size.to_nat(), base2, frame2.size.to_nat()))
+                || !overlap(base1, frame1.size.as_nat(), base2, frame2.size.as_nat()))
     }
 
     /// Page table mappings do not overlap in physical memory.
@@ -64,7 +64,7 @@ impl OSMemoryState {
         forall|base1: nat, frame1: Frame, base2: nat, frame2: Frame|
             self.interpret_pt_mem().contains_pair(base1, frame1)
                 && self.interpret_pt_mem().contains_pair(base2, frame2) ==> ((base1 == base2)
-                || !overlap(base1, frame1.size.to_nat(), base2, frame2.size.to_nat()))
+                || !overlap(base1, frame1.size.as_nat(), base2, frame2.size.as_nat()))
     }
 
     /// TLB must be a submap of the page table.
