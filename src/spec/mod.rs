@@ -32,11 +32,6 @@ pub open spec(checked) fn overlap(base1: nat, size1: nat, base2: nat, size2: nat
 pub struct VAddr(pub nat);
 
 impl VAddr {
-    /// Convert to word index.
-    pub open spec fn word_idx(self) -> VWordIdx {
-        VWordIdx(self.0 / 8)
-    }
-
     /// If addr is aligned to `size` bytes.
     pub open spec fn aligned(self, size: nat) -> bool {
         self.0 % size == 0
@@ -47,9 +42,9 @@ impl VAddr {
         lb.0 <= self.0 < ub.0
     }
 
-    /// Offset by `offset` bytes.
-    pub open spec fn offset(self, offset: nat) -> VAddr {
-        VAddr(self.0 + offset)
+    /// If addr is in range `[base, base + size)`.
+    pub open spec fn within(self, base: Self, size: nat) -> bool {
+        self.between(base, self.offset(size))
     }
 
     /// If virtual region (base1, size1) and virtual region (base2, size2) overlap.
@@ -57,9 +52,19 @@ impl VAddr {
         overlap(base1.0, size1, base2.0, size2)
     }
 
-    /// If virtual page base `vbase` maps to physical page base `pbase`, calc the physical
-    /// address that `self` maps to.
-    pub open spec fn translate(self, vbase: Self, pbase: PAddr) -> PAddr
+    /// Offset `self` by `offset` bytes.
+    pub open spec fn offset(self, offset: nat) -> VAddr {
+        VAddr(self.0 + offset)
+    }
+
+    /// Convert to word index.
+    pub open spec fn word_idx(self) -> VWordIdx {
+        VWordIdx(self.0 / 8)
+    }
+
+    /// If virtual page base `vbase` maps to physical page base `pbase`, calculate the
+    /// physical address that `self` maps to.
+    pub open spec fn map(self, vbase: Self, pbase: PAddr) -> PAddr
         recommends
             self.0 >= vbase.0,
     {

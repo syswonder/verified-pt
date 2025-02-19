@@ -50,6 +50,15 @@ pub struct OSMemoryState {
 }
 
 impl OSMemoryState {
+    /// If there is a mapped virtual page that `vaddr` lies in.
+    pub open spec fn exists_mapping_for(self, vaddr: VAddr) -> bool {
+        exists|base: VAddr, frame: Frame| #[trigger]
+            self.interpret_pt_mem().contains_pair(base, frame) && vaddr.within(
+                base,
+                frame.size.as_nat(),
+            )
+    }
+
     /// Interpret the page table memory as a map (vaddr -> frame).
     pub open spec fn interpret_pt_mem(self) -> Map<VAddr, Frame> {
         let max_base: nat = 0x8000_0000;
@@ -62,32 +71,29 @@ impl OSMemoryState {
         )
     }
 
-    /// Interpret the common memory as a map (vmem_word_idx -> word value).
+    /// Interpret the common memory as a map (vword_idx -> word value).
     pub open spec fn interpret_mem(self) -> Map<VWordIdx, nat> {
         Map::new(
-            |vmem_word_idx: VWordIdx|
+            |vword_idx: VWordIdx|
                 exists|base: VAddr, frame: Frame|
                     {
                         &&& #[trigger] self.all_mappings().contains_pair(base, frame)
-                        &&& vmem_word_idx.addr().between(base, base.offset(frame.size.as_nat()))
+                        &&& vword_idx.addr().within(base, frame.size.as_nat())
                     },
-            |vmem_word_idx: VWordIdx|
+            |vword_idx: VWordIdx|
                 {
                     let (base, frame) = choose|base: VAddr, frame: Frame|
                         {
                             &&& #[trigger] self.all_mappings().contains_pair(base, frame)
-                            &&& vmem_word_idx.addr().between(base, base.offset(frame.size.as_nat()))
+                            &&& vword_idx.addr().within(base, frame.size.as_nat())
                         };
-                    self.mem.index(
-                        vmem_word_idx.addr().translate(base, frame.base).word_idx().as_int(),
-                    )
+                    self.mem.index(vword_idx.addr().map(base, frame.base).word_idx().as_int())
                 },
         )
     }
 
-    /// Collect all page mappings managed by OS memory state.
+    /// Collect all page mappings managed by OS memory state (pt_mem and TLB).
     pub open spec fn all_mappings(self) -> Map<VAddr, Frame> {
-        // Collect all mappings in the page table and TLB.
         Map::new(
             |base: VAddr| self.tlb.contains_key(base) || self.interpret_pt_mem().contains_key(base),
             |base: VAddr|

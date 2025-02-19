@@ -19,7 +19,7 @@ verus! {
 /// High level (abstract) memory state.
 pub struct HlMemoryState {
     /// Word-indexed virtual memory (vword_idx -> word value).
-    /// 
+    ///
     /// We use word-index rather than address. Addresses that are not aligned to word boundaries should
     /// not be used to access a value, while word-indexes don't face the word-alignment issue.
     pub mem: Map<VWordIdx, nat>,
@@ -38,7 +38,7 @@ impl HlMemoryState {
                 exists|base: VAddr, frame: Frame|
                     {
                         &&& #[trigger] self.mappings.contains_pair(base, frame)
-                        &&& vword_idx.addr().between(base, base.offset(frame.size.as_nat()))
+                        &&& vword_idx.addr().within(base, frame.size.as_nat())
                     },
         )
     }
@@ -79,7 +79,7 @@ impl HlMemoryState {
 
     /// State transition - Read.
     pub open spec fn read(s1: Self, s2: Self, op: ReadOp, mapping: Option<(VAddr, Frame)>) -> bool {
-        // Memory and mappings should be unchanged
+        // Memory and mappings should not be updated
         &&& s1.mappings === s2.mappings
         &&& s1.mem === s2.mem
         // Check mapping
@@ -90,10 +90,10 @@ impl HlMemoryState {
                     base,
                     frame,
                 )
-                // `vaddr` should be in the virtual page marked by `base`
-                &&& op.vaddr.between(
+                // `vaddr` should be in the virtual page mapped by `base`
+                &&& op.vaddr.within(
                     base,
-                    base.offset(frame.size.as_nat()),
+                    frame.size.as_nat(),
                 )
                 // Check frame attributes
                 &&& if !frame.attr.readable || !frame.attr.user_accessible {
@@ -103,12 +103,12 @@ impl HlMemoryState {
                 } else {
                     // Otherwise, the result should be `Ok`
                     &&& op.result is Ok
-                    // The value should be the value in the memory at `vmem_word_idx`
+                    // The value should be the value in the memory at `vword_idx`
                     &&& op.result.unwrap() === s1.mem[op.vaddr.word_idx()]
                 }
             },
             None => {
-                // If `mapping` is `None`, the memory domain should not contain `vmem_word_idx`
+                // If `mapping` is `None`, the memory domain should not contain `vword_idx`
                 &&& !s1.mem_domain_covered_by_mappings().contains(
                     op.vaddr.word_idx(),
                 )
@@ -125,7 +125,7 @@ impl HlMemoryState {
         op: WriteOp,
         mapping: Option<(VAddr, Frame)>,
     ) -> bool {
-        // Mappings should be unchanged
+        // Mappings should not be updated
         &&& s1.mappings === s2.mappings
         // Check mapping
         &&& match mapping {
@@ -135,17 +135,17 @@ impl HlMemoryState {
                     base,
                     frame,
                 )
-                // `vaddr` should be in the virtual page marked by `base`
-                &&& op.vaddr.between(
+                // `vaddr` should be in the virtual page mapped by `base`
+                &&& op.vaddr.within(
                     base,
-                    base.offset(frame.size.as_nat()),
+                    frame.size.as_nat(),
                 )
                 // Check frame attributes
                 &&& if !frame.attr.writable || !frame.attr.user_accessible {
                     // If the frame is not writable or user accessible, the
                     // result should be `Err`
                     &&& op.result is Err
-                    // Memory should be unchanged
+                    // Memory should not be updated
                     &&& s1.mem === s2.mem
                 } else {
                     // Otherwise, the result should be `Ok`
@@ -159,7 +159,7 @@ impl HlMemoryState {
                 &&& !s1.mem_domain_covered_by_mappings().contains(
                     op.vaddr.word_idx(),
                 )
-                // And memory should be unchanged
+                // And memory should not be updated
                 &&& s1.mem === s2.mem
                 // Result should be `Err`
                 &&& op.result is Err
@@ -183,7 +183,7 @@ impl HlMemoryState {
         &&& if s1.overlaps_vmem(op.vaddr, op.frame) {
             // Mapping fails
             &&& op.result is Err
-            // Memory and mappings should be unchanged
+            // Memory and mappings should not be updated
             &&& s1.mem === s2.mem
             &&& s1.mappings === s2.mappings
         } else {
@@ -217,7 +217,7 @@ impl HlMemoryState {
         } else {
             // Unmapping fails
             &&& op.result is Err
-            // Memory and mappings should be unchanged
+            // Memory and mappings should not be updated
             &&& s1.mem === s2.mem
             &&& s1.mappings === s2.mappings
         }
