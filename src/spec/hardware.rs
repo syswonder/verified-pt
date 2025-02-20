@@ -21,7 +21,7 @@ impl OSMemoryState {
     ///
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after common memory read operation.
-    pub open spec fn mem_read(
+    pub open spec fn hw_mem_read(
         s1: Self,
         s2: Self,
         op: ReadOp,
@@ -74,7 +74,7 @@ impl OSMemoryState {
     ///
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after common memory write operation.
-    pub open spec fn mem_write(
+    pub open spec fn hw_mem_write(
         s1: Self,
         s2: Self,
         op: WriteOp,
@@ -129,20 +129,26 @@ impl OSMemoryState {
     ///
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after page table memory operation.
-    pub open spec fn pt_mem_op(s1: Self, s2: Self) -> bool {
-        // TODO
-        true
+    pub open spec fn hw_pt_mem_op(s1: Self, s2: Self) -> bool {
+        // Memory should not be updated
+        &&& s1.mem === s2.mem
     }
 
     /// State transition - TLB fill operation.
     ///
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after TLB fill operation.
-    pub open spec fn tlb_fill(s1: Self, s2: Self, vaddr: VAddr, frame: Frame) -> bool {
+    pub open spec fn hw_tlb_fill(s1: Self, s2: Self, vaddr: VAddr, frame: Frame) -> bool {
         // Page table must contain the mapping
-        &&& s1.interpret_pt_mem().contains_pair(vaddr, frame)
+        &&& s1.interpret_pt_mem().contains_pair(
+            vaddr,
+            frame,
+        )
         // Insert into tlb
-        &&& s2.tlb === s1.tlb.insert(vaddr, frame)
+        &&& s2.tlb === s1.tlb.insert(
+            vaddr,
+            frame,
+        )
         // Memory and page table should not be updated
         &&& s1.mem === s2.mem
         &&& s1.pt_mem === s2.pt_mem
@@ -152,11 +158,13 @@ impl OSMemoryState {
     ///
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after TLB eviction operation.
-    pub open spec fn tlb_evict(s1: Self, s2: Self, vaddr: VAddr) -> bool {
+    pub open spec fn hw_tlb_evict(s1: Self, s2: Self, vaddr: VAddr) -> bool {
         // TLB must contain the mapping
         &&& s1.tlb.contains_key(vaddr)
         // Remove from tlb
-        &&& s2.tlb === s1.tlb.remove(vaddr)
+        &&& s2.tlb === s1.tlb.remove(
+            vaddr,
+        )
         // Memory and page table should not be updated
         &&& s1.mem === s2.mem
         &&& s1.pt_mem === s2.pt_mem

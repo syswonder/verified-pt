@@ -10,7 +10,7 @@
 //! - ...
 use super::{
     hl::HlMemoryState,
-    mem::{Frame, PageTableMem},
+    mem::{Frame, MapOp, PageTableMem, UnmapOp},
     nat_to_u64,
     s1pt::page_table_walk,
     PAddr, VAddr, VWordIdx,
@@ -114,7 +114,7 @@ impl OSMemoryState {
 
     /* Invariants */
     /// Page table mappings do not overlap in virtual memory.
-    pub open spec fn pt_mappings_nonoverlap_in_vmem(self) -> bool {
+    pub open spec fn mappings_nonoverlap_in_vmem(self) -> bool {
         forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
             self.interpret_pt_mem().contains_pair(base1, frame1)
                 && self.interpret_pt_mem().contains_pair(base2, frame2) ==> ((base1 == base2)
@@ -122,7 +122,7 @@ impl OSMemoryState {
     }
 
     /// Page table mappings do not overlap in physical memory.
-    pub open spec fn pt_mappings_nonoverlap_in_pmem(self) -> bool {
+    pub open spec fn mappings_nonoverlap_in_pmem(self) -> bool {
         forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
             self.interpret_pt_mem().contains_pair(base1, frame1)
                 && self.interpret_pt_mem().contains_pair(base2, frame2) ==> ((base1 == base2)
@@ -143,8 +143,8 @@ impl OSMemoryState {
 
     /// OS state invariants.
     pub open spec fn invariants(self) -> bool {
-        &&& self.pt_mappings_nonoverlap_in_vmem()
-        &&& self.pt_mappings_nonoverlap_in_pmem()
+        &&& self.mappings_nonoverlap_in_vmem()
+        &&& self.mappings_nonoverlap_in_pmem()
         &&& self.tlb_is_submap_of_pt()
     }
 
@@ -155,6 +155,22 @@ impl OSMemoryState {
     pub open spec fn init(self) -> bool {
         &&& self.tlb.dom() === Set::empty()
         &&& self.interpret_pt_mem() === Map::empty()
+    }
+
+    /// State transition - map a virtual address to a frame.
+    pub open spec fn map(s1: Self, s2: Self, op: MapOp) -> bool {
+        // Hardware level spec
+        &&& Self::hw_pt_mem_op(s1, s2)
+        // Page table level spec
+        &&& Self::pt_map(s1, s2, op)
+    }
+
+    /// State transition - unmap a virtual address.
+    pub open spec fn unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
+        // Hardware level spec
+        &&& Self::hw_pt_mem_op(s1, s2)
+        // Page table level spec
+        &&& Self::pt_unmap(s1, s2, op)
     }
 }
 
