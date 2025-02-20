@@ -1,3 +1,4 @@
+//! Stage-2 VMSAv8-64 page table walk functions.
 use vstd::prelude::*;
 
 verus! {

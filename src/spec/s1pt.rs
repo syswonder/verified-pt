@@ -1,8 +1,9 @@
+//! Stage-1 VMSAv8-64 page table walk functions.
 use vstd::prelude::*;
 
 use super::{
+    addr::PAddr,
     mem::{Frame, FrameAttr, FrameSize, PageTableMem},
-    PAddr,
 };
 
 verus! {

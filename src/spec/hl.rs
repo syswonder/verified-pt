@@ -10,8 +10,8 @@
 use vstd::prelude::*;
 
 use super::{
+    addr::{PAddr, VAddr, VWordIdx},
     mem::{Frame, FrameSize, MapOp, ReadOp, UnmapOp, WriteOp},
-    PAddr, VAddr, VWordIdx,
 };
 
 verus! {

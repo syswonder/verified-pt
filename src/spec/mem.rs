@@ -1,7 +1,7 @@
-//! Defination of abstract memory state and functions.
+//! Memory related structs and functions.
 use vstd::prelude::*;
 
-use super::{PAddr, VAddr};
+use super::addr::{PAddr, VAddr};
 
 verus! {
 

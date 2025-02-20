@@ -13,9 +13,9 @@
 use vstd::prelude::*;
 
 use super::{
+    addr::{PAddr, VAddr},
     mem::{Frame, FrameSize, MapOp, UnmapOp},
     os::OSMemoryState,
-    PAddr, VAddr,
 };
 
 verus! {

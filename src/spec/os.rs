@@ -9,11 +9,11 @@
 //! - page table map & unmap
 //! - ...
 use super::{
+    addr::{PAddr, VAddr, VWordIdx},
     hl::HlMemoryState,
     mem::{Frame, MapOp, PageTableMem, UnmapOp},
     nat_to_u64,
     s1pt::page_table_walk,
-    PAddr, VAddr, VWordIdx,
 };
 use vstd::prelude::*;
 

@@ -10,9 +10,11 @@
 //! - TLB fill & evict.
 use vstd::prelude::*;
 
-use super::mem::{Frame, ReadOp, WriteOp};
-use super::os::OSMemoryState;
-use super::{PAddr, VAddr};
+use super::{
+    addr::{PAddr, VAddr},
+    mem::{Frame, ReadOp, WriteOp},
+    os::OSMemoryState,
+};
 
 verus! {
 
