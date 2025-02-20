@@ -1,13 +1,11 @@
 use vstd::prelude::*;
 
-mod addr;
-mod hardware;
-mod hl;
-mod mem;
-mod os;
-mod pt;
-mod s1pt;
-mod s2pt;
+pub mod addr;
+pub mod hl;
+pub mod mem;
+pub mod os;
+pub mod s1pt;
+pub mod s2pt;
 
 verus! {
 

@@ -1,4 +1,7 @@
-//! High-level memory state machine & high level specifications.
+//! High-level state machine & high-level specifications.
+//!
+//! This is the high-level abstraction of the memory management module, which gives
+//! a completely abstract view of the memory state with all implementation details removed.
 //!
 //! To prove an implementation’s correctness we need to ask what we mean
 //! by correctness. The application specification is a state machine encoding our
@@ -11,7 +14,7 @@ use vstd::prelude::*;
 
 use super::{
     addr::{PAddr, VAddr, VWordIdx},
-    mem::{Frame, FrameSize, MapOp, ReadOp, UnmapOp, WriteOp},
+    mem::{Frame, FrameSize, MapOp, QueryOp, ReadOp, UnmapOp, WriteOp},
 };
 
 verus! {
@@ -71,6 +74,18 @@ impl HlMemoryState {
             }
     }
 
+    /// If there exists a mapping for `vaddr`.
+    pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
+        exists|base: VAddr, frame: Frame|
+            {
+                &&& #[trigger] self.mappings.contains_pair(base, frame)
+                &&& vaddr.within(base, frame.size.as_nat())
+            }
+    }
+}
+
+/// State transition specifications.
+impl HlMemoryState {
     /// Init state. Empty memory and no mappings.
     pub open spec fn init(self) -> bool {
         &&& self.mem === Map::empty()
@@ -220,6 +235,25 @@ impl HlMemoryState {
             // Memory and mappings should not be updated
             &&& s1.mem === s2.mem
             &&& s1.mappings === s2.mappings
+        }
+    }
+
+    /// State transition - Page table query.
+    pub open spec fn query(s1: Self, s2: Self, op: QueryOp) -> bool {
+        // Memory and mappings should not be updated
+        &&& s1.mem === s2.mem
+        &&& s1.mappings === s2.mappings
+        // Check result
+        &&& match op.result {
+            Ok((base, frame)) => {
+                // Must contain the mapping
+                &&& s1.mappings.contains_pair(base, frame)
+                &&& op.vaddr.within(base, frame.size.as_nat())
+            },
+            Err(_) => {
+                // Should not contain any mapping for op.vaddr
+                !s1.has_mapping_for(op.vaddr)
+            },
         }
     }
 }

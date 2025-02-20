@@ -141,4 +141,12 @@ pub struct UnmapOp {
     pub result: Result<(), ()>,
 }
 
+/// Page table query operation and result.
+pub struct QueryOp {
+    /// Virtual page address.
+    pub vaddr: VAddr,
+    /// Query result.
+    pub result: Result<(VAddr, Frame), ()>,
+}
+
 } // verus!
