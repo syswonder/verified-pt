@@ -52,8 +52,8 @@ impl HlMemoryState {
             {
                 &&& #[trigger] self.mappings.contains_key(base)
                 &&& PAddr::overlap(
-                    self.mappings.index(base).base,
-                    self.mappings.index(base).size.as_nat(),
+                    self.mappings[base].base,
+                    self.mappings[base].size.as_nat(),
                     frame.base,
                     frame.size.as_nat(),
                 )
@@ -67,7 +67,7 @@ impl HlMemoryState {
                 &&& #[trigger] self.mappings.contains_key(base)
                 &&& VAddr::overlap(
                     base,
-                    self.mappings.index(base).size.as_nat(),
+                    self.mappings[base].size.as_nat(),
                     vaddr,
                     frame.size.as_nat(),
                 )

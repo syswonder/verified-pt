@@ -59,7 +59,7 @@ impl OSMemoryState {
                             &&& #[trigger] self.all_mappings().contains_pair(base, frame)
                             &&& vword_idx.addr().within(base, frame.size.as_nat())
                         };
-                    self.mem.index(vword_idx.addr().map(base, frame.base).word_idx().as_int())
+                    self.mem[vword_idx.addr().map(base, frame.base).word_idx().as_int()]
                 },
         )
     }
@@ -71,9 +71,9 @@ impl OSMemoryState {
             |base: VAddr|
                 {
                     if self.tlb.contains_key(base) {
-                        self.tlb.index(base)
+                        self.tlb[base]
                     } else {
-                        self.interpret_pt_mem().index(base)
+                        self.interpret_pt_mem()[base]
                     }
                 },
         )
@@ -94,8 +94,8 @@ impl OSMemoryState {
             {
                 &&& #[trigger] self.interpret_pt_mem().contains_key(base)
                 &&& PAddr::overlap(
-                    self.interpret_pt_mem().index(base).base,
-                    self.interpret_pt_mem().index(base).size.as_nat(),
+                    self.interpret_pt_mem()[base].base,
+                    self.interpret_pt_mem()[base].size.as_nat(),
                     frame.base,
                     frame.size.as_nat(),
                 )
@@ -109,7 +109,7 @@ impl OSMemoryState {
                 &&& #[trigger] self.interpret_pt_mem().contains_key(base)
                 &&& VAddr::overlap(
                     base,
-                    self.interpret_pt_mem().index(base).size.as_nat(),
+                    self.interpret_pt_mem()[base].size.as_nat(),
                     vaddr,
                     frame.size.as_nat(),
                 )
