@@ -93,12 +93,12 @@ impl HlMemoryState {
     }
 
     /// State transition - Read.
-    pub open spec fn read(s1: Self, s2: Self, op: ReadOp, mapping: Option<(VAddr, Frame)>) -> bool {
+    pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
         // Memory and mappings should not be updated
         &&& s1.mappings === s2.mappings
         &&& s1.mem === s2.mem
         // Check mapping
-        &&& match mapping {
+        &&& match op.mapping {
             Some((base, frame)) => {
                 // If `mapping` is `Some`, `s1.mappings` should contain it
                 &&& s1.mappings.contains_pair(
@@ -134,16 +134,11 @@ impl HlMemoryState {
     }
 
     /// State transition - write.
-    pub open spec fn write(
-        s1: Self,
-        s2: Self,
-        op: WriteOp,
-        mapping: Option<(VAddr, Frame)>,
-    ) -> bool {
+    pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
         // Mappings should not be updated
         &&& s1.mappings === s2.mappings
         // Check mapping
-        &&& match mapping {
+        &&& match op.mapping {
             Some((base, frame)) => {
                 // If `mapping` is `Some`, `s1.mappings` should contain it
                 &&& s1.mappings.contains_pair(

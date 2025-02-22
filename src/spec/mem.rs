@@ -109,6 +109,10 @@ impl PageTableMem {
 pub struct ReadOp {
     /// Virtual address.
     pub vaddr: VAddr,
+    /// Physical address.
+    pub paddr: PAddr,
+    /// Involved page mapping.
+    pub mapping: Option<(VAddr, Frame)>,
     /// Read result.
     pub result: Result<nat, ()>,
 }
@@ -117,8 +121,12 @@ pub struct ReadOp {
 pub struct WriteOp {
     /// Virtual address.
     pub vaddr: VAddr,
+    /// Physical address.
+    pub paddr: PAddr,
     /// Value to write.
     pub value: nat,
+    /// Involved page mapping.
+    pub mapping: Option<(VAddr, Frame)>,
     /// Write result.
     pub result: Result<(), ()>,
 }

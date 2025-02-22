@@ -174,17 +174,11 @@ impl OSMemoryState {
     ///
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after common memory read operation.
-    pub open spec fn mem_read(
-        s1: Self,
-        s2: Self,
-        op: ReadOp,
-        paddr: PAddr,
-        mapping: Option<(VAddr, Frame)>,
-    ) -> bool {
+    pub open spec fn mem_read(s1: Self, s2: Self, op: ReadOp) -> bool {
         // Memory should not be updated
         &&& s1.mem === s2.mem
         // Check mapping
-        &&& match mapping {
+        &&& match op.mapping {
             Some((base, frame)) => {
                 // If `mapping` is `Some`,
                 &&& s1.has_mapping_for(
@@ -197,7 +191,7 @@ impl OSMemoryState {
                 )
                 // `vaddr` should map to `paddr`
                 &&& op.vaddr.map(base, frame.base)
-                    === paddr
+                    === op.paddr
                 // Check frame attributes
                 &&& if !frame.attr.readable || !frame.attr.user_accessible {
                     // If the frame is not readable or user accessible, the
@@ -227,15 +221,9 @@ impl OSMemoryState {
     ///
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after common memory write operation.
-    pub open spec fn mem_write(
-        s1: Self,
-        s2: Self,
-        op: WriteOp,
-        paddr: PAddr,
-        mapping: Option<(VAddr, Frame)>,
-    ) -> bool {
+    pub open spec fn mem_write(s1: Self, s2: Self, op: WriteOp) -> bool {
         // Check mapping
-        &&& match mapping {
+        &&& match op.mapping {
             Some((base, frame)) => {
                 // If `mapping` is `Some`,
                 &&& s1.has_mapping_for(
@@ -248,7 +236,7 @@ impl OSMemoryState {
                 )
                 // `vaddr` should map to `paddr`
                 &&& op.vaddr.map(base, frame.base)
-                    === paddr
+                    === op.paddr
                 // Check frame attributes
                 &&& if !frame.attr.writable || !frame.attr.user_accessible {
                     // If the frame is not writable or user accessible, the
