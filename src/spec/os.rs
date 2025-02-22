@@ -22,7 +22,7 @@ verus! {
 /// - Page table memory: Memory used to store page tables.
 /// - TLB: Translation Lookaside Buffer.
 pub struct OSMemoryState {
-    /// Word-indexed physical memory.
+    /// (8-byte) Word-indexed physical memory.
     pub mem: Seq<nat>,
     /// Page table memory.
     pub pt_mem: PageTableMem,

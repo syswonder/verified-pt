@@ -3,6 +3,9 @@ use vstd::prelude::*;
 
 verus! {
 
+/// Word size.
+pub spec const WORD_SIZE: nat = 8;
+
 /// Representing virtual address.
 #[derive(Clone, Copy)]
 pub struct VAddr(pub nat);
@@ -35,7 +38,7 @@ impl VAddr {
 
     /// Convert to word index.
     pub open spec fn word_idx(self) -> VWordIdx {
-        VWordIdx(self.0 / 8)
+        VWordIdx(self.0 / WORD_SIZE)
     }
 
     /// If virtual page base `vbase` maps to physical page base `pbase`, calculate the
@@ -55,7 +58,7 @@ pub struct PAddr(pub nat);
 impl PAddr {
     /// Convert to word index.
     pub open spec fn word_idx(self) -> PWordIdx {
-        PWordIdx(self.0 / 8)
+        PWordIdx(self.0 / WORD_SIZE)
     }
 
     /// If addr is aligned to `size` bytes.
@@ -69,13 +72,13 @@ impl PAddr {
     }
 }
 
-/// Index used to access virtual memory by word.
+/// Index used to access virtual memory by (8-byte) word.
 pub struct VWordIdx(pub nat);
 
 impl VWordIdx {
     /// Convert to virtual address.
     pub open spec fn addr(self) -> VAddr {
-        VAddr(self.0 * 8)
+        VAddr(self.0 * WORD_SIZE)
     }
 
     /// Convert to int.
@@ -84,13 +87,13 @@ impl VWordIdx {
     }
 }
 
-/// Index used to access physical memory by word.
+/// Index used to access physical memory by (8-byte) word.
 pub struct PWordIdx(pub nat);
 
 impl PWordIdx {
     /// Convert to physical address.
     pub open spec fn addr(self) -> PAddr {
-        PAddr(self.0 * 8)
+        PAddr(self.0 * WORD_SIZE)
     }
 
     /// Convert to int.

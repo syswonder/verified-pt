@@ -21,7 +21,7 @@ verus! {
 
 /// High level (abstract) memory state.
 pub struct HlMemoryState {
-    /// Word-indexed virtual memory (vword_idx -> word value).
+    /// (8-byte) Word-indexed virtual memory (vword_idx -> word value).
     ///
     /// We use word-index rather than address. Addresses that are not aligned to word boundaries should
     /// not be used to access a value, while word-indexes don't face the word-alignment issue.
