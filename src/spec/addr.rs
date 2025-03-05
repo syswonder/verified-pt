@@ -37,8 +37,8 @@ impl VAddr {
     }
 
     /// Convert to word index.
-    pub open spec fn word_idx(self) -> VWordIdx {
-        VWordIdx(self.0 / WORD_SIZE)
+    pub open spec fn idx(self) -> VIdx {
+        VIdx(self.0 / WORD_SIZE)
     }
 
     /// If virtual page base `vbase` maps to physical page base `pbase`, calculate the
@@ -57,8 +57,8 @@ pub struct PAddr(pub nat);
 
 impl PAddr {
     /// Convert to word index.
-    pub open spec fn word_idx(self) -> PWordIdx {
-        PWordIdx(self.0 / WORD_SIZE)
+    pub open spec fn idx(self) -> PIdx {
+        PIdx(self.0 / WORD_SIZE)
     }
 
     /// If addr is aligned to `size` bytes.
@@ -72,10 +72,10 @@ impl PAddr {
     }
 }
 
-/// Index used to access virtual memory by (8-byte) word.
-pub struct VWordIdx(pub nat);
+/// Index used to access virtual memory by 8-byte word.
+pub struct VIdx(pub nat);
 
-impl VWordIdx {
+impl VIdx {
     /// Convert to virtual address.
     pub open spec fn addr(self) -> VAddr {
         VAddr(self.0 * WORD_SIZE)
@@ -87,10 +87,10 @@ impl VWordIdx {
     }
 }
 
-/// Index used to access physical memory by (8-byte) word.
-pub struct PWordIdx(pub nat);
+/// Index used to access physical memory by 8-byte word.
+pub struct PIdx(pub nat);
 
-impl PWordIdx {
+impl PIdx {
     /// Convert to physical address.
     pub open spec fn addr(self) -> PAddr {
         PAddr(self.0 * WORD_SIZE)

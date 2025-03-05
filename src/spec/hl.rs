@@ -13,7 +13,7 @@
 use vstd::prelude::*;
 
 use super::{
-    addr::{PAddr, VAddr, VWordIdx},
+    addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     mem::{Frame, FrameSize, MapOp, QueryOp, ReadOp, UnmapOp, WriteOp},
 };
 
@@ -21,11 +21,11 @@ verus! {
 
 /// High level (abstract) memory state.
 pub struct HlMemoryState {
-    /// (8-byte) Word-indexed virtual memory (vword_idx -> word value).
+    /// 8-byte-indexed virtual memory.
     ///
-    /// We use word-index rather than address. Addresses that are not aligned to word boundaries should
-    /// not be used to access a value, while word-indexes don't face the word-alignment issue.
-    pub mem: Map<VWordIdx, nat>,
+    /// We use index rather than address. Addresses that are not aligned to 8-byte boundaries
+    /// should not be used to access a value, while indexes don't face this issue.
+    pub mem: Map<VIdx, nat>,
     /// Mappings from virtual address to physical frames (virtual page base addr -> physical frame).
     ///
     /// The key must be the base address of a virtual page i.e. virtual range [`key`, `key + frame.size`)
@@ -43,13 +43,13 @@ pub struct HlConstants {
 
 impl HlMemoryState {
     /// Virtual memory domain covered by `self.mappings`.
-    pub open spec fn mem_domain_covered_by_mappings(self) -> Set<VWordIdx> {
+    pub open spec fn mem_domain_covered_by_mappings(self) -> Set<VIdx> {
         Set::new(
-            |vword_idx: VWordIdx|
+            |vidx: VIdx|
                 exists|base: VAddr, frame: Frame|
                     {
                         &&& #[trigger] self.mappings.contains_pair(base, frame)
-                        &&& vword_idx.addr().within(base, frame.size.as_nat())
+                        &&& vidx.addr().within(base, frame.size.as_nat())
                     },
         )
     }
@@ -103,7 +103,7 @@ impl HlMemoryState {
     /// State transition - Read.
     pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
         &&& op.vaddr.aligned(
-            8,
+            WORD_SIZE,
         )
         // Memory and mappings should not be updated
         &&& s1.mappings === s2.mappings
@@ -122,21 +122,21 @@ impl HlMemoryState {
                     frame.size.as_nat(),
                 )
                 // Check frame attributes
-                &&& if op.vaddr.map(base, frame.base).word_idx().0 < s1.constants.pmem_size
+                &&& if op.vaddr.map(base, frame.base).idx().0 < s1.constants.pmem_size
                     && frame.attr.readable && frame.attr.user_accessible {
                     // The result should be `Ok`
                     &&& op.result is Ok
-                    // The value should be the value in the memory at `vword_idx`
-                    &&& op.result.unwrap() === s1.mem[op.vaddr.word_idx()]
+                    // The value should be the value in the memory at `vidx`
+                    &&& op.result.unwrap() === s1.mem[op.vaddr.idx()]
                 } else {
                     // The result should be `Err`
                     op.result is Err
                 }
             },
             None => {
-                // If `mapping` is `None`, the memory domain should not contain `vword_idx`
+                // If `mapping` is `None`, the memory domain should not contain `vidx`
                 &&& !s1.mem_domain_covered_by_mappings().contains(
-                    op.vaddr.word_idx(),
+                    op.vaddr.idx(),
                 )
                 // Result should be `Err`
                 &&& op.result is Err
@@ -146,7 +146,7 @@ impl HlMemoryState {
 
     /// State transition - write.
     pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
-        &&& op.vaddr.aligned(8)
+        &&& op.vaddr.aligned(WORD_SIZE)
         // Mappings should not be updated
         &&& s1.mappings === s2.mappings
         // Check mapping
@@ -163,12 +163,12 @@ impl HlMemoryState {
                     frame.size.as_nat(),
                 )
                 // Check frame attributes
-                &&& if op.vaddr.map(base, frame.base).word_idx().0 < s1.constants.pmem_size
+                &&& if op.vaddr.map(base, frame.base).idx().0 < s1.constants.pmem_size
                     && frame.attr.writable && frame.attr.user_accessible {
                     // The result should be `Ok`
                     &&& op.result is Ok
-                    // Memory should be updated at `vword_idx` with `value`
-                    &&& s1.mem === s2.mem.insert(op.vaddr.word_idx(), op.value)
+                    // Memory should be updated at `vidx` with `value`
+                    &&& s1.mem === s2.mem.insert(op.vaddr.idx(), op.value)
                 } else {
                     // The result should be `Err`
                     &&& op.result is Err
@@ -177,9 +177,9 @@ impl HlMemoryState {
                 }
             },
             None => {
-                // If `mapping` is `None`, the memory domain should not contain `vword_idx`
+                // If `mapping` is `None`, the memory domain should not contain `vidx`
                 &&& !s1.mem_domain_covered_by_mappings().contains(
-                    op.vaddr.word_idx(),
+                    op.vaddr.idx(),
                 )
                 // And memory should not be updated
                 &&& s1.mem === s2.mem

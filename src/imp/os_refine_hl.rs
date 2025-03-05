@@ -99,75 +99,73 @@ proof fn os_init_refines_hl_init(st: OSMemoryState)
         st@.init(),
 {
     // 1. The interpreted mappings are empty if page table and TLB are empty.
-    lemma_interpret_pt_mem_equals_all_mappings(st);
     assert(st@.mappings === Map::empty());
-
     // 2. Empty mappings result in empty memory.
     assert(st.interpret_mem() === Map::empty());
 }
 
 /// Theorem. The OS-level read operation preserves the invariants.
-proof fn os_read_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: ReadOp)
+proof fn os_read_preserves_invariants(st1: OSMemoryState, st2: OSMemoryState, op: ReadOp)
     requires
-        s1.invariants(),
-        OSMemoryState::mem_read(s1, s2, op),
+        st1.invariants(),
+        OSMemoryState::mem_read(st1, st2, op),
     ensures
-        s2.invariants(),
+        st2.invariants(),
 {
-    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
+    assert(st1.interpret_pt_mem() === st2.interpret_pt_mem());
 }
 
 /// Theorem. The OS-level read operation refines the high-level read operation.
-proof fn os_read_refines_hl_read(s1: OSMemoryState, s2: OSMemoryState, op: ReadOp)
+proof fn os_read_refines_hl_read(st1: OSMemoryState, st2: OSMemoryState, op: ReadOp)
     requires
-        s1.invariants(),
-        OSMemoryState::mem_read(s1, s2, op),
+        st1.invariants(),
+        OSMemoryState::mem_read(st1, st2, op),
     ensures
-        HlMemoryState::read(s1@, s2@, op),
+        HlMemoryState::read(st1@, st2@, op),
 {
     // Lemmas satisfied by the invariants.
-    lemma_interpret_pt_mem_equals_all_mappings(s1);
-    lemma_at_most_one_mapping_for_vaddr(s1, op.vaddr);
+    lemma_interpret_pt_mem_equals_all_mappings(st1);
+    lemma_at_most_one_mapping_for_vaddr(st1, op.vaddr);
 
     match op.mapping {
         Some((base, frame)) => {
-            let p_idx = op.vaddr.map(base, frame.base).word_idx();
-            if p_idx.0 < s1.mem.len() && frame.attr.readable && frame.attr.user_accessible {
-                // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
-                assert(s1.all_mappings().contains_pair(base, frame));
+            let p_idx = op.vaddr.map(base, frame.base).idx();
+            if p_idx.0 < st1.mem.len() && frame.attr.readable && frame.attr.user_accessible {
+                // `st1` has the mapping `(base, frame)` which contains `op.vaddr`.
+                assert(st1.all_mappings().contains_pair(base, frame));
                 assert(op.vaddr.within(base, frame.size.as_nat()));
                 // Values in the intepreted memory are the same as in the OS memory, because
                 // there is only one mapping for `op.vaddr` (lemma).
-                assert(s1.interpret_mem()[op.vaddr.word_idx()] === s1.mem[p_idx.as_int()]);
+                assert(st1.interpret_mem()[op.vaddr.idx()] === st1.mem[p_idx.as_int()]);
             }
         },
         None => {
             // Satisfied because interpret_pt_mem equals all_mappings (lemma).
-            assert(!s1@.mem_domain_covered_by_mappings().contains(op.vaddr.word_idx()));
+            assert(!st1@.mem_domain_covered_by_mappings().contains(op.vaddr.idx()));
         },
     }
 }
 
 /// Theorem. The OS-level write operation preserves the invariants.
-proof fn os_write_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: WriteOp)
+proof fn os_write_preserves_invariants(st1: OSMemoryState, st2: OSMemoryState, op: WriteOp)
     requires
-        s1.invariants(),
-        OSMemoryState::mem_write(s1, s2, op),
+        st1.invariants(),
+        OSMemoryState::mem_write(st1, st2, op),
     ensures
-        s2.invariants(),
+        st2.invariants(),
 {
-    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
+    assert(st1.interpret_pt_mem() === st2.interpret_pt_mem());
 }
 
 /// Theorem: The OS-level write operation refines the high-level write operation.
-proof fn os_write_refines_hl_write(s1: OSMemoryState, s2: OSMemoryState, op: WriteOp)
+proof fn os_write_refines_hl_write(st1: OSMemoryState, st2: OSMemoryState, op: WriteOp)
     requires
-        OSMemoryState::mem_write(s1, s2, op),
+        OSMemoryState::mem_write(st1, st2, op),
     ensures
-        HlMemoryState::write(s1@, s2@, op),
+        HlMemoryState::write(st1@, st2@, op),
 {
     // TODO
-    assume(HlMemoryState::write(s1@, s2@, op));
+    assume(HlMemoryState::write(st1@, st2@, op));
 }
 
 } // verus!

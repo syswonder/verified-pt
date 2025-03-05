@@ -7,7 +7,7 @@
 use vstd::prelude::*;
 
 use super::{
-    addr::{PAddr, VAddr, VWordIdx},
+    addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     hl::{HlConstants, HlMemoryState},
     mem::{Frame, FrameSize, MapOp, PageTableMem, QueryOp, ReadOp, UnmapOp, WriteOp},
     nat_to_u64,
@@ -22,7 +22,7 @@ verus! {
 /// - Page table memory: Memory used to store page tables.
 /// - TLB: Translation Lookaside Buffer.
 pub struct OSMemoryState {
-    /// (8-byte) Word-indexed physical memory.
+    /// 8-byte-indexed physical memory.
     pub mem: Seq<nat>,
     /// Page table memory.
     pub pt_mem: PageTableMem,
@@ -60,23 +60,23 @@ impl OSMemoryState {
         )
     }
 
-    /// Interpret the common memory as a map (vword_idx -> word value).
-    pub open spec fn interpret_mem(self) -> Map<VWordIdx, nat> {
+    /// Interpret the common memory as a map (vidx -> word value).
+    pub open spec fn interpret_mem(self) -> Map<VIdx, nat> {
         Map::new(
-            |vword_idx: VWordIdx|
+            |vidx: VIdx|
                 exists|base: VAddr, frame: Frame|
                     {
                         &&& #[trigger] self.all_mappings().contains_pair(base, frame)
-                        &&& vword_idx.addr().within(base, frame.size.as_nat())
+                        &&& vidx.addr().within(base, frame.size.as_nat())
                     },
-            |vword_idx: VWordIdx|
+            |vidx: VIdx|
                 {
                     let (base, frame) = choose|base: VAddr, frame: Frame|
                         {
                             &&& #[trigger] self.all_mappings().contains_pair(base, frame)
-                            &&& vword_idx.addr().within(base, frame.size.as_nat())
+                            &&& vidx.addr().within(base, frame.size.as_nat())
                         };
-                    self.mem[vword_idx.addr().map(base, frame.base).word_idx().as_int()]
+                    self.mem[vidx.addr().map(base, frame.base).idx().as_int()]
                 },
         )
     }
@@ -93,17 +93,6 @@ impl OSMemoryState {
 
 /// Helper functions.
 impl OSMemoryState {
-    /// If exists a specific mapping `(base, frame)` that `vaddr` lies in.
-    pub open spec fn has_specific_mapping_for(
-        self,
-        base: VAddr,
-        frame: Frame,
-        vaddr: VAddr,
-    ) -> bool {
-        &&& self.interpret_pt_mem().contains_pair(base, frame)
-        &&& vaddr.within(base, frame.size.as_nat())
-    }
-
     /// If exists a mapping that `vaddr` lies in.
     pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
         exists|base: VAddr, frame: Frame| #[trigger]
@@ -196,7 +185,7 @@ impl OSMemoryState {
     /// after common memory read operation.
     pub open spec fn mem_read(s1: Self, s2: Self, op: ReadOp) -> bool {
         &&& op.vaddr.aligned(
-            8,
+            WORD_SIZE,
         )
         // Memory, page table and TLB should not be updated
         &&& s1.mem === s2.mem
@@ -219,14 +208,11 @@ impl OSMemoryState {
                 &&& op.vaddr.map(base, frame.base)
                     === op.paddr
                 // Check frame attributes
-                &&& if op.vaddr.map(base, frame.base).word_idx().0 < s1.mem.len()
-                    && frame.attr.readable && frame.attr.user_accessible {
+                &&& if op.vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.readable
+                    && frame.attr.user_accessible {
                     // The result should be `Ok`
                     &&& op.result is Ok
-                    &&& op.result.unwrap() === s1.mem[op.vaddr.map(
-                        base,
-                        frame.base,
-                    ).word_idx().as_int()]
+                    &&& op.result.unwrap() === s1.mem[op.vaddr.map(base, frame.base).idx().as_int()]
                 } else {
                     // The result should be `Err`
                     op.result is Err
@@ -249,7 +235,7 @@ impl OSMemoryState {
     /// after common memory write operation.
     pub open spec fn mem_write(s1: Self, s2: Self, op: WriteOp) -> bool {
         &&& op.vaddr.aligned(
-            8,
+            WORD_SIZE,
         )
         // Page table and TLB should not be updated
         &&& s1.pt_mem === s2.pt_mem
@@ -271,13 +257,13 @@ impl OSMemoryState {
                 &&& op.vaddr.map(base, frame.base)
                     === op.paddr
                 // Check frame attributes
-                &&& if op.vaddr.map(base, frame.base).word_idx().0 < s1.mem.len()
-                    && frame.attr.writable && frame.attr.user_accessible {
+                &&& if op.vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.writable
+                    && frame.attr.user_accessible {
                     // The result should be `Ok`
                     &&& op.result is Ok
                     // Update memory
                     &&& s2.mem === s1.mem.update(
-                        op.vaddr.map(base, frame.base).word_idx().as_int(),
+                        op.vaddr.map(base, frame.base).idx().as_int(),
                         op.value,
                     )
                 } else {
@@ -394,7 +380,9 @@ impl OSMemoryState {
         // Memory should not be updated
         &&& s1.mem === s2.mem
         // Base vaddr should align to 8 bytes
-        &&& op.vaddr.aligned(8)
+        &&& op.vaddr.aligned(
+            WORD_SIZE,
+        )
         // Page table should not be updated
         &&& s1.pt_mem === s2.pt_mem
         // Check result
