@@ -168,7 +168,7 @@ impl HlMemoryState {
                     // The result should be `Ok`
                     &&& op.result is Ok
                     // Memory should be updated at `vidx` with `value`
-                    &&& s1.mem === s2.mem.insert(op.vaddr.idx(), op.value)
+                    &&& s2.mem === s1.mem.insert(op.vaddr.idx(), op.value)
                 } else {
                     // The result should be `Err`
                     &&& op.result is Err

@@ -70,6 +70,11 @@ impl PAddr {
     pub open spec fn overlap(base1: Self, size1: nat, base2: Self, size2: nat) -> bool {
         overlap(base1.0, size1, base2.0, size2)
     }
+
+    /// Offset `self` by `offset` bytes.
+    pub open spec fn offset(self, offset: nat) -> PAddr {
+        PAddr(self.0 + offset)
+    }
 }
 
 /// Index used to access virtual memory by 8-byte word.

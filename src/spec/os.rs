@@ -133,6 +133,20 @@ impl OSMemoryState {
 
 /// State Invariants.
 impl OSMemoryState {
+    /// All frames are within the physical memory bounds.
+    pub open spec fn frames_within_pmem(self) -> bool {
+        forall|base: VAddr, frame: Frame| #[trigger]
+            self.interpret_pt_mem().contains_pair(base, frame) ==> 
+                frame.base.offset(frame.size.as_nat()).0 <= self.mem.len()
+    }
+
+    /// All frames are 8-byte aligned.
+    pub open spec fn frames_aligned(self) -> bool {
+        forall|base: VAddr, frame: Frame| #[trigger]
+            self.interpret_pt_mem().contains_pair(base, frame) ==> frame.base.aligned(WORD_SIZE)
+                && frame.size.as_nat() % WORD_SIZE == 0
+    }
+
     /// Page table mappings do not overlap in virtual memory.
     pub open spec fn mappings_nonoverlap_in_vmem(self) -> bool {
         forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
@@ -163,6 +177,8 @@ impl OSMemoryState {
 
     /// OS state invariants.
     pub open spec fn invariants(self) -> bool {
+        &&& self.frames_within_pmem()
+        &&& self.frames_aligned()
         &&& self.mappings_nonoverlap_in_vmem()
         &&& self.mappings_nonoverlap_in_pmem()
         &&& self.tlb_is_submap_of_pt()
