@@ -1,8 +1,9 @@
 //! Prove that OS state machine refines the high-level state machine.
 use super::lemmas::*;
 use crate::spec::{
+    addr::VAddr,
     hl::HlMemoryState,
-    mem::{ReadOp, WriteOp},
+    mem::{Frame, ReadOp, WriteOp},
     os::OSMemoryState,
 };
 use vstd::prelude::*;
@@ -39,6 +40,56 @@ proof fn lemma_interpret_pt_mem_equals_all_mappings(st: OSMemoryState)
     lemma_map_eq_pair(pt_mem, all_mappings);
 }
 
+/// Lemma. If there is no overlap in the virtual memory space, then there is at most
+/// one mapping containing a virtual address.
+proof fn lemma_at_most_one_mapping_for_vaddr(st: OSMemoryState, vaddr: VAddr)
+    requires
+        st.mappings_nonoverlap_in_vmem(),
+    ensures
+        forall|base1, frame1, base2, frame2|
+            {
+                &&& #[trigger] st.interpret_pt_mem().contains_pair(base1, frame1)
+                &&& vaddr.within(base1, frame1.size.as_nat())
+                &&& #[trigger] st.interpret_pt_mem().contains_pair(base2, frame2)
+                &&& vaddr.within(base2, frame2.size.as_nat())
+            } ==> base1 == base2,
+{
+    if exists|base1, frame1, base2, frame2|
+        {
+            &&& #[trigger] st.interpret_pt_mem().contains_pair(base1, frame1)
+            &&& vaddr.within(base1, frame1.size.as_nat())
+            &&& #[trigger] st.interpret_pt_mem().contains_pair(base2, frame2)
+            &&& vaddr.within(base2, frame2.size.as_nat())
+            &&& base1 != base2
+        } {
+        // Proof by contradiction. If there are two mappings for `vaddr`,
+        // then there is an overlap.
+        let (base1, frame1, base2, frame2): (VAddr, Frame, VAddr, Frame) = choose|
+            base1,
+            frame1,
+            base2,
+            frame2,
+        |
+            {
+                &&& #[trigger] st.interpret_pt_mem().contains_pair(base1, frame1)
+                &&& vaddr.within(base1, frame1.size.as_nat())
+                &&& #[trigger] st.interpret_pt_mem().contains_pair(base2, frame2)
+                &&& vaddr.within(base2, frame2.size.as_nat())
+                &&& base1 != base2
+            };
+        assert(VAddr::overlap(base1, frame1.size.as_nat(), base2, frame2.size.as_nat()));
+    }
+}
+
+/// Theorem. The OS-level init state implies the invariants.
+proof fn os_init_implies_invariants(st: OSMemoryState)
+    requires
+        st.init(),
+    ensures
+        st.invariants(),
+{
+}
+
 /// Theorem. The OS-level init state refines the high-level init state.
 proof fn os_init_refines_hl_init(st: OSMemoryState)
     requires
@@ -49,21 +100,63 @@ proof fn os_init_refines_hl_init(st: OSMemoryState)
 {
     // 1. The interpreted mappings are empty if page table and TLB are empty.
     lemma_interpret_pt_mem_equals_all_mappings(st);
-    assert(st@.mappings =~= Map::empty());
+    assert(st@.mappings === Map::empty());
 
     // 2. Empty mappings result in empty memory.
     assert(st.interpret_mem() === Map::empty());
 }
 
+/// Theorem. The OS-level read operation preserves the invariants.
+proof fn os_read_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: ReadOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::mem_read(s1, s2, op),
+    ensures
+        s2.invariants(),
+{
+    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
+}
+
 /// Theorem. The OS-level read operation refines the high-level read operation.
 proof fn os_read_refines_hl_read(s1: OSMemoryState, s2: OSMemoryState, op: ReadOp)
     requires
+        s1.invariants(),
         OSMemoryState::mem_read(s1, s2, op),
     ensures
         HlMemoryState::read(s1@, s2@, op),
 {
-    // TODO
-    assume(HlMemoryState::read(s1@, s2@, op));
+    // Lemmas satisfied by the invariants.
+    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    lemma_at_most_one_mapping_for_vaddr(s1, op.vaddr);
+
+    match op.mapping {
+        Some((base, frame)) => {
+            let p_idx = op.vaddr.map(base, frame.base).word_idx();
+            if p_idx.0 < s1.mem.len() && frame.attr.readable && frame.attr.user_accessible {
+                // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
+                assert(s1.all_mappings().contains_pair(base, frame));
+                assert(op.vaddr.within(base, frame.size.as_nat()));
+                // Values in the intepreted memory are the same as in the OS memory, because
+                // there is only one mapping for `op.vaddr` (lemma).
+                assert(s1.interpret_mem()[op.vaddr.word_idx()] === s1.mem[p_idx.as_int()]);
+            }
+        },
+        None => {
+            // Satisfied because interpret_pt_mem equals all_mappings (lemma).
+            assert(!s1@.mem_domain_covered_by_mappings().contains(op.vaddr.word_idx()));
+        },
+    }
+}
+
+/// Theorem. The OS-level write operation preserves the invariants.
+proof fn os_write_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: WriteOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::mem_write(s1, s2, op),
+    ensures
+        s2.invariants(),
+{
+    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
 }
 
 /// Theorem: The OS-level write operation refines the high-level write operation.

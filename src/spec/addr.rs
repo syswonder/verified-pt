@@ -23,7 +23,7 @@ impl VAddr {
 
     /// If addr is in range `[base, base + size)`.
     pub open spec fn within(self, base: Self, size: nat) -> bool {
-        self.between(base, self.offset(size))
+        base.0 <= self.0 < base.0 + size
     }
 
     /// If virtual region (base1, size1) and virtual region (base2, size2) overlap.

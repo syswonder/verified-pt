@@ -8,7 +8,7 @@ use vstd::prelude::*;
 
 use super::{
     addr::{PAddr, VAddr, VWordIdx},
-    hl::HlMemoryState,
+    hl::{HlConstants, HlMemoryState},
     mem::{Frame, FrameSize, MapOp, PageTableMem, QueryOp, ReadOp, UnmapOp, WriteOp},
     nat_to_u64,
     s1pt::page_table_walk,
@@ -30,16 +30,33 @@ pub struct OSMemoryState {
     pub tlb: Map<VAddr, Frame>,
 }
 
+/// View(abstraction) functions.
 impl OSMemoryState {
     /// Interpret the page table memory as a map (vaddr -> frame).
     pub open spec fn interpret_pt_mem(self) -> Map<VAddr, Frame> {
-        let max_base: nat = 0x8000_0000;
+        let max_vaddr: nat = 0x8000_0000;
         Map::new(
             |addr: VAddr|
-                addr.0 < max_base && exists|frame: Frame| #[trigger]
+                addr.0 < max_vaddr && exists|frame: Frame| #[trigger]
                     page_table_walk(self.pt_mem, nat_to_u64(addr.0), frame),
             |addr: VAddr|
-                choose|pte: Frame| #[trigger] page_table_walk(self.pt_mem, nat_to_u64(addr.0), pte),
+                choose|frame: Frame| #[trigger]
+                    page_table_walk(self.pt_mem, nat_to_u64(addr.0), frame),
+        )
+    }
+
+    /// Collect all page mappings managed by OS memory state (pt_mem and TLB).
+    pub open spec fn all_mappings(self) -> Map<VAddr, Frame> {
+        Map::new(
+            |base: VAddr| self.tlb.contains_key(base) || self.interpret_pt_mem().contains_key(base),
+            |base: VAddr|
+                {
+                    if self.tlb.contains_key(base) {
+                        self.tlb[base]
+                    } else {
+                        self.interpret_pt_mem()[base]
+                    }
+                },
         )
     }
 
@@ -64,22 +81,30 @@ impl OSMemoryState {
         )
     }
 
-    /// Collect all page mappings managed by OS memory state (pt_mem and TLB).
-    pub open spec fn all_mappings(self) -> Map<VAddr, Frame> {
-        Map::new(
-            |base: VAddr| self.tlb.contains_key(base) || self.interpret_pt_mem().contains_key(base),
-            |base: VAddr|
-                {
-                    if self.tlb.contains_key(base) {
-                        self.tlb[base]
-                    } else {
-                        self.interpret_pt_mem()[base]
-                    }
-                },
-        )
+    /// High-level (abstract) view of the OS memory state.
+    pub open spec fn view(self) -> HlMemoryState {
+        HlMemoryState {
+            mem: self.interpret_mem(),
+            mappings: self.all_mappings(),
+            constants: HlConstants { pmem_size: self.mem.len() },
+        }
+    }
+}
+
+/// Helper functions.
+impl OSMemoryState {
+    /// If exists a specific mapping `(base, frame)` that `vaddr` lies in.
+    pub open spec fn has_specific_mapping_for(
+        self,
+        base: VAddr,
+        frame: Frame,
+        vaddr: VAddr,
+    ) -> bool {
+        &&& self.interpret_pt_mem().contains_pair(base, frame)
+        &&& vaddr.within(base, frame.size.as_nat())
     }
 
-    /// If there is a mapped virtual page that `vaddr` lies in.
+    /// If exists a mapping that `vaddr` lies in.
     pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
         exists|base: VAddr, frame: Frame| #[trigger]
             self.interpret_pt_mem().contains_pair(base, frame) && vaddr.within(
@@ -115,14 +140,9 @@ impl OSMemoryState {
                 )
             }
     }
-
-    /// High-level (abstract) view of the OS memory state.
-    pub open spec fn view(self) -> HlMemoryState {
-        HlMemoryState { mem: self.interpret_mem(), mappings: self.all_mappings() }
-    }
 }
 
-/// OS State Invariants.
+/// State Invariants.
 impl OSMemoryState {
     /// Page table mappings do not overlap in virtual memory.
     pub open spec fn mappings_nonoverlap_in_vmem(self) -> bool {
@@ -175,14 +195,20 @@ impl OSMemoryState {
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after common memory read operation.
     pub open spec fn mem_read(s1: Self, s2: Self, op: ReadOp) -> bool {
-        // Memory should not be updated
+        &&& op.vaddr.aligned(
+            8,
+        )
+        // Memory, page table and TLB should not be updated
         &&& s1.mem === s2.mem
+        &&& s1.pt_mem === s2.pt_mem
+        &&& s1.tlb === s2.tlb
         // Check mapping
         &&& match op.mapping {
             Some((base, frame)) => {
-                // If `mapping` is `Some`,
-                &&& s1.has_mapping_for(
-                    op.vaddr,
+                // If `mapping` is `Some`, it should be cached by TLB
+                &&& s1.tlb.contains_pair(
+                    base,
+                    frame,
                 )
                 // `vaddr` should be in the virtual page mapped by `base`
                 &&& op.vaddr.within(
@@ -193,17 +219,17 @@ impl OSMemoryState {
                 &&& op.vaddr.map(base, frame.base)
                     === op.paddr
                 // Check frame attributes
-                &&& if !frame.attr.readable || !frame.attr.user_accessible {
-                    // If the frame is not readable or user accessible, the
-                    // result should be `Err`
-                    op.result is Err
-                } else {
-                    // Otherwise, the result should be `Ok`
+                &&& if op.vaddr.map(base, frame.base).word_idx().0 < s1.mem.len()
+                    && frame.attr.readable && frame.attr.user_accessible {
+                    // The result should be `Ok`
                     &&& op.result is Ok
                     &&& op.result.unwrap() === s1.mem[op.vaddr.map(
                         base,
                         frame.base,
                     ).word_idx().as_int()]
+                } else {
+                    // The result should be `Err`
+                    op.result is Err
                 }
             },
             None => {
@@ -222,12 +248,19 @@ impl OSMemoryState {
     /// The pre-state `s1` and post-state `s2` must satisfy the specification
     /// after common memory write operation.
     pub open spec fn mem_write(s1: Self, s2: Self, op: WriteOp) -> bool {
+        &&& op.vaddr.aligned(
+            8,
+        )
+        // Page table and TLB should not be updated
+        &&& s1.pt_mem === s2.pt_mem
+        &&& s1.tlb === s2.tlb
         // Check mapping
         &&& match op.mapping {
             Some((base, frame)) => {
-                // If `mapping` is `Some`,
-                &&& s1.has_mapping_for(
-                    op.vaddr,
+                // If `mapping` is `Some`, it should be cached by TLB
+                &&& s1.tlb.contains_pair(
+                    base,
+                    frame,
                 )
                 // `vaddr` should be in the virtual page mapped by `base`
                 &&& op.vaddr.within(
@@ -238,19 +271,20 @@ impl OSMemoryState {
                 &&& op.vaddr.map(base, frame.base)
                     === op.paddr
                 // Check frame attributes
-                &&& if !frame.attr.writable || !frame.attr.user_accessible {
-                    // If the frame is not writable or user accessible, the
-                    // result should be `Err`
-                    &&& op.result is Err
-                    // Memory should not be updated
-                    &&& s1.mem === s2.mem
-                } else {
-                    // Otherwise, the result should be `Ok`
+                &&& if op.vaddr.map(base, frame.base).word_idx().0 < s1.mem.len()
+                    && frame.attr.writable && frame.attr.user_accessible {
+                    // The result should be `Ok`
                     &&& op.result is Ok
+                    // Update memory
                     &&& s2.mem === s1.mem.update(
                         op.vaddr.map(base, frame.base).word_idx().as_int(),
                         op.value,
                     )
+                } else {
+                    // The result should be `Err`
+                    &&& op.result is Err
+                    // Memory should not be updated
+                    &&& s1.mem === s2.mem
                 }
             },
             None => {

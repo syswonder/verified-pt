@@ -31,6 +31,14 @@ pub struct HlMemoryState {
     /// The key must be the base address of a virtual page i.e. virtual range [`key`, `key + frame.size`)
     /// must be mapped to the same physical frame.
     pub mappings: Map<VAddr, Frame>,
+    /// Constants.
+    pub constants: HlConstants,
+}
+
+/// High-level (abstract) memory state constants.
+pub struct HlConstants {
+    /// Physical memory size (in bytes).
+    pub pmem_size: nat,
 }
 
 impl HlMemoryState {
@@ -94,6 +102,9 @@ impl HlMemoryState {
 
     /// State transition - Read.
     pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
+        &&& op.vaddr.aligned(
+            8,
+        )
         // Memory and mappings should not be updated
         &&& s1.mappings === s2.mappings
         &&& s1.mem === s2.mem
@@ -111,15 +122,15 @@ impl HlMemoryState {
                     frame.size.as_nat(),
                 )
                 // Check frame attributes
-                &&& if !frame.attr.readable || !frame.attr.user_accessible {
-                    // If the frame is not readable or user accessible, the
-                    // result should be `Err`
-                    op.result is Err
-                } else {
-                    // Otherwise, the result should be `Ok`
+                &&& if op.vaddr.map(base, frame.base).word_idx().0 < s1.constants.pmem_size
+                    && frame.attr.readable && frame.attr.user_accessible {
+                    // The result should be `Ok`
                     &&& op.result is Ok
                     // The value should be the value in the memory at `vword_idx`
                     &&& op.result.unwrap() === s1.mem[op.vaddr.word_idx()]
+                } else {
+                    // The result should be `Err`
+                    op.result is Err
                 }
             },
             None => {
@@ -135,6 +146,7 @@ impl HlMemoryState {
 
     /// State transition - write.
     pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
+        &&& op.vaddr.aligned(8)
         // Mappings should not be updated
         &&& s1.mappings === s2.mappings
         // Check mapping
@@ -151,17 +163,17 @@ impl HlMemoryState {
                     frame.size.as_nat(),
                 )
                 // Check frame attributes
-                &&& if !frame.attr.writable || !frame.attr.user_accessible {
-                    // If the frame is not writable or user accessible, the
-                    // result should be `Err`
-                    &&& op.result is Err
-                    // Memory should not be updated
-                    &&& s1.mem === s2.mem
-                } else {
-                    // Otherwise, the result should be `Ok`
+                &&& if op.vaddr.map(base, frame.base).word_idx().0 < s1.constants.pmem_size
+                    && frame.attr.writable && frame.attr.user_accessible {
+                    // The result should be `Ok`
                     &&& op.result is Ok
                     // Memory should be updated at `vword_idx` with `value`
                     &&& s1.mem === s2.mem.insert(op.vaddr.word_idx(), op.value)
+                } else {
+                    // The result should be `Err`
+                    &&& op.result is Err
+                    // Memory should not be updated
+                    &&& s1.mem === s2.mem
                 }
             },
             None => {
