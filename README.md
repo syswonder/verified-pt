@@ -2,7 +2,7 @@
 
 ## Overview
 
-[arch](docs/arch.svg)
+![arch](docs/arch.svg)
 
 ## Specification
 
