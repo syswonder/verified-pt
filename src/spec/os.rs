@@ -9,11 +9,9 @@ use vstd::prelude::*;
 use super::{
     addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     hl::{HlConstants, HlMemoryState},
-    mem::{
-        Frame, FrameSize, MapOp, PageTableMem, QueryOp, ReadOp, TLBEvictOp, TLBFillOp, UnmapOp,
-        WriteOp,
-    },
+    mem::{Frame, FrameSize, PageTableMem},
     nat_to_u64,
+    op::{MapOp, QueryOp, ReadOp, TLBEvictOp, TLBFillOp, UnmapOp, WriteOp},
     s1pt::page_table_walk,
 };
 

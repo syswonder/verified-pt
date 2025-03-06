@@ -3,7 +3,8 @@ use super::lemmas::*;
 use crate::spec::{
     addr::VAddr,
     hl::HlMemoryState,
-    mem::{Frame, MapOp, QueryOp, ReadOp, TLBEvictOp, TLBFillOp, UnmapOp, WriteOp},
+    mem::Frame,
+    op::{MapOp, QueryOp, ReadOp, TLBEvictOp, TLBFillOp, UnmapOp, WriteOp},
     os::OSMemoryState,
 };
 use vstd::prelude::*;

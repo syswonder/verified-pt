@@ -14,7 +14,8 @@ use vstd::prelude::*;
 
 use super::{
     addr::{PAddr, VAddr, VIdx, WORD_SIZE},
-    mem::{Frame, FrameSize, MapOp, QueryOp, ReadOp, UnmapOp, WriteOp},
+    mem::{Frame, FrameSize},
+    op::{MapOp, QueryOp, ReadOp, UnmapOp, WriteOp},
 };
 
 verus! {

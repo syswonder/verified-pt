@@ -3,6 +3,7 @@ use vstd::prelude::*;
 pub mod addr;
 pub mod hl;
 pub mod mem;
+pub mod op;
 pub mod os;
 pub mod s1pt;
 pub mod s2pt;

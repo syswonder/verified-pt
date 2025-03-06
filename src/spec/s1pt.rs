@@ -121,13 +121,13 @@ impl PTEntry {
 /// Reads a page table entry from the page table memory.
 ///
 /// # Parameters
-/// - `mem`: The page table memory to read from.
+/// - `pt_mem`: The page table memory to read from.
 /// - `addr`: The address of the page table entry to read.
 ///
 /// # Returns
 /// - The abstract representation of the page table entry (`GhostPTEntry`).
-pub open spec fn read_pt_entry(mem: PageTableMem, addr: u64) -> GhostPTEntry {
-    PTEntry { value: mem.spec_read(addr) }@
+pub open spec fn read_pt_entry(pt_mem: PageTableMem, addr: u64) -> GhostPTEntry {
+    PTEntry { value: pt_mem.spec_read(addr) }@
 }
 
 /// Extract index bits from virtual address for given level (0-3)
@@ -167,7 +167,7 @@ spec fn compute_frame(
 
 /// Recursive helper for page table walk
 pub closed spec fn walk_level(
-    mem: PageTableMem,
+    pt_mem: PageTableMem,
     addr: u64,
     level: nat,
     table_addr: u64,
@@ -182,7 +182,7 @@ pub closed spec fn walk_level(
     } else {
         let index = get_index(addr, level);
         let pte_addr = (table_addr + index * 8) as u64;
-        let pte = read_pt_entry(mem, pte_addr);
+        let pte = read_pt_entry(pt_mem, pte_addr);
 
         match pte {
             GhostPTEntry::Table(desc) => {
@@ -190,7 +190,15 @@ pub closed spec fn walk_level(
                 let new_uxn = uxn_accum || desc.uxn;
                 let new_pxn = pxn_accum || desc.pxn;
                 let next_table = desc.addr << 12;
-                walk_level(mem, addr, (level - 1) as nat, next_table, new_user_ok, new_uxn, new_pxn)
+                walk_level(
+                    pt_mem,
+                    addr,
+                    (level - 1) as nat,
+                    next_table,
+                    new_user_ok,
+                    new_uxn,
+                    new_pxn,
+                )
             },
             GhostPTEntry::Page(page_desc) => {
                 if level > 3 && page_desc.non_block {
@@ -210,14 +218,14 @@ pub closed spec fn walk_level(
 /// This function simulates the MMU's page table walk process and checks if the given
 /// virtual address `addr` maps to the specified `frame` with the correct flags.
 ///
-/// Given a `PageTableMem` `mem`, the predicate is true for those `addr` and `frame` where the
+/// Given a `PageTableMem` `pt_mem`, the predicate is true for those `addr` and `frame` where the
 /// MMU's page table walk arrives at an entry mapping the frame `frame`, and the `pte.flags`
 /// must reflect the properties along the translation path.
 ///
 /// Support 4-level page tables yet.
-pub open spec fn page_table_walk(mem: PageTableMem, addr: u64, frame: Frame) -> bool {
-    let root_addr = mem.root();
-    match walk_level(mem, addr, 4, root_addr, true, false, false) {
+pub open spec fn page_table_walk(pt_mem: PageTableMem, addr: u64, frame: Frame) -> bool {
+    let root_addr = pt_mem.root();
+    match walk_level(pt_mem, addr, 4, root_addr, true, false, false) {
         Some(reached) => {
             &&& reached.base == frame.base
             &&& reached.size == frame.size
