@@ -3,7 +3,7 @@ use super::lemmas::*;
 use crate::spec::{
     addr::VAddr,
     hl::HlMemoryState,
-    mem::{Frame, ReadOp, WriteOp},
+    mem::{Frame, ReadOp, WriteOp, MapOp, UnmapOp},
     os::OSMemoryState,
 };
 use vstd::prelude::*;
@@ -126,80 +126,79 @@ proof fn os_init_refines_hl_init(st: OSMemoryState)
 }
 
 /// Theorem. The OS-level read operation preserves the invariants.
-proof fn os_read_preserves_invariants(st1: OSMemoryState, st2: OSMemoryState, op: ReadOp)
+proof fn os_read_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: ReadOp)
     requires
-        st1.invariants(),
-        OSMemoryState::mem_read(st1, st2, op),
+        s1.invariants(),
+        OSMemoryState::read(s1, s2, op),
     ensures
-        st2.invariants(),
+        s2.invariants(),
 {
-    assert(st1.interpret_pt_mem() === st2.interpret_pt_mem());
 }
 
 /// Theorem. The OS-level read operation refines the high-level read operation.
-proof fn os_read_refines_hl_read(st1: OSMemoryState, st2: OSMemoryState, op: ReadOp)
+proof fn os_read_refines_hl_read(s1: OSMemoryState, s2: OSMemoryState, op: ReadOp)
     requires
-        st1.invariants(),
-        OSMemoryState::mem_read(st1, st2, op),
+        s1.invariants(),
+        OSMemoryState::read(s1, s2, op),
     ensures
-        HlMemoryState::read(st1@, st2@, op),
+        HlMemoryState::read(s1@, s2@, op),
 {
     // Lemmas satisfied by the invariants.
-    lemma_interpret_pt_mem_equals_all_mappings(st1);
-    lemma_at_most_one_mapping_for_vaddr(st1, op.vaddr);
+    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    lemma_at_most_one_mapping_for_vaddr(s1, op.vaddr);
 
     match op.mapping {
         Some((base, frame)) => {
             let pidx = op.vaddr.map(base, frame.base).idx();
-            if pidx.0 < st1.mem.len() && frame.attr.readable && frame.attr.user_accessible {
-                // `st1` has the mapping `(base, frame)` which contains `op.vaddr`.
-                assert(st1.all_mappings().contains_pair(base, frame));
+            if pidx.0 < s1.mem.len() && frame.attr.readable && frame.attr.user_accessible {
+                // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
+                assert(s1.all_mappings().contains_pair(base, frame));
                 assert(op.vaddr.within(base, frame.size.as_nat()));
                 // Values in the intepreted memory are the same as in the OS memory, because
                 // there is only one mapping for `op.vaddr` (lemma).
-                assert(st1.interpret_mem()[op.vaddr.idx()] === st1.mem[pidx.as_int()]);
+                assert(s1.interpret_mem()[op.vaddr.idx()] === s1.mem[pidx.as_int()]);
             }
         },
         None => {
             // Satisfied because interpret_pt_mem equals all_mappings (lemma).
-            assert(!st1@.mem_domain_covered_by_mappings().contains(op.vaddr.idx()));
+            assert(!s1@.mem_domain_covered_by_mappings().contains(op.vaddr.idx()));
         },
     }
 }
 
 /// Theorem. The OS-level write operation preserves the invariants.
-proof fn os_write_preserves_invariants(st1: OSMemoryState, st2: OSMemoryState, op: WriteOp)
+proof fn os_write_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: WriteOp)
     requires
-        st1.invariants(),
-        OSMemoryState::mem_write(st1, st2, op),
+        s1.invariants(),
+        OSMemoryState::write(s1, s2, op),
     ensures
-        st2.invariants(),
+        s2.invariants(),
 {
-    assert(st1.interpret_pt_mem() === st2.interpret_pt_mem());
+    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
 }
 
 /// Theorem: The OS-level write operation refines the high-level write operation.
-proof fn os_write_refines_hl_write(st1: OSMemoryState, st2: OSMemoryState, op: WriteOp)
+proof fn os_write_refines_hl_write(s1: OSMemoryState, s2: OSMemoryState, op: WriteOp)
     requires
-        st1.invariants(),
-        OSMemoryState::mem_write(st1, st2, op),
+        s1.invariants(),
+        OSMemoryState::write(s1, s2, op),
     ensures
-        HlMemoryState::write(st1@, st2@, op),
+        HlMemoryState::write(s1@, s2@, op),
 {
     // Lemmas satisfied by the invariants.
-    lemma_interpret_pt_mem_equals_all_mappings(st1);
-    lemma_at_most_one_mapping_for_vaddr(st2, op.vaddr);
+    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    lemma_at_most_one_mapping_for_vaddr(s2, op.vaddr);
 
     match op.mapping {
         Some((base, frame)) => {
             let pidx = op.vaddr.map(base, frame.base).idx();
-            if pidx.0 < st1.mem.len() && frame.attr.writable && frame.attr.user_accessible {
-                // `st1` has the mapping `(base, frame)` which contains `op.vaddr`.
-                assert(st1.all_mappings().contains_pair(base, frame));
+            if pidx.0 < s1.mem.len() && frame.attr.writable && frame.attr.user_accessible {
+                // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
+                assert(s1.all_mappings().contains_pair(base, frame));
                 assert(op.vaddr.within(base, frame.size.as_nat()));
                 // Value updated in the physical memory is the same as in the interpreted memory,
                 // because there is only one mapping for `op.vaddr` (lemma).
-                assert(st2.interpret_mem() === st1.interpret_mem().insert(
+                assert(s2.interpret_mem() === s1.interpret_mem().insert(
                     op.vaddr.idx(),
                     op.value,
                 ));
@@ -207,9 +206,57 @@ proof fn os_write_refines_hl_write(st1: OSMemoryState, st2: OSMemoryState, op: W
         },
         None => {
             // Satisfied because interpret_pt_mem equals all_mappings (lemma).
-            assert(!st1@.mem_domain_covered_by_mappings().contains(op.vaddr.idx()));
+            assert(!s1@.mem_domain_covered_by_mappings().contains(op.vaddr.idx()));
         },
     }
+}
+
+/// Theorem. The OS-level map operation preserves the invariants.
+proof fn os_map_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: MapOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::map(s1, s2, op),
+    ensures
+        s2.invariants(),
+{
+}
+
+/// Theorem: The OS-level map operation refines the high-level map operation.
+proof fn os_map_refines_hl_map(s1: OSMemoryState, s2: OSMemoryState, op: MapOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::map(s1, s2, op),
+    ensures
+        HlMemoryState::map(s1@, s2@, op),
+{
+    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    // Post condition satified because interpret_pt_mem equals all_mappings (lemma).
+    // Then updating pt_mem is equivalent to updating all_mappings.
+}
+
+/// Theorem. The OS-level unmap operation preserves the invariants.
+proof fn os_unmap_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: UnmapOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::unmap(s1, s2, op),
+    ensures
+        s2.invariants(),
+{
+}
+
+/// Theorem: The OS-level unmap operation refines the high-level unmap operation.
+proof fn os_unmap_refines_hl_unmap(s1: OSMemoryState, s2: OSMemoryState, op: UnmapOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::unmap(s1, s2, op),
+    ensures
+        HlMemoryState::unmap(s1@, s2@, op),
+{
+    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    // Post condition satified because interpret_pt_mem equals all_mappings (lemma).
+    // Then updating pt_mem is equivalent to updating all_mappings.    
 }
 
 } // verus!

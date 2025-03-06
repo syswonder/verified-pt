@@ -196,10 +196,7 @@ impl OSMemoryState {
     }
 
     /// State transition - Common memory read.
-    ///
-    /// The pre-state `s1` and post-state `s2` must satisfy the specification
-    /// after common memory read operation.
-    pub open spec fn mem_read(s1: Self, s2: Self, op: ReadOp) -> bool {
+    pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
         &&& op.vaddr.aligned(
             WORD_SIZE,
         )
@@ -246,10 +243,7 @@ impl OSMemoryState {
     }
 
     /// State transition - Common memory write.
-    ///
-    /// The pre-state `s1` and post-state `s2` must satisfy the specification
-    /// after common memory write operation.
-    pub open spec fn mem_write(s1: Self, s2: Self, op: WriteOp) -> bool {
+    pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
         &&& op.vaddr.aligned(
             WORD_SIZE,
         )
@@ -303,9 +297,6 @@ impl OSMemoryState {
     }
 
     /// State transition - TLB fill.
-    ///
-    /// The pre-state `s1` and post-state `s2` must satisfy the specification
-    /// after TLB fill operation.
     pub open spec fn tlb_fill(s1: Self, s2: Self, vaddr: VAddr, frame: Frame) -> bool {
         // Page table must contain the mapping
         &&& s1.interpret_pt_mem().contains_pair(
@@ -323,9 +314,6 @@ impl OSMemoryState {
     }
 
     /// State transition - TLB eviction.
-    ///
-    /// The pre-state `s1` and post-state `s2` must satisfy the specification
-    /// after TLB eviction operation.
     pub open spec fn tlb_evict(s1: Self, s2: Self, vaddr: VAddr) -> bool {
         // TLB must contain the mapping
         &&& s1.tlb.contains_key(vaddr)
@@ -364,6 +352,12 @@ impl OSMemoryState {
             // Update page table
             &&& s1.interpret_pt_mem().insert(op.vaddr, op.frame) === s2.interpret_pt_mem()
         }
+        // s2.tlb is a submap of s1.tlb
+        &&& forall|base: VAddr, frame: Frame|
+        s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(
+            base,
+            frame,
+        )
     }
 
     /// State transition - unmap a virtual address.
@@ -389,6 +383,14 @@ impl OSMemoryState {
             // Page table should not be updated
             &&& s1.interpret_pt_mem() === s2.interpret_pt_mem()
         }
+        // s2.tlb cannot contain any mapping for op.vaddr
+        &&& !s2.tlb.contains_key(op.vaddr)
+        // s2.tlb is a submap of s1.tlb
+        &&& forall|base: VAddr, frame: Frame|
+        s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(
+            base,
+            frame,
+        )
     }
 
     /// State transition - page table query.
