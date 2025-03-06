@@ -157,4 +157,18 @@ pub struct QueryOp {
     pub result: Result<(VAddr, Frame), ()>,
 }
 
+/// TLB fill operation.
+pub struct TLBFillOp {
+    /// Virtual page address.
+    pub vaddr: VAddr,
+    /// Frame to map.
+    pub frame: Frame,
+}
+
+/// TLB eviction operation.
+pub struct TLBEvictOp {
+    /// Virtual page address.
+    pub vaddr: VAddr,
+}
+
 } // verus!

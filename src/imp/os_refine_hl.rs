@@ -1,9 +1,9 @@
-//! Prove that OS state machine refines the high-level state machine.
+//! Prove the OS state machine refines the high-level state machine.
 use super::lemmas::*;
 use crate::spec::{
     addr::VAddr,
     hl::HlMemoryState,
-    mem::{Frame, ReadOp, WriteOp, MapOp, UnmapOp},
+    mem::{Frame, MapOp, QueryOp, ReadOp, TLBEvictOp, TLBFillOp, UnmapOp, WriteOp},
     os::OSMemoryState,
 };
 use vstd::prelude::*;
@@ -177,7 +177,7 @@ proof fn os_write_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op:
     assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
 }
 
-/// Theorem: The OS-level write operation refines the high-level write operation.
+/// Theorem. The OS-level write operation refines the high-level write operation.
 proof fn os_write_refines_hl_write(s1: OSMemoryState, s2: OSMemoryState, op: WriteOp)
     requires
         s1.invariants(),
@@ -198,10 +198,7 @@ proof fn os_write_refines_hl_write(s1: OSMemoryState, s2: OSMemoryState, op: Wri
                 assert(op.vaddr.within(base, frame.size.as_nat()));
                 // Value updated in the physical memory is the same as in the interpreted memory,
                 // because there is only one mapping for `op.vaddr` (lemma).
-                assert(s2.interpret_mem() === s1.interpret_mem().insert(
-                    op.vaddr.idx(),
-                    op.value,
-                ));
+                assert(s2.interpret_mem() === s1.interpret_mem().insert(op.vaddr.idx(), op.value));
             }
         },
         None => {
@@ -221,7 +218,7 @@ proof fn os_map_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: M
 {
 }
 
-/// Theorem: The OS-level map operation refines the high-level map operation.
+/// Theorem. The OS-level map operation refines the high-level map operation.
 proof fn os_map_refines_hl_map(s1: OSMemoryState, s2: OSMemoryState, op: MapOp)
     requires
         s1.invariants(),
@@ -229,9 +226,9 @@ proof fn os_map_refines_hl_map(s1: OSMemoryState, s2: OSMemoryState, op: MapOp)
     ensures
         HlMemoryState::map(s1@, s2@, op),
 {
-    lemma_interpret_pt_mem_equals_all_mappings(s2);
     lemma_interpret_pt_mem_equals_all_mappings(s1);
-    // Post condition satified because interpret_pt_mem equals all_mappings (lemma).
+    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
     // Then updating pt_mem is equivalent to updating all_mappings.
 }
 
@@ -245,7 +242,7 @@ proof fn os_unmap_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op:
 {
 }
 
-/// Theorem: The OS-level unmap operation refines the high-level unmap operation.
+/// Theorem. The OS-level unmap operation refines the high-level unmap operation.
 proof fn os_unmap_refines_hl_unmap(s1: OSMemoryState, s2: OSMemoryState, op: UnmapOp)
     requires
         s1.invariants(),
@@ -253,10 +250,84 @@ proof fn os_unmap_refines_hl_unmap(s1: OSMemoryState, s2: OSMemoryState, op: Unm
     ensures
         HlMemoryState::unmap(s1@, s2@, op),
 {
-    lemma_interpret_pt_mem_equals_all_mappings(s2);
     lemma_interpret_pt_mem_equals_all_mappings(s1);
-    // Post condition satified because interpret_pt_mem equals all_mappings (lemma).
-    // Then updating pt_mem is equivalent to updating all_mappings.    
+    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
+    // Then updating pt_mem (OS-level) is equivalent to updating all_mappings (high-level).
+}
+
+/// Theorem. The OS-level query operation preserves the invariants.
+proof fn os_query_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: QueryOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::query(s1, s2, op),
+    ensures
+        s2.invariants(),
+{
+    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
+}
+
+/// Theorem. The OS-level query operation refines the high-level query operation.
+proof fn os_query_refines_hl_query(s1: OSMemoryState, s2: OSMemoryState, op: QueryOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::query(s1, s2, op),
+    ensures
+        HlMemoryState::query(s1@, s2@, op),
+{
+    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
+    // Then querying pt_mem (OS-level) is equivalent to querying all_mappings (high-level).
+}
+
+/// Theorem. The OS-level tlb fill operation preserves the invariants.
+proof fn os_tlb_fill_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: TLBFillOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::tlb_fill(s1, s2, op),
+    ensures
+        s2.invariants(),
+{
+}
+
+/// Theorem. The OS-level tlb fill operation refines the high-level identity operation.
+proof fn os_tlb_fill_refines_hl_id(s1: OSMemoryState, s2: OSMemoryState, op: TLBFillOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::tlb_fill(s1, s2, op),
+    ensures
+        HlMemoryState::id(s1@, s2@),
+{
+    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    // Post condition satisfied because TLB is the subset of the page table (lemma).
+    // Then updating TLB has no effect on the page table.
+}
+
+/// Theorem. The OS-level tlb evict operation preserves the invariants.
+proof fn os_tlb_evict_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: TLBEvictOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::tlb_evict(s1, s2, op),
+    ensures
+        s2.invariants(),
+{
+    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
+}
+
+/// Theorem. The OS-level tlb evict operation refines the high-level identity operation.
+proof fn os_tlb_evict_refines_hl_id(s1: OSMemoryState, s2: OSMemoryState, op: TLBEvictOp)
+    requires
+        s1.invariants(),
+        OSMemoryState::tlb_evict(s1, s2, op),
+    ensures
+        HlMemoryState::id(s1@, s2@),
+{
+    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    // Post condition satisfied because TLB is the subset of the page table (lemma).
+    // Then updating TLB has no effect on the page table.
 }
 
 } // verus!

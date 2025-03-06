@@ -263,6 +263,11 @@ impl HlMemoryState {
             },
         }
     }
+
+    /// State transition - Identity.
+    pub open spec fn id(s1: Self, s2: Self) -> bool {
+        s1 === s2
+    }
 }
 
 } // verus!

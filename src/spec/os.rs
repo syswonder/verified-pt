@@ -9,7 +9,10 @@ use vstd::prelude::*;
 use super::{
     addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     hl::{HlConstants, HlMemoryState},
-    mem::{Frame, FrameSize, MapOp, PageTableMem, QueryOp, ReadOp, UnmapOp, WriteOp},
+    mem::{
+        Frame, FrameSize, MapOp, PageTableMem, QueryOp, ReadOp, TLBEvictOp, TLBFillOp, UnmapOp,
+        WriteOp,
+    },
     nat_to_u64,
     s1pt::page_table_walk,
 };
@@ -136,8 +139,9 @@ impl OSMemoryState {
     /// All frames are within the physical memory bounds.
     pub open spec fn frames_within_pmem(self) -> bool {
         forall|base: VAddr, frame: Frame| #[trigger]
-            self.interpret_pt_mem().contains_pair(base, frame) ==> 
-                frame.base.offset(frame.size.as_nat()).0 <= self.mem.len()
+            self.interpret_pt_mem().contains_pair(base, frame) ==> frame.base.offset(
+                frame.size.as_nat(),
+            ).0 <= self.mem.len()
     }
 
     /// All frames are 8-byte aligned.
@@ -296,36 +300,6 @@ impl OSMemoryState {
         }
     }
 
-    /// State transition - TLB fill.
-    pub open spec fn tlb_fill(s1: Self, s2: Self, vaddr: VAddr, frame: Frame) -> bool {
-        // Page table must contain the mapping
-        &&& s1.interpret_pt_mem().contains_pair(
-            vaddr,
-            frame,
-        )
-        // Insert into tlb
-        &&& s2.tlb === s1.tlb.insert(
-            vaddr,
-            frame,
-        )
-        // Memory and page table should not be updated
-        &&& s1.mem === s2.mem
-        &&& s1.pt_mem === s2.pt_mem
-    }
-
-    /// State transition - TLB eviction.
-    pub open spec fn tlb_evict(s1: Self, s2: Self, vaddr: VAddr) -> bool {
-        // TLB must contain the mapping
-        &&& s1.tlb.contains_key(vaddr)
-        // Remove from tlb
-        &&& s2.tlb === s1.tlb.remove(
-            vaddr,
-        )
-        // Memory and page table should not be updated
-        &&& s1.mem === s2.mem
-        &&& s1.pt_mem === s2.pt_mem
-    }
-
     /// State transition - map a virtual address to a physical frame.
     pub open spec fn map(s1: Self, s2: Self, op: MapOp) -> bool {
         // Memory should not be updated
@@ -354,10 +328,7 @@ impl OSMemoryState {
         }
         // s2.tlb is a submap of s1.tlb
         &&& forall|base: VAddr, frame: Frame|
-        s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(
-            base,
-            frame,
-        )
+            s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(base, frame)
     }
 
     /// State transition - unmap a virtual address.
@@ -387,10 +358,7 @@ impl OSMemoryState {
         &&& !s2.tlb.contains_key(op.vaddr)
         // s2.tlb is a submap of s1.tlb
         &&& forall|base: VAddr, frame: Frame|
-        s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(
-            base,
-            frame,
-        )
+            s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(base, frame)
     }
 
     /// State transition - page table query.
@@ -415,6 +383,39 @@ impl OSMemoryState {
                 !s1.has_mapping_for(op.vaddr)
             },
         }
+        // s2.tlb is a submap of s1.tlb
+        &&& forall|base: VAddr, frame: Frame|
+            s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(base, frame)
+    }
+
+    /// State transition - TLB fill.
+    pub open spec fn tlb_fill(s1: Self, s2: Self, op: TLBFillOp) -> bool {
+        // Page table must contain the mapping
+        &&& s1.interpret_pt_mem().contains_pair(
+            op.vaddr,
+            op.frame,
+        )
+        // Insert into tlb
+        &&& s2.tlb === s1.tlb.insert(
+            op.vaddr,
+            op.frame,
+        )
+        // Memory and page table should not be updated
+        &&& s1.mem === s2.mem
+        &&& s1.pt_mem === s2.pt_mem
+    }
+
+    /// State transition - TLB eviction.
+    pub open spec fn tlb_evict(s1: Self, s2: Self, op: TLBEvictOp) -> bool {
+        // TLB must contain the mapping
+        &&& s1.tlb.contains_key(op.vaddr)
+        // Remove from tlb
+        &&& s2.tlb === s1.tlb.remove(
+            op.vaddr,
+        )
+        // Memory and page table should not be updated
+        &&& s1.mem === s2.mem
+        &&& s1.pt_mem === s2.pt_mem
     }
 }
 
