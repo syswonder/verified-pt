@@ -1,13 +1,13 @@
-/// Hardware specification.
-/// 
-/// This module defines the abstract hardware state and its transition behaviors for memory 
-/// management. The hardware state includes physical memory, a page table, and a Translation 
-/// Lookaside Buffer (TLB). The module specifies how the hardware behaves during memory 
-/// operations, TLB management, and page table updates.
-/// 
-/// Assumption. The hardware behavior refines the hardware specification, ensuring correctness
-/// in memory translations. The hardware specification serves as the foundation for verifying
-/// the correctness of the memory management system.
+//! Hardware specification.
+//!
+//! This module defines the abstract hardware state and its transition behaviors for memory
+//! management. The hardware state includes physical memory, a page table, and a Translation
+//! Lookaside Buffer (TLB). The module specifies how the hardware behaves during memory
+//! operations, TLB management, and page table updates.
+//!
+//! Assumption. The hardware behavior refines the hardware specification, ensuring correctness
+//! in memory translations. The hardware specification serves as the foundation for verifying
+//! the correctness of the memory management system.
 use vstd::prelude::*;
 
 use super::{
@@ -19,7 +19,7 @@ use super::{
 
 verus! {
 
-/// Abstract state managed by hardware. 
+/// Abstract state managed by hardware.
 pub struct HardwareState {
     /// 8-byte-indexed physical memory.
     pub mem: Seq<nat>,

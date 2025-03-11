@@ -3,7 +3,7 @@ use vstd::prelude::*;
 
 use super::lemmas::*;
 use crate::spec::{
-    addr::VAddr,
+    addr::{PAddr, VAddr, VIdx},
     frame::Frame,
     high_level::HighLevelState,
     low_level::LowLevelState,
@@ -80,27 +80,72 @@ proof fn lemma_at_most_one_mapping_for_vaddr(st: LowLevelState, vaddr: VAddr)
                 &&& base1 != base2
             };
         assert(VAddr::overlap(base1, frame1.size.as_nat(), base2, frame2.size.as_nat()));
+        assert(false);
     }
 }
 
 /// Lemma. If there is no overlap in the physical memory space, then 2 different virtual
-/// addresses cannot map to the same physical address.
-proof fn lemma_different_paddrs_for_different_vaddrs(
-    st: LowLevelState,
-    vaddr1: VAddr,
-    vaddr2: VAddr,
-)
+/// indexes cannot map to the same physical index.
+proof fn lemma_different_pidxs_for_different_vidxs(st: LowLevelState, vidx1: VIdx, vidx2: VIdx)
     requires
         st.mappings_nonoverlap_in_pmem(),
-        vaddr1 != vaddr2,
+        st.mappings_aligned(),
+        vidx1 != vidx2,
     ensures
         forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
             {
                 &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
-                &&& #[trigger] vaddr1.within(base1, frame1.size.as_nat())
+                &&& vidx1.addr().within(base1, frame1.size.as_nat())
                 &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
-                &&& #[trigger] vaddr2.within(base2, frame2.size.as_nat())
-            } ==> vaddr1.map(base1, frame1.base) != vaddr2.map(base2, frame2.base),
+                &&& vidx2.addr().within(base2, frame2.size.as_nat())
+            } ==> vidx1.addr().map(base1, frame1.base).idx() != vidx2.addr().map(
+                base2,
+                frame2.base,
+            ).idx(),
+{
+    if exists|base1, frame1, base2, frame2|
+        {
+            &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
+            &&& vidx1.addr().within(base1, frame1.size.as_nat())
+            &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
+            &&& vidx2.addr().within(base2, frame2.size.as_nat())
+            &&& vidx1.addr().map(base1, frame1.base).idx() == vidx2.addr().map(
+                base2,
+                frame2.base,
+            ).idx()
+        } {
+        // Proof by contradiction.
+        let (base1, frame1, base2, frame2): (VAddr, Frame, VAddr, Frame) = choose|
+            base1,
+            frame1,
+            base2,
+            frame2,
+        |
+            {
+                &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
+                &&& vidx1.addr().within(base1, frame1.size.as_nat())
+                &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
+                &&& vidx2.addr().within(base2, frame2.size.as_nat())
+                &&& vidx1.addr().map(base1, frame1.base).idx() == vidx2.addr().map(
+                    base2,
+                    frame2.base,
+                ).idx()
+            };
+        assert(PAddr::overlap(
+            frame1.base,
+            frame1.size.as_nat(),
+            frame2.base,
+            frame2.size.as_nat(),
+        ));
+    }
+}
+
+/// Lemma. Hardware state is low-level state.
+proof fn lemma_hardware_state_is_low_level_state(st: LowLevelState)
+    ensures
+        st.mem === st.hw_state().mem,
+        st.pt === st.hw_state().pt,
+        st.tlb === st.hw_state().tlb,
 {
 }
 
@@ -193,13 +238,44 @@ proof fn ll_write_refines_hl_write(s1: LowLevelState, s2: LowLevelState, op: Wri
 
     match op.mapping {
         Some((base, frame)) => {
+            let vidx = op.vaddr.idx();
             let pidx = op.vaddr.map(base, frame.base).idx();
+
             if pidx.0 < s1.mem.len() && frame.attr.writable && frame.attr.user_accessible {
                 // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
                 assert(s1.all_mappings().contains_pair(base, frame));
                 assert(op.vaddr.within(base, frame.size.as_nat()));
-                // Value updated in the physical memory is the same as in the interpreted memory,
-                // because there is only one mapping for `op.vaddr` (lemma).
+
+                // Prove that the interpreted memory is updated correctly.
+                assert forall|vidx2: VIdx|
+                    s2.interpret_mem().contains_key(vidx2) && s1.interpret_mem().insert(
+                        vidx,
+                        op.value,
+                    ).contains_key(vidx2) implies #[trigger] s2.interpret_mem()[vidx2]
+                    == s1.interpret_mem().insert(vidx, op.value)[vidx2] by {
+                    if vidx2 == vidx {
+                        // Prove that value at `vidx` is updated.
+                        //
+                        // Value updated in the physical memory is the same as in the interpreted memory,
+                        // because there is only one mapping for `op.vaddr` (lemma).
+                        assert(s2.interpret_mem()[vidx] == op.value);
+                    } else {
+                        // Prove that values at other indices are unchanged.
+                        let (base2, frame2) = choose|base2: VAddr, frame2: Frame|
+                            {
+                                &&& #[trigger] s1.all_mappings().contains_pair(base2, frame2)
+                                &&& vidx2.addr().within(base2, frame2.size.as_nat())
+                                &&& vidx2.addr().map(base2, frame2.base).idx().0 < s1.mem.len()
+                            };
+                        let pidx2 = vidx2.addr().map(base2, frame2.base).idx();
+                        // Only `interpret_mem()[vidx]` and `mem[pidx]` are updated.
+                        // 
+                        // Lemma ensures that `pidx` and `pidx2` are different for different `vidx` and `vidx2`.
+                        // Thus `mem[pidx2]` is not updated.
+                        lemma_different_pidxs_for_different_vidxs(s1, vidx, vidx2);
+                        assert(s1.mem[pidx2.as_int()] == s2.mem[pidx2.as_int()]);
+                    }
+                }
                 assert(s2.interpret_mem() === s1.interpret_mem().insert(op.vaddr.idx(), op.value));
             }
         },
@@ -218,6 +294,20 @@ proof fn ll_map_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: M
     ensures
         s2.invariants(),
 {
+    lemma_hardware_state_is_low_level_state(s1);
+    assert(forall|base, frame|
+        s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(base, frame));
+    assert(forall|base, frame|
+        s1.pt.interpret().contains_pair(base, frame) ==> s2.pt.interpret().contains_pair(
+            base,
+            frame,
+        ));
+    assert(s2.tlb_is_submap_of_pt());
+
+    assert(s2.mappings_nonoverlap_in_pmem());
+    assert(s2.mappings_nonoverlap_in_vmem());
+    assert(s2.frames_within_pmem());
+    assert(s2.mappings_aligned());
 }
 
 /// Theorem. The low-level map operation refines the high-level map operation.
