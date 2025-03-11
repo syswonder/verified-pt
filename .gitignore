@@ -1,3 +1,5 @@
 /target
 
 /.verus-log
+
+/.verus-solver-log

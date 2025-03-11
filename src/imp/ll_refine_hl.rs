@@ -1,65 +1,66 @@
-//! Prove the OS state machine refines the high-level state machine.
+//! Prove the low-level state machine refines the high-level state machine.
+use vstd::prelude::*;
+
 use super::lemmas::*;
 use crate::spec::{
     addr::VAddr,
-    hl::HlMemoryState,
-    mem::Frame,
+    frame::Frame,
+    high_level::HighLevelState,
+    low_level::LowLevelState,
     op::{MapOp, QueryOp, ReadOp, TLBEvictOp, TLBFillOp, UnmapOp, WriteOp},
-    os::OSMemoryState,
 };
-use vstd::prelude::*;
 
 verus! {
 
 /// Lemma. If the TLB is a subset of the page table, then the interpreted page table
-/// memory is equal to the all mappings (page table & TLB).
-proof fn lemma_interpret_pt_mem_equals_all_mappings(st: OSMemoryState)
+/// is equal to the all mappings (page table & TLB).
+proof fn lemma_interpret_pt_equals_all_mappings(st: LowLevelState)
     requires
         st.tlb_is_submap_of_pt(),
     ensures
-        st.interpret_pt_mem() === st.all_mappings(),
+        st.pt.interpret() === st.all_mappings(),
 {
-    let pt_mem = st.interpret_pt_mem();
+    let interp_pt = st.pt.interpret();
     let tlb = st.tlb;
     let all_mappings = st.all_mappings();
 
-    // 1. Any mapping in `all_mappings` is also in `pt_mem`.
+    // 1. Any mapping in `all_mappings` is also in `interp_pt`.
     assert(forall|addr, frame| #[trigger]
-        all_mappings.contains_pair(addr, frame) ==> pt_mem.contains_pair(addr, frame));
+        all_mappings.contains_pair(addr, frame) ==> interp_pt.contains_pair(addr, frame));
 
-    // 2. Any mapping in `pt_mem` is also in `all_mappings`.
+    // 2. Any mapping in `interp_pt` is also in `all_mappings`.
     assert forall|addr, frame| #[trigger]
-        pt_mem.contains_pair(addr, frame) implies all_mappings.contains_pair(addr, frame) by {
+        interp_pt.contains_pair(addr, frame) implies all_mappings.contains_pair(addr, frame) by {
         if tlb.contains_key(addr) {
             assert(all_mappings.contains_pair(addr, tlb[addr]));
         } else {
-            assert(all_mappings.contains_pair(addr, pt_mem[addr]));
+            assert(all_mappings.contains_pair(addr, interp_pt[addr]));
         }
     }
 
     // 3. The two maps are equal.
-    lemma_map_eq_pair(pt_mem, all_mappings);
+    lemma_map_eq_pair(interp_pt, all_mappings);
 }
 
 /// Lemma. If there is no overlap in the virtual memory space, then there is at most
 /// one mapping containing a virtual address.
-proof fn lemma_at_most_one_mapping_for_vaddr(st: OSMemoryState, vaddr: VAddr)
+proof fn lemma_at_most_one_mapping_for_vaddr(st: LowLevelState, vaddr: VAddr)
     requires
         st.mappings_nonoverlap_in_vmem(),
     ensures
         forall|base1, frame1, base2, frame2|
             {
-                &&& #[trigger] st.interpret_pt_mem().contains_pair(base1, frame1)
+                &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
                 &&& vaddr.within(base1, frame1.size.as_nat())
-                &&& #[trigger] st.interpret_pt_mem().contains_pair(base2, frame2)
+                &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
                 &&& vaddr.within(base2, frame2.size.as_nat())
             } ==> base1 == base2,
 {
     if exists|base1, frame1, base2, frame2|
         {
-            &&& #[trigger] st.interpret_pt_mem().contains_pair(base1, frame1)
+            &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
             &&& vaddr.within(base1, frame1.size.as_nat())
-            &&& #[trigger] st.interpret_pt_mem().contains_pair(base2, frame2)
+            &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
             &&& vaddr.within(base2, frame2.size.as_nat())
             &&& base1 != base2
         } {
@@ -72,9 +73,9 @@ proof fn lemma_at_most_one_mapping_for_vaddr(st: OSMemoryState, vaddr: VAddr)
             frame2,
         |
             {
-                &&& #[trigger] st.interpret_pt_mem().contains_pair(base1, frame1)
+                &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
                 &&& vaddr.within(base1, frame1.size.as_nat())
-                &&& #[trigger] st.interpret_pt_mem().contains_pair(base2, frame2)
+                &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
                 &&& vaddr.within(base2, frame2.size.as_nat())
                 &&& base1 != base2
             };
@@ -85,7 +86,7 @@ proof fn lemma_at_most_one_mapping_for_vaddr(st: OSMemoryState, vaddr: VAddr)
 /// Lemma. If there is no overlap in the physical memory space, then 2 different virtual
 /// addresses cannot map to the same physical address.
 proof fn lemma_different_paddrs_for_different_vaddrs(
-    st: OSMemoryState,
+    st: LowLevelState,
     vaddr1: VAddr,
     vaddr2: VAddr,
 )
@@ -95,16 +96,16 @@ proof fn lemma_different_paddrs_for_different_vaddrs(
     ensures
         forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
             {
-                &&& #[trigger] st.interpret_pt_mem().contains_pair(base1, frame1)
+                &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
                 &&& #[trigger] vaddr1.within(base1, frame1.size.as_nat())
-                &&& #[trigger] st.interpret_pt_mem().contains_pair(base2, frame2)
+                &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
                 &&& #[trigger] vaddr2.within(base2, frame2.size.as_nat())
             } ==> vaddr1.map(base1, frame1.base) != vaddr2.map(base2, frame2.base),
 {
 }
 
-/// Theorem. The OS-level init state implies the invariants.
-proof fn os_init_implies_invariants(st: OSMemoryState)
+/// Theorem. The low-level init state implies the invariants.
+proof fn ll_init_implies_invariants(st: LowLevelState)
     requires
         st.init(),
     ensures
@@ -112,8 +113,8 @@ proof fn os_init_implies_invariants(st: OSMemoryState)
 {
 }
 
-/// Theorem. The OS-level init state refines the high-level init state.
-proof fn os_init_refines_hl_init(st: OSMemoryState)
+/// Theorem. The low-level init state refines the high-level init state.
+proof fn ll_init_refines_hl_init(st: LowLevelState)
     requires
         st.tlb_is_submap_of_pt(),
         st.init(),
@@ -126,26 +127,26 @@ proof fn os_init_refines_hl_init(st: OSMemoryState)
     assert(st.interpret_mem() === Map::empty());
 }
 
-/// Theorem. The OS-level read operation preserves the invariants.
-proof fn os_read_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: ReadOp)
+/// Theorem. The low-level read operation preserves the invariants.
+proof fn ll_read_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: ReadOp)
     requires
         s1.invariants(),
-        OSMemoryState::read(s1, s2, op),
+        LowLevelState::read(s1, s2, op),
     ensures
         s2.invariants(),
 {
 }
 
-/// Theorem. The OS-level read operation refines the high-level read operation.
-proof fn os_read_refines_hl_read(s1: OSMemoryState, s2: OSMemoryState, op: ReadOp)
+/// Theorem. The low-level read operation refines the high-level read operation.
+proof fn ll_read_refines_hl_read(s1: LowLevelState, s2: LowLevelState, op: ReadOp)
     requires
         s1.invariants(),
-        OSMemoryState::read(s1, s2, op),
+        LowLevelState::read(s1, s2, op),
     ensures
-        HlMemoryState::read(s1@, s2@, op),
+        HighLevelState::read(s1@, s2@, op),
 {
     // Lemmas satisfied by the invariants.
-    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    lemma_interpret_pt_equals_all_mappings(s1);
     lemma_at_most_one_mapping_for_vaddr(s1, op.vaddr);
 
     match op.mapping {
@@ -167,27 +168,27 @@ proof fn os_read_refines_hl_read(s1: OSMemoryState, s2: OSMemoryState, op: ReadO
     }
 }
 
-/// Theorem. The OS-level write operation preserves the invariants.
-proof fn os_write_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: WriteOp)
+/// Theorem. The low-level write operation preserves the invariants.
+proof fn ll_write_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: WriteOp)
     requires
         s1.invariants(),
-        OSMemoryState::write(s1, s2, op),
+        LowLevelState::write(s1, s2, op),
     ensures
         s2.invariants(),
 {
-    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
+    assert(s1.pt.interpret() === s2.pt.interpret());
 }
 
-/// Theorem. The OS-level write operation refines the high-level write operation.
-proof fn os_write_refines_hl_write(s1: OSMemoryState, s2: OSMemoryState, op: WriteOp)
+/// Theorem. The low-level write operation refines the high-level write operation.
+proof fn ll_write_refines_hl_write(s1: LowLevelState, s2: LowLevelState, op: WriteOp)
     requires
         s1.invariants(),
-        OSMemoryState::write(s1, s2, op),
+        LowLevelState::write(s1, s2, op),
     ensures
-        HlMemoryState::write(s1@, s2@, op),
+        HighLevelState::write(s1@, s2@, op),
 {
     // Lemmas satisfied by the invariants.
-    lemma_interpret_pt_mem_equals_all_mappings(s1);
+    lemma_interpret_pt_equals_all_mappings(s1);
     lemma_at_most_one_mapping_for_vaddr(s2, op.vaddr);
 
     match op.mapping {
@@ -209,124 +210,124 @@ proof fn os_write_refines_hl_write(s1: OSMemoryState, s2: OSMemoryState, op: Wri
     }
 }
 
-/// Theorem. The OS-level map operation preserves the invariants.
-proof fn os_map_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: MapOp)
+/// Theorem. The low-level map operation preserves the invariants.
+proof fn ll_map_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: MapOp)
     requires
         s1.invariants(),
-        OSMemoryState::map(s1, s2, op),
+        LowLevelState::map(s1, s2, op),
     ensures
         s2.invariants(),
 {
 }
 
-/// Theorem. The OS-level map operation refines the high-level map operation.
-proof fn os_map_refines_hl_map(s1: OSMemoryState, s2: OSMemoryState, op: MapOp)
+/// Theorem. The low-level map operation refines the high-level map operation.
+proof fn ll_map_refines_hl_map(s1: LowLevelState, s2: LowLevelState, op: MapOp)
     requires
         s1.invariants(),
-        OSMemoryState::map(s1, s2, op),
+        LowLevelState::map(s1, s2, op),
     ensures
-        HlMemoryState::map(s1@, s2@, op),
+        HighLevelState::map(s1@, s2@, op),
 {
-    lemma_interpret_pt_mem_equals_all_mappings(s1);
-    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    lemma_interpret_pt_equals_all_mappings(s1);
+    lemma_interpret_pt_equals_all_mappings(s2);
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
     // Then updating pt_mem is equivalent to updating all_mappings.
 }
 
-/// Theorem. The OS-level unmap operation preserves the invariants.
-proof fn os_unmap_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: UnmapOp)
+/// Theorem. The low-level unmap operation preserves the invariants.
+proof fn ll_unmap_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: UnmapOp)
     requires
         s1.invariants(),
-        OSMemoryState::unmap(s1, s2, op),
+        LowLevelState::unmap(s1, s2, op),
     ensures
         s2.invariants(),
 {
 }
 
-/// Theorem. The OS-level unmap operation refines the high-level unmap operation.
-proof fn os_unmap_refines_hl_unmap(s1: OSMemoryState, s2: OSMemoryState, op: UnmapOp)
+/// Theorem. The low-level unmap operation refines the high-level unmap operation.
+proof fn ll_unmap_refines_hl_unmap(s1: LowLevelState, s2: LowLevelState, op: UnmapOp)
     requires
         s1.invariants(),
-        OSMemoryState::unmap(s1, s2, op),
+        LowLevelState::unmap(s1, s2, op),
     ensures
-        HlMemoryState::unmap(s1@, s2@, op),
+        HighLevelState::unmap(s1@, s2@, op),
 {
-    lemma_interpret_pt_mem_equals_all_mappings(s1);
-    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    lemma_interpret_pt_equals_all_mappings(s1);
+    lemma_interpret_pt_equals_all_mappings(s2);
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
-    // Then updating pt_mem (OS-level) is equivalent to updating all_mappings (high-level).
+    // Then updating pt_mem (low-level) is equivalent to updating all_mappings (high-level).
 }
 
-/// Theorem. The OS-level query operation preserves the invariants.
-proof fn os_query_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: QueryOp)
+/// Theorem. The low-level query operation preserves the invariants.
+proof fn ll_query_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: QueryOp)
     requires
         s1.invariants(),
-        OSMemoryState::query(s1, s2, op),
+        LowLevelState::query(s1, s2, op),
     ensures
         s2.invariants(),
 {
-    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
+    assert(s1.pt.interpret() === s2.pt.interpret());
 }
 
-/// Theorem. The OS-level query operation refines the high-level query operation.
-proof fn os_query_refines_hl_query(s1: OSMemoryState, s2: OSMemoryState, op: QueryOp)
+/// Theorem. The low-level query operation refines the high-level query operation.
+proof fn ll_query_refines_hl_query(s1: LowLevelState, s2: LowLevelState, op: QueryOp)
     requires
         s1.invariants(),
-        OSMemoryState::query(s1, s2, op),
+        LowLevelState::query(s1, s2, op),
     ensures
-        HlMemoryState::query(s1@, s2@, op),
+        HighLevelState::query(s1@, s2@, op),
 {
-    lemma_interpret_pt_mem_equals_all_mappings(s1);
-    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    lemma_interpret_pt_equals_all_mappings(s1);
+    lemma_interpret_pt_equals_all_mappings(s2);
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
-    // Then querying pt_mem (OS-level) is equivalent to querying all_mappings (high-level).
+    // Then querying pt_mem (low-level) is equivalent to querying all_mappings (high-level).
 }
 
-/// Theorem. The OS-level tlb fill operation preserves the invariants.
-proof fn os_tlb_fill_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: TLBFillOp)
+/// Theorem. The low-level tlb fill operation preserves the invariants.
+proof fn ll_tlb_fill_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: TLBFillOp)
     requires
         s1.invariants(),
-        OSMemoryState::tlb_fill(s1, s2, op),
+        LowLevelState::tlb_fill(s1, s2, op),
     ensures
         s2.invariants(),
 {
 }
 
-/// Theorem. The OS-level tlb fill operation refines the high-level identity operation.
-proof fn os_tlb_fill_refines_hl_id(s1: OSMemoryState, s2: OSMemoryState, op: TLBFillOp)
+/// Theorem. The low-level tlb fill operation refines the high-level identity operation.
+proof fn ll_tlb_fill_refines_hl_id(s1: LowLevelState, s2: LowLevelState, op: TLBFillOp)
     requires
         s1.invariants(),
-        OSMemoryState::tlb_fill(s1, s2, op),
+        LowLevelState::tlb_fill(s1, s2, op),
     ensures
-        HlMemoryState::id(s1@, s2@),
+        HighLevelState::id(s1@, s2@),
 {
-    lemma_interpret_pt_mem_equals_all_mappings(s1);
-    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    lemma_interpret_pt_equals_all_mappings(s1);
+    lemma_interpret_pt_equals_all_mappings(s2);
     // Post condition satisfied because TLB is the subset of the page table (lemma).
     // Then updating TLB has no effect on the page table.
 }
 
-/// Theorem. The OS-level tlb evict operation preserves the invariants.
-proof fn os_tlb_evict_preserves_invariants(s1: OSMemoryState, s2: OSMemoryState, op: TLBEvictOp)
+/// Theorem. The low-level tlb evict operation preserves the invariants.
+proof fn ll_tlb_evict_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: TLBEvictOp)
     requires
         s1.invariants(),
-        OSMemoryState::tlb_evict(s1, s2, op),
+        LowLevelState::tlb_evict(s1, s2, op),
     ensures
         s2.invariants(),
 {
-    assert(s1.interpret_pt_mem() === s2.interpret_pt_mem());
+    assert(s1.pt.interpret() === s2.pt.interpret());
 }
 
-/// Theorem. The OS-level tlb evict operation refines the high-level identity operation.
-proof fn os_tlb_evict_refines_hl_id(s1: OSMemoryState, s2: OSMemoryState, op: TLBEvictOp)
+/// Theorem. The low-level tlb evict operation refines the high-level identity operation.
+proof fn ll_tlb_evict_refines_hl_id(s1: LowLevelState, s2: LowLevelState, op: TLBEvictOp)
     requires
         s1.invariants(),
-        OSMemoryState::tlb_evict(s1, s2, op),
+        LowLevelState::tlb_evict(s1, s2, op),
     ensures
-        HlMemoryState::id(s1@, s2@),
+        HighLevelState::id(s1@, s2@),
 {
-    lemma_interpret_pt_mem_equals_all_mappings(s1);
-    lemma_interpret_pt_mem_equals_all_mappings(s2);
+    lemma_interpret_pt_equals_all_mappings(s1);
+    lemma_interpret_pt_equals_all_mappings(s2);
     // Post condition satisfied because TLB is the subset of the page table (lemma).
     // Then updating TLB has no effect on the page table.
 }

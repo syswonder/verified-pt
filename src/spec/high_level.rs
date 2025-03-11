@@ -9,40 +9,40 @@
 //!
 //! This specification represents the proof target. Our implementation running
 //! in the intended environment should refine it. This is demonstrated in part
-//! by the proof that the OS-level state machine refines this specification.
+//! by the proof that the low-level state machine refines this specification.
 use vstd::prelude::*;
 
 use super::{
     addr::{PAddr, VAddr, VIdx, WORD_SIZE},
-    mem::{Frame, FrameSize},
+    frame::{Frame, FrameSize},
     op::{MapOp, QueryOp, ReadOp, UnmapOp, WriteOp},
 };
 
 verus! {
 
 /// High level (abstract) memory state.
-pub struct HlMemoryState {
+pub struct HighLevelState {
     /// 8-byte-indexed virtual memory.
     ///
     /// We use index rather than address. Addresses that are not aligned to 8-byte boundaries
     /// should not be used to access a value, while indexes don't face this issue.
     pub mem: Map<VIdx, nat>,
-    /// Mappings from virtual address to physical frames (virtual page base addr -> physical frame).
+    /// Mappings from virtual address to physical frames.
     ///
     /// The key must be the base address of a virtual page i.e. virtual range [`key`, `key + frame.size`)
     /// must be mapped to the same physical frame.
     pub mappings: Map<VAddr, Frame>,
     /// Constants.
-    pub constants: HlConstants,
+    pub constants: HighLevelConstants,
 }
 
 /// High-level (abstract) memory state constants.
-pub struct HlConstants {
+pub struct HighLevelConstants {
     /// Physical memory size (in bytes).
     pub pmem_size: nat,
 }
 
-impl HlMemoryState {
+impl HighLevelState {
     /// Virtual memory domain covered by `self.mappings`.
     pub open spec fn mem_domain_covered_by_mappings(self) -> Set<VIdx> {
         Set::new(
@@ -94,7 +94,7 @@ impl HlMemoryState {
 }
 
 /// State transition specifications.
-impl HlMemoryState {
+impl HighLevelState {
     /// Init state. Empty memory and no mappings.
     pub open spec fn init(self) -> bool {
         &&& self.mem === Map::empty()

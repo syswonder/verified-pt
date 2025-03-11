@@ -1,12 +1,179 @@
-//! Stage-1 VMSAv8-64 page table walk functions.
+//! Stage-1 VMSAv8-64 page table specification.
 use vstd::prelude::*;
 
 use super::{
-    addr::PAddr,
-    mem::{Frame, FrameAttr, FrameSize, PageTableMem},
+    addr::{PAddr, PAddrExec, VAddr},
+    frame::{Frame, FrameAttr, FrameExec, FrameSize},
+    nat_to_u64,
 };
 
 verus! {
+
+/// Stage-1 VMSAv8-64 page table.
+pub struct S1PageTable {
+    /// Root address.
+    pub root: PAddrExec,
+    /// Frames allocated for page table.
+    pub frames: Set<FrameExec>,
+}
+
+impl S1PageTable {
+    /// Physical address of the root page table.
+    pub open spec fn root(self) -> u64 {
+        0
+    }
+
+    /// Read value at physical address `base + idx * WORD_SIZE`
+    pub fn read(&self, base: u64, idx: u64) -> (res: u64) {
+        0
+    }
+
+    /// Write `value` to physical address `base + idx * WORD_SIZE`
+    pub fn write(&mut self, base: u64, idx: u64, value: u64) {
+        // TODO: write to memory
+    }
+
+    /// Allocate a new physical frame.
+    pub open spec fn alloc(self, size: FrameSize) -> (frame: Frame) {
+        // TODO: allocate a new frame
+        Frame {
+            base: PAddr(0),
+            size,
+            attr: FrameAttr {
+                readable: true,
+                writable: true,
+                executable: true,
+                user_accessible: true,
+            },
+        }
+    }
+
+    /// Deallocate a physical frame.
+    pub fn dealloc(&mut self, frame: Frame) {
+        // TODO: deallocate a frame
+    }
+
+    pub open spec fn frame_view(self, frame: Frame) -> Seq<nat>;
+
+    /// Specification of read operation.
+    pub open spec fn spec_read(&self, base: u64, addr: u64) -> u64 {
+        0
+    }
+
+    /// Interpret as mappings.
+    pub open spec fn interpret(self) -> Map<VAddr, Frame> {
+        let max_vaddr: nat = 0x8000_0000;
+        Map::new(
+            |addr: VAddr|
+                addr.0 < max_vaddr && exists|frame: Frame| #[trigger]
+                    self.walk(nat_to_u64(addr.0), frame),
+            |addr: VAddr| choose|frame: Frame| #[trigger] self.walk(nat_to_u64(addr.0), frame),
+        )
+    }
+
+    /// Hardware behavior of a 4-level page table walk process.
+    ///
+    /// This function simulates the MMU's page table walk process and checks if the given
+    /// virtual address `addr` maps to the specified `frame` with the correct flags.
+    ///
+    /// Given a `PageTableMem` `pt_mem`, the predicate is true for those `addr` and `frame` where the
+    /// MMU's page table walk arrives at an entry mapping the frame `frame`, and the `pte.flags`
+    /// must reflect the properties along the translation path.
+    pub open spec fn walk(self, addr: u64, frame: Frame) -> bool {
+        match self.walk_level(addr, 4, self.root(), true, false, false) {
+            Some(reached) => {
+                &&& reached.base == frame.base
+                &&& reached.size == frame.size
+                &&& reached.attr == frame.attr
+            },
+            None => false,
+        }
+    }
+
+    /// Recursive helper for page table walk.
+    pub closed spec fn walk_level(
+        self,
+        addr: u64,
+        level: nat,
+        table_addr: u64,
+        user_ok: bool,
+        uxn_accum: bool,
+        pxn_accum: bool,
+    ) -> Option<Frame>
+        decreases level,
+    {
+        if level == 0 {
+            None
+        } else {
+            let level_shift = 39 - level * 9;
+            let index = (addr >> level_shift) & 0x1FF;
+            let pte = PTEntry(self.spec_read(table_addr, index))@;
+            match pte {
+                GhostPTEntry::Table(desc) => {
+                    let new_user_ok = user_ok && desc.ap_user;
+                    let new_uxn = uxn_accum || desc.uxn;
+                    let new_pxn = pxn_accum || desc.pxn;
+                    let next_table = desc.addr << 12;
+                    self.walk_level(
+                        addr,
+                        (level - 1) as nat,
+                        next_table,
+                        new_user_ok,
+                        new_uxn,
+                        new_pxn,
+                    )
+                },
+                GhostPTEntry::Page(page_desc) => {
+                    if level > 3 && page_desc.non_block {
+                        None  // Block must be at level 1-3, page only at level 1
+
+                    } else {
+                        Some(
+                            Self::compute_frame(
+                                page_desc,
+                                level,
+                                addr,
+                                user_ok,
+                                uxn_accum,
+                                pxn_accum,
+                            ),
+                        )
+                    }
+                },
+                GhostPTEntry::Empty => None,
+            }
+        }
+    }
+
+    /// Compute physical address and flags for the reached frame.
+    spec fn compute_frame(
+        entry: GhostPageDescriptor,
+        level: nat,
+        addr: u64,
+        user_ok: bool,
+        uxn_accum: bool,
+        pxn_accum: bool,
+    ) -> Frame {
+        let size = if level == 3 {
+            FrameSize::Size1G
+        } else if level == 2 {
+            FrameSize::Size2M
+        } else {
+            FrameSize::Size4K
+        };
+        let offset_mask = (size.as_usize() - 1) as u64;
+        let base = PAddr(((entry.addr << 12) | (addr & offset_mask)) as nat);
+        let attr = FrameAttr {
+            readable: true,
+            writable: entry.ap_rw,
+            // NOTE: VMSA-v8 differentiates between user-executable and kernel-executable
+            // We don't have this distinction yet, so we just use the user-executable bit
+            executable: !(uxn_accum || entry.xn),
+            user_accessible: user_ok && entry.ap_user,
+        };
+        Frame { base, size, attr }
+    }
+}
 
 /// Abstract stage 1 VMSAv8-64 Table descriptor.
 pub ghost struct GhostTableDescriptor {
@@ -62,11 +229,8 @@ pub ghost enum GhostPTEntry {
     Empty,
 }
 
-/// Concrete page table entry.
-pub struct PTEntry {
-    /// The 64-bit value of the page table entry.
-    pub value: u64,
-}
+/// Concrete page table entry, wrapping a 64-bit value.
+pub struct PTEntry(pub u64);
 
 impl PTEntry {
     /// Maps the concrete page table entry to its abstract representation.
@@ -76,7 +240,7 @@ impl PTEntry {
     /// - `GhostPTEntry::Page` if the entry is a valid page/block descriptor.
     /// - `GhostPTEntry::Empty` if the entry is invalid or empty.
     pub open spec fn view(self) -> GhostPTEntry {
-        let value = self.value;
+        let value = self.0;
         if value & 0x1 == 0 {
             GhostPTEntry::Empty
         } else {
@@ -115,123 +279,6 @@ impl PTEntry {
                 )
             }
         }
-    }
-}
-
-/// Reads a page table entry from the page table memory.
-///
-/// # Parameters
-/// - `pt_mem`: The page table memory to read from.
-/// - `addr`: The address of the page table entry to read.
-///
-/// # Returns
-/// - The abstract representation of the page table entry (`GhostPTEntry`).
-pub open spec fn read_pt_entry(pt_mem: PageTableMem, addr: u64) -> GhostPTEntry {
-    PTEntry { value: pt_mem.spec_read(addr) }@
-}
-
-/// Extract index bits from virtual address for given level (0-3)
-spec fn get_index(addr: u64, level: nat) -> u64 {
-    let level_shift = 39 - level * 9;
-    (addr >> level_shift) & 0x1FF
-}
-
-/// Compute physical address and flags for the reached frame
-spec fn compute_frame(
-    entry: GhostPageDescriptor,
-    level: nat,
-    addr: u64,
-    user_ok: bool,
-    uxn_accum: bool,
-    pxn_accum: bool,
-) -> Frame {
-    let size = if level == 3 {
-        FrameSize::Size1G
-    } else if level == 2 {
-        FrameSize::Size2M
-    } else {
-        FrameSize::Size4K
-    };
-    let offset_mask = (size.as_u64() - 1) as u64;
-    let base = PAddr(((entry.addr << 12) | (addr & offset_mask)) as nat);
-    let attr = FrameAttr {
-        readable: true,
-        writable: entry.ap_rw,
-        // NOTE: VMSA-v8 differentiates between user-executable and kernel-executable
-        // We don't have this distinction yet, so we just use the user-executable bit
-        executable: !(uxn_accum || entry.xn),
-        user_accessible: user_ok && entry.ap_user,
-    };
-    Frame { base, size, attr }
-}
-
-/// Recursive helper for page table walk
-pub closed spec fn walk_level(
-    pt_mem: PageTableMem,
-    addr: u64,
-    level: nat,
-    table_addr: u64,
-    user_ok: bool,
-    uxn_accum: bool,
-    pxn_accum: bool,
-) -> Option<Frame>
-    decreases level,
-{
-    if level == 0 {
-        None
-    } else {
-        let index = get_index(addr, level);
-        let pte_addr = (table_addr + index * 8) as u64;
-        let pte = read_pt_entry(pt_mem, pte_addr);
-
-        match pte {
-            GhostPTEntry::Table(desc) => {
-                let new_user_ok = user_ok && desc.ap_user;
-                let new_uxn = uxn_accum || desc.uxn;
-                let new_pxn = pxn_accum || desc.pxn;
-                let next_table = desc.addr << 12;
-                walk_level(
-                    pt_mem,
-                    addr,
-                    (level - 1) as nat,
-                    next_table,
-                    new_user_ok,
-                    new_uxn,
-                    new_pxn,
-                )
-            },
-            GhostPTEntry::Page(page_desc) => {
-                if level > 3 && page_desc.non_block {
-                    None  // Block must be at level 1-3, page only at level 1
-
-                } else {
-                    Some(compute_frame(page_desc, level, addr, user_ok, uxn_accum, pxn_accum))
-                }
-            },
-            GhostPTEntry::Empty => None,
-        }
-    }
-}
-
-/// Hardware behavior of a valid page table walk process.
-///
-/// This function simulates the MMU's page table walk process and checks if the given
-/// virtual address `addr` maps to the specified `frame` with the correct flags.
-///
-/// Given a `PageTableMem` `pt_mem`, the predicate is true for those `addr` and `frame` where the
-/// MMU's page table walk arrives at an entry mapping the frame `frame`, and the `pte.flags`
-/// must reflect the properties along the translation path.
-///
-/// Support 4-level page tables yet.
-pub open spec fn page_table_walk(pt_mem: PageTableMem, addr: u64, frame: Frame) -> bool {
-    let root_addr = pt_mem.root();
-    match walk_level(pt_mem, addr, 4, root_addr, true, false, false) {
-        Some(reached) => {
-            &&& reached.base == frame.base
-            &&& reached.size == frame.size
-            &&& reached.attr == frame.attr
-        },
-        None => false,
     }
 }
 

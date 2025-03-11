@@ -1,8 +1,8 @@
-//! High-level & OS-level state machine operations.
+//! High-level & low-level state machine operations.
 use vstd::prelude::*;
 
 use super::addr::{PAddr, VAddr};
-use super::mem::Frame;
+use super::frame::Frame;
 
 verus! {
 

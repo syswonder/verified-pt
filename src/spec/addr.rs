@@ -116,4 +116,17 @@ pub open spec(checked) fn overlap(base1: nat, size1: nat, base2: nat, size2: nat
     }
 }
 
+/// (EXEC-MODE) Physical Address.
+pub struct PAddrExec(pub usize);
+
+impl PAddrExec {
+    /// Convert to spec PAddr.
+    pub open spec fn to_spec(self) -> PAddr {
+        PAddr(self.0 as nat)
+    }
+}
+
+/// (EXEC-MODE) Virtual Address.
+pub struct VAddrExec(pub usize);
+
 } // verus!
