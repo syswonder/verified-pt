@@ -412,7 +412,9 @@ proof fn ll_map_refines_hl_map(s1: LowLevelState, s2: LowLevelState, op: MapOp)
         HighLevelState::map(s1@, s2@, op),
 {
     lemma_interpret_pt_equals_all_mappings(s1);
+    ll_map_preserves_invariants(s1, s2, op);
     lemma_interpret_pt_equals_all_mappings(s2);
+    
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
     // Then updating pt_mem is equivalent to updating all_mappings.
 }
@@ -425,6 +427,22 @@ proof fn ll_unmap_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op:
     ensures
         s2.invariants(),
 {
+    // Prove s2.pt is a subset of s1.pt.
+    assert(forall |base, frame| #[trigger]
+        s2.pt.interpret().contains_pair(base, frame) ==> s1.pt.interpret
+            ().contains_pair(base, frame));
+
+    // Prove tlb is a subset of pt.
+    assert(s1.tlb == s1.hw_state().tlb);
+    // s1.tlb < s1.pt ==> s2.tlb < s1.tlb\{op.vaddr} < s1.pt\{op.vaddr} = s2.pt
+    assert forall|base, frame|
+        #[trigger] s2.tlb.contains_pair(base, frame) implies s2.pt.interpret().contains_pair(
+            base,
+            frame,
+        ) by {
+            assert(s1.pt.interpret().contains_pair(base, frame));
+        }
+    assert(s2.tlb_is_submap_of_pt());
 }
 
 /// Theorem. The low-level unmap operation refines the high-level unmap operation.
@@ -436,7 +454,9 @@ proof fn ll_unmap_refines_hl_unmap(s1: LowLevelState, s2: LowLevelState, op: Unm
         HighLevelState::unmap(s1@, s2@, op),
 {
     lemma_interpret_pt_equals_all_mappings(s1);
+    ll_unmap_preserves_invariants(s1, s2, op);
     lemma_interpret_pt_equals_all_mappings(s2);
+
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
     // Then updating pt_mem (low-level) is equivalent to updating all_mappings (high-level).
 }
@@ -449,7 +469,7 @@ proof fn ll_query_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op:
     ensures
         s2.invariants(),
 {
-    assert(s1.pt.interpret() === s2.pt.interpret());
+    assert(s1.tlb == s1.hw_state().tlb);
 }
 
 /// Theorem. The low-level query operation refines the high-level query operation.
@@ -461,7 +481,9 @@ proof fn ll_query_refines_hl_query(s1: LowLevelState, s2: LowLevelState, op: Que
         HighLevelState::query(s1@, s2@, op),
 {
     lemma_interpret_pt_equals_all_mappings(s1);
+    ll_query_preserves_invariants(s1, s2, op);
     lemma_interpret_pt_equals_all_mappings(s2);
+
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
     // Then querying pt_mem (low-level) is equivalent to querying all_mappings (high-level).
 }
@@ -485,7 +507,9 @@ proof fn ll_tlb_fill_refines_hl_id(s1: LowLevelState, s2: LowLevelState, op: TLB
         HighLevelState::id(s1@, s2@),
 {
     lemma_interpret_pt_equals_all_mappings(s1);
+    ll_tlb_fill_preserves_invariants(s1, s2, op);
     lemma_interpret_pt_equals_all_mappings(s2);
+
     // Post condition satisfied because TLB is the subset of the page table (lemma).
     // Then updating TLB has no effect on the page table.
 }
@@ -498,7 +522,6 @@ proof fn ll_tlb_evict_preserves_invariants(s1: LowLevelState, s2: LowLevelState,
     ensures
         s2.invariants(),
 {
-    assert(s1.pt.interpret() === s2.pt.interpret());
 }
 
 /// Theorem. The low-level tlb evict operation refines the high-level identity operation.
@@ -510,7 +533,9 @@ proof fn ll_tlb_evict_refines_hl_id(s1: LowLevelState, s2: LowLevelState, op: TL
         HighLevelState::id(s1@, s2@),
 {
     lemma_interpret_pt_equals_all_mappings(s1);
+    ll_tlb_evict_preserves_invariants(s1, s2, op);
     lemma_interpret_pt_equals_all_mappings(s2);
+
     // Post condition satisfied because TLB is the subset of the page table (lemma).
     // Then updating TLB has no effect on the page table.
 }

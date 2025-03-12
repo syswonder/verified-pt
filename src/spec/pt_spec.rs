@@ -28,6 +28,7 @@ pub struct PTConstants {
     pub pmem_size: nat,
 }
 
+/// State transition specification.
 impl PageTableState {
     /// State transition - map a virtual address to a physical frame.
     pub open spec fn pt_map(s1: Self, s2: Self, op: MapOp) -> bool {
@@ -105,7 +106,10 @@ impl PageTableState {
             },
         }
     }
+}
 
+/// Helper functions.
+impl PageTableState {
     /// If `frame` overlaps with existing physical memory.
     pub open spec fn overlaps_pmem(self, frame: Frame) -> bool {
         exists|frame1: Frame|

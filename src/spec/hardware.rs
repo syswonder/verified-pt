@@ -29,6 +29,7 @@ pub struct HardwareState {
     pub tlb: Map<VAddr, Frame>,
 }
 
+/// State transition specification.
 impl HardwareState {
     /// Hardware init state.
     pub open spec fn hw_init(self) -> bool {
@@ -176,7 +177,10 @@ impl HardwareState {
         &&& s1.mem === s2.mem
         &&& s1.pt === s2.pt
     }
+}
 
+/// Helper functions.
+impl HardwareState {
     /// If exists a mapping that `vaddr` lies in.
     pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
         exists|base: VAddr, frame: Frame| #[trigger]

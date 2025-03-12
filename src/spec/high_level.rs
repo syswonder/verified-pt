@@ -42,57 +42,6 @@ pub struct HighLevelConstants {
     pub pmem_size: nat,
 }
 
-impl HighLevelState {
-    /// Virtual memory domain covered by `self.mappings`.
-    pub open spec fn mem_domain_covered_by_mappings(self) -> Set<VIdx> {
-        Set::new(
-            |vidx: VIdx|
-                exists|base: VAddr, frame: Frame|
-                    {
-                        &&& #[trigger] self.mappings.contains_pair(base, frame)
-                        &&& vidx.addr().within(base, frame.size.as_nat())
-                    },
-        )
-    }
-
-    /// If `frame` overlaps with existing physical memory.
-    pub open spec fn overlaps_pmem(self, frame: Frame) -> bool {
-        exists|base: VAddr|
-            {
-                &&& #[trigger] self.mappings.contains_key(base)
-                &&& PAddr::overlap(
-                    self.mappings[base].base,
-                    self.mappings[base].size.as_nat(),
-                    frame.base,
-                    frame.size.as_nat(),
-                )
-            }
-    }
-
-    /// If mapping `(vaddr, frame)` overlaps with existing virtual memory.
-    pub open spec fn overlaps_vmem(self, vaddr: VAddr, frame: Frame) -> bool {
-        exists|base: VAddr|
-            {
-                &&& #[trigger] self.mappings.contains_key(base)
-                &&& VAddr::overlap(
-                    base,
-                    self.mappings[base].size.as_nat(),
-                    vaddr,
-                    frame.size.as_nat(),
-                )
-            }
-    }
-
-    /// If there exists a mapping for `vaddr`.
-    pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
-        exists|base: VAddr, frame: Frame|
-            {
-                &&& #[trigger] self.mappings.contains_pair(base, frame)
-                &&& vaddr.within(base, frame.size.as_nat())
-            }
-    }
-}
-
 /// State transition specifications.
 impl HighLevelState {
     /// Init state. Empty memory and no mappings.
@@ -268,6 +217,58 @@ impl HighLevelState {
     /// State transition - Identity.
     pub open spec fn id(s1: Self, s2: Self) -> bool {
         s1 === s2
+    }
+}
+
+/// Helper functions.
+impl HighLevelState {
+    /// Virtual memory domain covered by `self.mappings`.
+    pub open spec fn mem_domain_covered_by_mappings(self) -> Set<VIdx> {
+        Set::new(
+            |vidx: VIdx|
+                exists|base: VAddr, frame: Frame|
+                    {
+                        &&& #[trigger] self.mappings.contains_pair(base, frame)
+                        &&& vidx.addr().within(base, frame.size.as_nat())
+                    },
+        )
+    }
+
+    /// If `frame` overlaps with existing physical memory.
+    pub open spec fn overlaps_pmem(self, frame: Frame) -> bool {
+        exists|frame1: Frame|
+            {
+                &&& #[trigger] self.mappings.contains_value(frame1)
+                &&& PAddr::overlap(
+                    frame1.base,
+                    frame1.size.as_nat(),
+                    frame.base,
+                    frame.size.as_nat(),
+                )
+            }
+    }
+
+    /// If mapping `(vaddr, frame)` overlaps with existing virtual memory.
+    pub open spec fn overlaps_vmem(self, vaddr: VAddr, frame: Frame) -> bool {
+        exists|base: VAddr|
+            {
+                &&& #[trigger] self.mappings.contains_key(base)
+                &&& VAddr::overlap(
+                    base,
+                    self.mappings[base].size.as_nat(),
+                    vaddr,
+                    frame.size.as_nat(),
+                )
+            }
+    }
+
+    /// If there exists a mapping for `vaddr`.
+    pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
+        exists|base: VAddr, frame: Frame|
+            {
+                &&& #[trigger] self.mappings.contains_pair(base, frame)
+                &&& vaddr.within(base, frame.size.as_nat())
+            }
     }
 }
 
