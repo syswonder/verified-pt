@@ -363,11 +363,9 @@ proof fn ll_map_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: M
     if s2.pt.interpret() == s1.pt.interpret().insert(op.vaddr, op.frame) {
         // Prove mappings aligned to word size.
         assert forall|base: VAddr, frame: Frame| #[trigger]
-        s2.pt.interpret().contains_pair(base, frame) implies base.aligned(WORD_SIZE)
-        && frame.base.aligned(WORD_SIZE) by {
+            s2.pt.interpret().contains_pair(base, frame) implies base.aligned(WORD_SIZE)
+            && frame.base.aligned(WORD_SIZE) by {
             if base == op.vaddr {
-                lemma_va_align_frame_size_must_align_word_size(op.vaddr);
-                lemma_pa_align_frame_size_must_align_word_size(op.frame.base);
                 assert(base.aligned(WORD_SIZE));
                 assert(frame.base.aligned(WORD_SIZE));
             } else {
@@ -376,8 +374,8 @@ proof fn ll_map_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: M
         }
         // Prove mappings within physical memory.
         assert forall|base: VAddr, frame: Frame| #[trigger]
-        s2.pt.interpret().contains_pair(base, frame) implies frame.base.0 + frame.size.as_nat()
-        <= s2.mem.len() by {
+            s2.pt.interpret().contains_pair(base, frame) implies frame.base.0 + frame.size.as_nat()
+            <= s2.mem.len() by {
             if base == op.vaddr {
                 assert(op.frame.base.0 + op.frame.size.as_nat() <= s2.mem.len());
             } else {
@@ -387,7 +385,7 @@ proof fn ll_map_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: M
     }
     assert(s2.mappings_aligned());
     assert(s2.frames_within_pmem());
-    
+
     // Prove non-overlapping mappings in pmem and vmem.
     assert(s2.mappings_nonoverlap_in_vmem());
     lemma_add_mapping_preserves_nonoverlap(s1.pt.interpret(), op.vaddr, op.frame);
@@ -414,7 +412,7 @@ proof fn ll_map_refines_hl_map(s1: LowLevelState, s2: LowLevelState, op: MapOp)
     lemma_interpret_pt_equals_all_mappings(s1);
     ll_map_preserves_invariants(s1, s2, op);
     lemma_interpret_pt_equals_all_mappings(s2);
-    
+
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
     // Then updating pt_mem is equivalent to updating all_mappings.
 }
@@ -428,20 +426,19 @@ proof fn ll_unmap_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op:
         s2.invariants(),
 {
     // Prove s2.pt is a subset of s1.pt.
-    assert(forall |base, frame| #[trigger]
-        s2.pt.interpret().contains_pair(base, frame) ==> s1.pt.interpret
-            ().contains_pair(base, frame));
+    assert(forall|base, frame| #[trigger]
+        s2.pt.interpret().contains_pair(base, frame) ==> s1.pt.interpret().contains_pair(
+            base,
+            frame,
+        ));
 
     // Prove tlb is a subset of pt.
     assert(s1.tlb == s1.hw_state().tlb);
     // s1.tlb < s1.pt ==> s2.tlb < s1.tlb\{op.vaddr} < s1.pt\{op.vaddr} = s2.pt
-    assert forall|base, frame|
-        #[trigger] s2.tlb.contains_pair(base, frame) implies s2.pt.interpret().contains_pair(
-            base,
-            frame,
-        ) by {
-            assert(s1.pt.interpret().contains_pair(base, frame));
-        }
+    assert forall|base, frame| #[trigger]
+        s2.tlb.contains_pair(base, frame) implies s2.pt.interpret().contains_pair(base, frame) by {
+        assert(s1.pt.interpret().contains_pair(base, frame));
+    }
     assert(s2.tlb_is_submap_of_pt());
 }
 

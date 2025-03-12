@@ -58,32 +58,48 @@ pub proof fn lemma_map_eq_pair<K, V>(m1: Map<K, V>, m2: Map<K, V>)
 }
 
 /// Lemma. VA alignment to FrameSize ensures alignment to WORD_SIZE.
-pub proof fn lemma_va_align_frame_size_must_align_word_size(vaddr: VAddr)
+pub proof fn lemma_va_align_frame_size_must_align_word_size(vaddr: VAddr, fsize: FrameSize)
     requires
-        exists|fsize: FrameSize| #[trigger] vaddr.aligned(fsize.as_nat()),
+        vaddr.aligned(fsize.as_nat()),
     ensures
         vaddr.aligned(WORD_SIZE),
 {
-    let fsize = choose|fsize: FrameSize| #[trigger] vaddr.aligned(fsize.as_nat());
     match fsize {
-        FrameSize::Size4K => assert(vaddr.aligned(4096)),
-        FrameSize::Size2M => assert(vaddr.aligned(2 * 1024 * 1024)),
-        FrameSize::Size1G => assert(vaddr.aligned(1 * 1024 * 1024 * 1024)),
+        FrameSize::Size4K => {
+            assert(vaddr.aligned(4096));
+            assert(vaddr.aligned(8));
+        },
+        FrameSize::Size2M => {
+            assert(vaddr.aligned(2097152));
+            assert(vaddr.aligned(8));
+        },
+        FrameSize::Size1G => {
+            assert(vaddr.aligned(1073741824));
+            assert(vaddr.aligned(8));
+        },
     }
 }
 
 /// Lemma. PA alignment to FrameSize ensures alignment to WORD_SIZE.
-pub proof fn lemma_pa_align_frame_size_must_align_word_size(paddr: PAddr)
+pub proof fn lemma_pa_align_frame_size_must_align_word_size(paddr: PAddr, fsize: FrameSize)
     requires
-        exists|fsize: FrameSize| #[trigger] paddr.aligned(fsize.as_nat()),
+        paddr.aligned(fsize.as_nat()),
     ensures
         paddr.aligned(WORD_SIZE),
 {
-    let fsize = choose|fsize: FrameSize| #[trigger] paddr.aligned(fsize.as_nat());
     match fsize {
-        FrameSize::Size4K => assert(paddr.aligned(4096)),
-        FrameSize::Size2M => assert(paddr.aligned(2 * 1024 * 1024)),
-        FrameSize::Size1G => assert(paddr.aligned(1 * 1024 * 1024 * 1024)),
+        FrameSize::Size4K => {
+            assert(paddr.aligned(4096));
+            assert(paddr.aligned(8));
+        },
+        FrameSize::Size2M => {
+            assert(paddr.aligned(2097152));
+            assert(paddr.aligned(8));
+        },
+        FrameSize::Size1G => {
+            assert(paddr.aligned(1073741824));
+            assert(paddr.aligned(8));
+        },
     }
 }
 
