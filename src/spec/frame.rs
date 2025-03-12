@@ -60,6 +60,15 @@ pub struct FrameExec {
     pub base: PAddrExec,
     /// The size of the frame in bytes.
     pub size: FrameSize,
+    /// The attributes of the frame.
+    pub attr: FrameAttr,
+}
+
+impl FrameExec {
+    /// Convert to Frame.
+    pub open spec fn view(self) -> Frame {
+        Frame { base: self.base@, size: self.size, attr: self.attr }
+    }
 }
 
 } // verus!

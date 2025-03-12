@@ -121,12 +121,19 @@ pub struct PAddrExec(pub usize);
 
 impl PAddrExec {
     /// Convert to spec PAddr.
-    pub open spec fn to_spec(self) -> PAddr {
+    pub open spec fn view(self) -> PAddr {
         PAddr(self.0 as nat)
     }
 }
 
 /// (EXEC-MODE) Virtual Address.
 pub struct VAddrExec(pub usize);
+
+impl VAddrExec {
+    /// Convert to spec VAddr.
+    pub open spec fn view(self) -> VAddr {
+        VAddr(self.0 as nat)
+    }
+}
 
 } // verus!

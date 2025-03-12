@@ -7,8 +7,8 @@
 use vstd::prelude::*;
 
 use super::{
-    addr::{PAddr, VAddr, WORD_SIZE},
-    frame::{Frame, FrameSize},
+    addr::{PAddr, VAddr, VAddrExec, WORD_SIZE},
+    frame::{Frame, FrameExec, FrameSize},
     op::{MapOp, QueryOp, UnmapOp},
 };
 
@@ -30,21 +30,27 @@ pub struct PTConstants {
 
 /// State transition specification.
 impl PageTableState {
-    /// State transition - map a virtual address to a physical frame.
-    pub open spec fn pt_map(s1: Self, s2: Self, op: MapOp) -> bool {
+    /// pt_map precondition.
+    pub open spec fn pt_map_pre(self, vaddr: VAddr, frame: Frame) -> bool {
         // Base vaddr should align to frame size
-        &&& op.vaddr.aligned(
-            op.frame.size.as_nat(),
+        &&& vaddr.aligned(
+            frame.size.as_nat(),
         )
         // Base paddr should align to frame size
-        &&& op.frame.base.aligned(
-            op.frame.size.as_nat(),
+        &&& frame.base.aligned(
+            frame.size.as_nat(),
         )
         // Frame should be within pmem
-        &&& op.frame.base.offset(op.frame.size.as_nat()).0
-            <= s1.constants.pmem_size
+        &&& frame.base.offset(frame.size.as_nat()).0
+            <= self.constants.pmem_size
         // Frame should not overlap with existing pmem
-        &&& !s1.overlaps_pmem(op.frame)
+        &&& !self.overlaps_pmem(frame)
+    }
+
+    /// State transition - map a virtual address to a physical frame.
+    pub open spec fn pt_map(s1: Self, s2: Self, op: MapOp) -> bool {
+        // Precondition
+        &&& s1.pt_map_pre(op.vaddr, op.frame)
         // Check vmem overlapping
         &&& if s1.overlaps_vmem(op.vaddr, op.frame) {
             // Mapping fails
@@ -59,14 +65,18 @@ impl PageTableState {
         }
     }
 
+    /// pt_unmap precondition.
+    pub open spec fn pt_unmap_pre(self, vaddr: VAddr) -> bool {
+        // Base vaddr should align to some valid frame size
+        ||| vaddr.aligned(FrameSize::Size4K.as_nat())
+        ||| vaddr.aligned(FrameSize::Size2M.as_nat())
+        ||| vaddr.aligned(FrameSize::Size1G.as_nat())
+    }
+
     /// State transition - unmap a virtual address.
     pub open spec fn pt_unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
-        // Base vaddr should align to some valid frame size
-        &&& {
-            ||| op.vaddr.aligned(FrameSize::Size4K.as_nat())
-            ||| op.vaddr.aligned(FrameSize::Size2M.as_nat())
-            ||| op.vaddr.aligned(FrameSize::Size1G.as_nat())
-        }
+        // Precondition
+        &&& s1.pt_unmap_pre(op.vaddr)
         // Check page table
         &&& if s1.mappings.contains_key(op.vaddr) {
             // Unmapping succeeds
@@ -81,12 +91,16 @@ impl PageTableState {
         }
     }
 
+    /// pt_query precondition.
+    pub open spec fn pt_query_pre(self, vaddr: VAddr) -> bool {
+        // Base vaddr should align to 8 bytes
+        vaddr.aligned(WORD_SIZE)
+    }
+
     /// State transition - page table query.
     pub open spec fn pt_query(s1: Self, s2: Self, op: QueryOp) -> bool {
-        // Base vaddr should align to 8 bytes
-        &&& op.vaddr.aligned(
-            WORD_SIZE,
-        )
+        // Precondition
+        &&& s1.pt_query_pre(op.vaddr)
         // Page table should not be updated
         &&& s1.mappings === s2.mappings
         // Check result
@@ -137,6 +151,73 @@ impl PageTableState {
                 )
             }
     }
+}
+
+/// Page table must implement the `PageTableInterface` and satisfy the specification.
+///
+/// - `invariants` specifies the invariants that must be preserved after each operation.
+/// - `view` abstracts the concrete page table as a `PageTableState`.
+/// - `map` specifies the pre and post conditions for the `map` operation.
+/// - `unmap` specifies the pre and post conditions for the `unmap` operation.
+/// - `query` specifies the pre and post conditions for the `query` operation.
+///
+/// If a concrete implementation refines this specification (i.e. `impl PageTableInterface`),
+/// along with the assumptions we make about the hardware and the remaining system, we can
+/// conclude that the whole system refines the low-level specification, thus refines the
+/// high-level specification.
+pub trait PageTableInterface where Self: Sized {
+    /// Specify the invariants that must be implied at initial state and preseved after each operation.
+    spec fn invariants(self) -> bool;
+
+    /// Specify the initial state.
+    spec fn init(self) -> bool;
+
+    /// Get abstract page table state.
+    spec fn view(self) -> PageTableState;
+
+    /// Prove that the initial state satisfies the invariants.
+    proof fn init_implies_invariants(self)
+        requires
+            self.init(),
+        ensures
+            self.invariants(),
+    ;
+
+    /// Map a virtual address to a physical frame.
+    ///
+    /// Implementation must ensure the postconditions are satisfied.
+    fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (result: Result<(), ()>)
+        requires
+            old(self).invariants(),
+            old(self)@.pt_map_pre(vaddr@, frame@),
+        ensures
+            self.invariants(),
+            PageTableState::pt_map(old(self)@, self@, MapOp {vaddr: vaddr@, frame: frame@, result}),
+    ;
+
+    /// Unmap a virtual address.
+    ///
+    /// Implementation must ensure the postconditions are satisfied.
+    fn unmap(&mut self, vaddr: VAddrExec) -> (result: Result<(), ()>)
+        requires
+            old(self).invariants(),
+            old(self)@.pt_unmap_pre(vaddr@),
+        ensures
+            self.invariants(),
+            PageTableState::pt_unmap(old(self)@, self@, UnmapOp {vaddr: vaddr@, result}),
+    ;
+
+    /// Query a virtual address, return the mapped physical frame.
+    ///
+    /// Implementation must ensure the postconditions are satisfied.
+    fn query(&mut self, vaddr: VAddrExec) -> (result: Result<(VAddr, Frame), ()>)
+        requires
+            old(self).invariants(),
+            old(self)@.pt_query_pre(vaddr@),
+        ensures
+            self.invariants(),
+            PageTableState::pt_query(old(self)@, self@, QueryOp {vaddr: vaddr@, result}),
+    ;
 }
 
 } // verus!
