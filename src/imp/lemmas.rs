@@ -1,6 +1,11 @@
 //! Basic lemmas used by the proof.
 use vstd::prelude::*;
 
+use crate::spec::{
+    addr::{PAddr, VAddr, WORD_SIZE},
+    frame::FrameSize,
+};
+
 verus! {
 
 /// Lemma. The equality of 2 sets. Two sets are equal if they have the same elements.
@@ -49,6 +54,36 @@ pub proof fn lemma_map_eq_pair<K, V>(m1: Map<K, V>, m2: Map<K, V>)
     }
     assert(m1 === m2) by {
         lemma_map_eq_key_value(m1, m2);
+    }
+}
+
+/// Lemma. VA alignment to FrameSize ensures alignment to WORD_SIZE.
+pub proof fn lemma_va_align_frame_size_must_align_word_size(vaddr: VAddr)
+    requires
+        exists|fsize: FrameSize| #[trigger] vaddr.aligned(fsize.as_nat()),
+    ensures
+        vaddr.aligned(WORD_SIZE),
+{
+    let fsize = choose|fsize: FrameSize| #[trigger] vaddr.aligned(fsize.as_nat());
+    match fsize {
+        FrameSize::Size4K => assert(vaddr.aligned(4096)),
+        FrameSize::Size2M => assert(vaddr.aligned(2 * 1024 * 1024)),
+        FrameSize::Size1G => assert(vaddr.aligned(1 * 1024 * 1024 * 1024)),
+    }
+}
+
+/// Lemma. PA alignment to FrameSize ensures alignment to WORD_SIZE.
+pub proof fn lemma_pa_align_frame_size_must_align_word_size(paddr: PAddr)
+    requires
+        exists|fsize: FrameSize| #[trigger] paddr.aligned(fsize.as_nat()),
+    ensures
+        paddr.aligned(WORD_SIZE),
+{
+    let fsize = choose|fsize: FrameSize| #[trigger] paddr.aligned(fsize.as_nat());
+    match fsize {
+        FrameSize::Size4K => assert(paddr.aligned(4096)),
+        FrameSize::Size2M => assert(paddr.aligned(2 * 1024 * 1024)),
+        FrameSize::Size1G => assert(paddr.aligned(1 * 1024 * 1024 * 1024)),
     }
 }
 

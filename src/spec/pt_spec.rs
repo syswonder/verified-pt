@@ -108,12 +108,12 @@ impl PageTableState {
 
     /// If `frame` overlaps with existing physical memory.
     pub open spec fn overlaps_pmem(self, frame: Frame) -> bool {
-        exists|base: VAddr|
+        exists|frame1: Frame|
             {
-                &&& #[trigger] self.mappings.contains_key(base)
+                &&& #[trigger] self.mappings.contains_value(frame1)
                 &&& PAddr::overlap(
-                    self.mappings[base].base,
-                    self.mappings[base].size.as_nat(),
+                    frame1.base,
+                    frame1.size.as_nat(),
                     frame.base,
                     frame.size.as_nat(),
                 )
