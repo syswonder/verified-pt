@@ -38,7 +38,7 @@ impl HardwareState {
     }
 
     /// Hardware state transition - memory read.
-    pub open spec fn hw_read(s1: Self, s2: Self, op: ReadOp) -> bool {
+    pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
         &&& op.vaddr.aligned(
             WORD_SIZE,
         )
@@ -85,7 +85,7 @@ impl HardwareState {
     }
 
     /// State transition - memory write.
-    pub open spec fn hw_write(s1: Self, s2: Self, op: WriteOp) -> bool {
+    pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
         &&& op.vaddr.aligned(
             WORD_SIZE,
         )
@@ -139,7 +139,7 @@ impl HardwareState {
     }
 
     /// State transition - Page table operation.
-    pub open spec fn hw_pt_op(s1: Self, s2: Self) -> bool {
+    pub open spec fn pt_op(s1: Self, s2: Self) -> bool {
         // Memory should not be updated
         &&& s1.mem
             === s2.mem
@@ -149,7 +149,7 @@ impl HardwareState {
     }
 
     /// State transition - TLB fill.
-    pub open spec fn hw_tlb_fill(s1: Self, s2: Self, op: TLBFillOp) -> bool {
+    pub open spec fn tlb_fill(s1: Self, s2: Self, op: TLBFillOp) -> bool {
         // Page table must contain the mapping
         &&& s1.pt.interpret().contains_pair(
             op.vaddr,
@@ -166,7 +166,7 @@ impl HardwareState {
     }
 
     /// State transition - TLB eviction.
-    pub open spec fn hw_tlb_evict(s1: Self, s2: Self, op: TLBEvictOp) -> bool {
+    pub open spec fn tlb_evict(s1: Self, s2: Self, op: TLBEvictOp) -> bool {
         // TLB must contain the mapping
         &&& s1.tlb.contains_key(op.vaddr)
         // Remove from tlb

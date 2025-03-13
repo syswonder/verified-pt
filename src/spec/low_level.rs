@@ -47,36 +47,36 @@ impl LowLevelState {
 
     /// State transition - Memory read.
     pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
-        HardwareState::hw_read(s1.hw_state(), s2.hw_state(), op)
+        HardwareState::read(s1.hw_state(), s2.hw_state(), op)
     }
 
     /// State transition - Memory write.
     pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
-        HardwareState::hw_write(s1.hw_state(), s2.hw_state(), op)
+        HardwareState::write(s1.hw_state(), s2.hw_state(), op)
     }
 
     /// State transition - Map a frame.
     pub open spec fn map(s1: Self, s2: Self, op: MapOp) -> bool {
         // Page table spec satisfied
-        &&& PageTableState::pt_map(
+        &&& PageTableState::map(
             s1.pt_state(),
             s2.pt_state(),
             op,
         )
         // Hardware behaves as spec
-        &&& HardwareState::hw_pt_op(s1.hw_state(), s2.hw_state())
+        &&& HardwareState::pt_op(s1.hw_state(), s2.hw_state())
     }
 
     /// State transition - Unmap a frame.
     pub open spec fn unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
         // Page table spec satisfied
-        &&& PageTableState::pt_unmap(
+        &&& PageTableState::unmap(
             s1.pt_state(),
             s2.pt_state(),
             op,
         )
         // Hardware behaves as spec
-        &&& HardwareState::hw_pt_op(
+        &&& HardwareState::pt_op(
             s1.hw_state(),
             s2.hw_state(),
         )
@@ -87,25 +87,25 @@ impl LowLevelState {
     /// State transition - Query a vaddr.
     pub open spec fn query(s1: Self, s2: Self, op: QueryOp) -> bool {
         // Page table spec satisfied
-        &&& PageTableState::pt_query(
+        &&& PageTableState::query(
             s1.pt_state(),
             s2.pt_state(),
             op,
         )
         // Hardware behaves as spec
-        &&& HardwareState::hw_pt_op(s1.hw_state(), s2.hw_state())
+        &&& HardwareState::pt_op(s1.hw_state(), s2.hw_state())
     }
 
     /// State transition - TLB fill.
     pub open spec fn tlb_fill(s1: Self, s2: Self, op: TLBFillOp) -> bool {
         // Hardware behaves as spec
-        HardwareState::hw_tlb_fill(s1.hw_state(), s2.hw_state(), op)
+        HardwareState::tlb_fill(s1.hw_state(), s2.hw_state(), op)
     }
 
     /// State transition - TLB evict.
     pub open spec fn tlb_evict(s1: Self, s2: Self, op: TLBEvictOp) -> bool {
         // Hardware behaves as spec
-        HardwareState::hw_tlb_evict(s1.hw_state(), s2.hw_state(), op)
+        HardwareState::tlb_evict(s1.hw_state(), s2.hw_state(), op)
     }
 }
 

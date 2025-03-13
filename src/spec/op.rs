@@ -54,7 +54,7 @@ pub struct UnmapOp {
 pub struct QueryOp {
     /// Virtual page address.
     pub vaddr: VAddr,
-    /// Query result.
+    /// Query result (virtual page base, physical frame).
     pub result: Result<(VAddr, Frame), ()>,
 }
 

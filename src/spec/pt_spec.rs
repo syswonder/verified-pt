@@ -30,8 +30,8 @@ pub struct PTConstants {
 
 /// State transition specification.
 impl PageTableState {
-    /// pt_map precondition.
-    pub open spec fn pt_map_pre(self, vaddr: VAddr, frame: Frame) -> bool {
+    /// map precondition.
+    pub open spec fn map_pre(self, vaddr: VAddr, frame: Frame) -> bool {
         // Base vaddr should align to frame size
         &&& vaddr.aligned(
             frame.size.as_nat(),
@@ -48,9 +48,9 @@ impl PageTableState {
     }
 
     /// State transition - map a virtual address to a physical frame.
-    pub open spec fn pt_map(s1: Self, s2: Self, op: MapOp) -> bool {
+    pub open spec fn map(s1: Self, s2: Self, op: MapOp) -> bool {
         // Precondition
-        &&& s1.pt_map_pre(op.vaddr, op.frame)
+        &&& s1.map_pre(op.vaddr, op.frame)
         // Check vmem overlapping
         &&& if s1.overlaps_vmem(op.vaddr, op.frame) {
             // Mapping fails
@@ -65,8 +65,8 @@ impl PageTableState {
         }
     }
 
-    /// pt_unmap precondition.
-    pub open spec fn pt_unmap_pre(self, vaddr: VAddr) -> bool {
+    /// unmap precondition.
+    pub open spec fn unmap_pre(self, vaddr: VAddr) -> bool {
         // Base vaddr should align to some valid frame size
         ||| vaddr.aligned(FrameSize::Size4K.as_nat())
         ||| vaddr.aligned(FrameSize::Size2M.as_nat())
@@ -74,9 +74,9 @@ impl PageTableState {
     }
 
     /// State transition - unmap a virtual address.
-    pub open spec fn pt_unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
         // Precondition
-        &&& s1.pt_unmap_pre(op.vaddr)
+        &&& s1.unmap_pre(op.vaddr)
         // Check page table
         &&& if s1.mappings.contains_key(op.vaddr) {
             // Unmapping succeeds
@@ -91,16 +91,16 @@ impl PageTableState {
         }
     }
 
-    /// pt_query precondition.
-    pub open spec fn pt_query_pre(self, vaddr: VAddr) -> bool {
+    /// query precondition.
+    pub open spec fn query_pre(self, vaddr: VAddr) -> bool {
         // Base vaddr should align to 8 bytes
         vaddr.aligned(WORD_SIZE)
     }
 
     /// State transition - page table query.
-    pub open spec fn pt_query(s1: Self, s2: Self, op: QueryOp) -> bool {
+    pub open spec fn query(s1: Self, s2: Self, op: QueryOp) -> bool {
         // Precondition
-        &&& s1.pt_query_pre(op.vaddr)
+        &&& s1.query_pre(op.vaddr)
         // Page table should not be updated
         &&& s1.mappings === s2.mappings
         // Check result
@@ -183,40 +183,54 @@ pub trait PageTableInterface where Self: Sized {
             self.invariants(),
     ;
 
-    /// Map a virtual address to a physical frame.
+    /// **EXEC** Map a virtual address to a physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
     fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (result: Result<(), ()>)
         requires
             old(self).invariants(),
-            old(self)@.pt_map_pre(vaddr@, frame@),
+            old(self)@.map_pre(vaddr@, frame@),
         ensures
             self.invariants(),
-            PageTableState::pt_map(old(self)@, self@, MapOp {vaddr: vaddr@, frame: frame@, result}),
+            PageTableState::map(
+                old(self)@,
+                self@,
+                MapOp { vaddr: vaddr@, frame: frame@, result },
+            ),
     ;
 
-    /// Unmap a virtual address.
+    /// **EXEC** Unmap a virtual address.
     ///
     /// Implementation must ensure the postconditions are satisfied.
     fn unmap(&mut self, vaddr: VAddrExec) -> (result: Result<(), ()>)
         requires
             old(self).invariants(),
-            old(self)@.pt_unmap_pre(vaddr@),
+            old(self)@.unmap_pre(vaddr@),
         ensures
             self.invariants(),
-            PageTableState::pt_unmap(old(self)@, self@, UnmapOp {vaddr: vaddr@, result}),
+            PageTableState::unmap(old(self)@, self@, UnmapOp { vaddr: vaddr@, result }),
     ;
 
-    /// Query a virtual address, return the mapped physical frame.
+    /// **EXEC** Query a virtual address, return the mapped physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn query(&mut self, vaddr: VAddrExec) -> (result: Result<(VAddr, Frame), ()>)
+    fn query(&mut self, vaddr: VAddrExec) -> (result: Result<(VAddrExec, FrameExec), ()>)
         requires
             old(self).invariants(),
-            old(self)@.pt_query_pre(vaddr@),
+            old(self)@.query_pre(vaddr@),
         ensures
             self.invariants(),
-            PageTableState::pt_query(old(self)@, self@, QueryOp {vaddr: vaddr@, result}),
+            PageTableState::query(
+                old(self)@,
+                self@,
+                QueryOp {
+                    vaddr: vaddr@,
+                    result: match result {
+                        Ok((vaddr, frame)) => Ok((vaddr@, frame@)),
+                        Err(()) => Err(()),
+                    },
+                },
+            ),
     ;
 }
 
