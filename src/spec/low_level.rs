@@ -1,12 +1,12 @@
 //! Low-level state machine and low-level specifications.
 //!
-//! This is the low-level abstraction of the memory management module. This abstraction level
-//! performs as a bridge between the concrete implementation and the high level specification.
-//!
-//! We have made the assumption that the hardware behavior refines the hardware specification.
-//！And we have proved that the page table implementation refines the page table specification.
-//！Combining these two parts, we can conclude that the low-level system (hardware + hypervisor)
-//！refines the low-level specification, thus refines the high-level specification.
+//！The low-level state machine provides a more concrete abstraction of the memory management
+//！module, acting as a bridge between the implementation and the high-level specification.
+//！
+//！The verification assumes that hardware behavior refines the hardware specification. By proving
+//！the page table implementation refines the page table specification, we can conclude that the 
+//！combined system (hardware + hypervisor) refines the low-level specification and, in turn, the
+//！high-level specification.
 use vstd::prelude::*;
 
 use super::{
