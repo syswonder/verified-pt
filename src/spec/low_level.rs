@@ -41,8 +41,7 @@ impl LowLevelState {
     ///
     /// The initial state must satisfy the specification.
     pub open spec fn init(self) -> bool {
-        &&& self.tlb.dom() === Set::empty()
-        &&& self.pt.interpret() === Map::empty()
+        HardwareState::init(self.hw_state())
     }
 
     /// State transition - Memory read.

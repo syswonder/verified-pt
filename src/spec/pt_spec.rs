@@ -30,7 +30,12 @@ pub struct PTConstants {
 
 /// State transition specification.
 impl PageTableState {
-    /// map precondition.
+    /// Init state.
+    pub open spec fn init(self) -> bool {
+        self.mappings === Map::empty()
+    }
+
+    /// Map precondition.
     pub open spec fn map_pre(self, vaddr: VAddr, frame: Frame) -> bool {
         // Base vaddr should align to frame size
         &&& vaddr.aligned(
@@ -65,7 +70,7 @@ impl PageTableState {
         }
     }
 
-    /// unmap precondition.
+    /// Unmap precondition.
     pub open spec fn unmap_pre(self, vaddr: VAddr) -> bool {
         // Base vaddr should align to some valid frame size
         ||| vaddr.aligned(FrameSize::Size4K.as_nat())
@@ -91,7 +96,7 @@ impl PageTableState {
         }
     }
 
-    /// query precondition.
+    /// Query precondition.
     pub open spec fn query_pre(self, vaddr: VAddr) -> bool {
         // Base vaddr should align to 8 bytes
         vaddr.aligned(WORD_SIZE)
@@ -166,19 +171,20 @@ impl PageTableState {
 /// conclude that the whole system refines the low-level specification, thus refines the
 /// high-level specification.
 pub trait PageTableInterface where Self: Sized {
-    /// Specify the invariants that must be implied at initial state and preseved after each operation.
-    spec fn invariants(self) -> bool;
-
-    /// Specify the initial state.
-    spec fn init(self) -> bool;
-
     /// Get abstract page table state.
     spec fn view(self) -> PageTableState;
 
-    /// Prove that the initial state satisfies the invariants.
+    /// Specify the invariants that must be implied at initial state and preseved 
+    /// after each operation.
+    spec fn invariants(self) -> bool;
+
+    /// The assumptions we made about the hardware and the remaining system implies 
+    /// `self@.init()` at the system initialization.
+    ///
+    /// Implementation must prove that the invariants are satisfied at this initial state.
     proof fn init_implies_invariants(self)
         requires
-            self.init(),
+            self@.init(),
         ensures
             self.invariants(),
     ;
@@ -192,11 +198,7 @@ pub trait PageTableInterface where Self: Sized {
             old(self)@.map_pre(vaddr@, frame@),
         ensures
             self.invariants(),
-            PageTableState::map(
-                old(self)@,
-                self@,
-                MapOp { vaddr: vaddr@, frame: frame@, result },
-            ),
+            PageTableState::map(old(self)@, self@, MapOp { vaddr: vaddr@, frame: frame@, result }),
     ;
 
     /// **EXEC** Unmap a virtual address.

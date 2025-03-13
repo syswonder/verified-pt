@@ -224,6 +224,15 @@ proof fn ll_init_implies_invariants(st: LowLevelState)
 {
 }
 
+/// Theorem. The low-level init state implies the page table init state.
+proof fn ll_init_implies_pt_init(st: LowLevelState)
+    requires
+        st.init(),
+    ensures
+        st.pt_state().init(),
+{
+}
+
 /// Theorem. The low-level init state refines the high-level init state.
 proof fn ll_init_refines_hl_init(st: LowLevelState)
     requires
@@ -366,7 +375,9 @@ proof fn ll_map_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: M
             s2.pt.interpret().contains_pair(base, frame) implies base.aligned(WORD_SIZE)
             && frame.base.aligned(WORD_SIZE) by {
             if base == op.vaddr {
+                lemma_va_align_frame_size_must_align_word_size(base, frame.size);
                 assert(base.aligned(WORD_SIZE));
+                lemma_pa_align_frame_size_must_align_word_size(frame.base, frame.size);
                 assert(frame.base.aligned(WORD_SIZE));
             } else {
                 assert(s1.pt.interpret().contains_pair(base, frame));

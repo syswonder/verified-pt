@@ -32,7 +32,7 @@ pub struct HardwareState {
 /// State transition specification.
 impl HardwareState {
     /// Hardware init state.
-    pub open spec fn hw_init(self) -> bool {
+    pub open spec fn init(self) -> bool {
         &&& self.tlb === Map::empty()
         &&& self.pt.interpret() === Map::empty()
     }
