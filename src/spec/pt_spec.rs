@@ -3,7 +3,7 @@
 //! This is the **proof target** of the page table implementation. If the page table implementation
 //! satisfies this specification, along with the assumptions we make about the hardware and the
 //! remaining OS, we can conclude that the whole system refines the low-level specification.
-//! 
+//!
 //! This module is not trusted (not a proof base).
 use vstd::prelude::*;
 
@@ -175,11 +175,11 @@ pub trait PageTableInterface where Self: Sized {
     /// Get abstract page table state.
     spec fn view(self) -> PageTableState;
 
-    /// Specify the invariants that must be implied at initial state and preseved 
+    /// Specify the invariants that must be implied at initial state and preseved
     /// after each operation.
     spec fn invariants(self) -> bool;
 
-    /// The assumptions we made about the hardware and the remaining system implies 
+    /// The assumptions we made about the hardware and the remaining system implies
     /// `self@.init()` at the system initialization.
     ///
     /// Implementation must prove that the invariants are satisfied at this initial state.

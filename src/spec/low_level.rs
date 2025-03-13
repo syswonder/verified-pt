@@ -4,7 +4,7 @@
 //！module, acting as a bridge between the implementation and the high-level specification.
 //！
 //！The verification assumes that hardware behavior refines the hardware specification. By proving
-//！the page table implementation refines the page table specification, we can conclude that the 
+//！the page table implementation refines the page table specification, we can conclude that the
 //！combined system (hardware + hypervisor) refines the low-level specification and, in turn, the
 //！high-level specification.
 use vstd::prelude::*;
