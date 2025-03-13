@@ -19,7 +19,7 @@ verus! {
 pub struct PageTableState {
     /// Mappings from virtual address to physical frames.
     pub mappings: Map<VAddr, Frame>,
-    /// Page table.
+    /// Page table constants.
     pub constants: PTConstants,
 }
 

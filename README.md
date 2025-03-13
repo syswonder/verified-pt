@@ -70,11 +70,39 @@ The module specifies hardware behavior during memory translations, TLB managemen
 
 **Assumption:** The hardware behavior refines the hardware specification, ensuring correctness in memory translations. This specification underpins the entire verification process.
 
+```rust
+/// Abstract state managed by hardware.
+pub struct HardwareState {
+    /// 8-byte-indexed physical memory.
+    pub mem: Seq<nat>,
+    /// Page table.
+    pub pt: S1PageTable,
+    /// Translation Lookaside Buffer.
+    pub tlb: Map<VAddr, Frame>,
+}
+```
+
 #### Page Table Specification
 
 The page table specification defines the **proof target** for the page table implementation. Meeting this specification, alongside the hardware and OS assumptions, ensures the system refines the low-level specification.
 
 Importantly, this module itself is **not trusted**; it is part of the proof rather than a trusted base.
+
+```rust
+/// Abstract state managed by the page table.
+pub struct PageTableState {
+    /// Mappings from virtual address to physical frames.
+    pub mappings: Map<VAddr, Frame>,
+    /// Page table constants.
+    pub constants: PTConstants,
+}
+
+/// Page table config constants.
+pub struct PTConstants {
+    /// Physical memory size (in bytes).
+    pub pmem_size: nat,
+}
+```
 
 ### Refinement Relationship
 
@@ -85,3 +113,83 @@ The **refinement relationship** between the low-level state machine and the high
 
 This relationship is established through **simulation relations** and **invariant preservation** across the layers.
 
+## Implementation & Proof
+
+### Page Table Interface
+
+The **Page Table Interface** defines the contract that any concrete page table implementation must follow to ensure correctness. This interface outlines:
+
+- **Invariants**: Conditions that must hold throughout the page table's lifetime to maintain consistency.
+- **View**: An abstraction that maps the concrete implementation to the abstract `PageTableState`.
+- **Operations**: The `map`, `unmap`, and `query` methods, each with well-defined preconditions and postconditions.
+
+To verify correctness, the implementation must:
+
+1. **Preserve Invariants**: Demonstrate that all operations uphold the defined invariants.
+2. **Establish Initial Conditions**: Prove that the system's initialization state satisfies the required conditions.
+3. **Prove Refinement**: Ensure that the concrete implementation refines the abstract state transitions defined in `PageTableState`.
+
+By verifying these conditions and combining them with hardware and system assumptions, we can conclude that the overall system refines both the low-level and high-level specifications.
+
+```rust
+/// Page table must implement the `PageTableInterface` and satisfy the specification.
+pub trait PageTableInterface where Self: Sized {
+    /// Get abstract page table state.
+    spec fn view(self) -> PageTableState;
+
+    /// Specify the invariants that must be implied at initial state and preseved 
+    /// after each operation.
+    spec fn invariants(self) -> bool;
+
+    /// The assumptions we made about the hardware and the remaining system implies 
+    /// `self@.init()` at the system initialization.
+    ///
+    /// Implementation must prove that the invariants are satisfied at this initial state.
+    proof fn init_implies_invariants(self)
+        requires
+            self@.init(),
+        ensures
+            self.invariants(),
+    ;
+
+    /// **EXEC** Map a virtual address to a physical frame.
+    fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (result: Result<(), ()>)
+        requires
+            old(self).invariants(),
+            old(self)@.map_pre(vaddr@, frame@),
+        ensures
+            self.invariants(),
+            PageTableState::map(old(self)@, self@, MapOp { vaddr: vaddr@, frame: frame@, result }),
+    ;
+
+    /// **EXEC** Unmap a virtual address.
+    fn unmap(&mut self, vaddr: VAddrExec) -> (result: Result<(), ()>)
+        requires
+            old(self).invariants(),
+            old(self)@.unmap_pre(vaddr@),
+        ensures
+            self.invariants(),
+            PageTableState::unmap(old(self)@, self@, UnmapOp { vaddr: vaddr@, result }),
+    ;
+
+    /// **EXEC** Query a virtual address, return the mapped physical frame.
+    fn query(&mut self, vaddr: VAddrExec) -> (result: Result<(VAddrExec, FrameExec), ()>)
+        requires
+            old(self).invariants(),
+            old(self)@.query_pre(vaddr@),
+        ensures
+            self.invariants(),
+            PageTableState::query(
+                old(self)@,
+                self@,
+                QueryOp {
+                    vaddr: vaddr@,
+                    result: match result {
+                        Ok((vaddr, frame)) => Ok((vaddr@, frame@)),
+                        Err(()) => Err(()),
+                    },
+                },
+            ),
+    ;
+}
+```
