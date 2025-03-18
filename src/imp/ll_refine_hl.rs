@@ -3,7 +3,7 @@ use vstd::prelude::*;
 
 use super::lemmas::*;
 use crate::spec::{
-    addr::{PAddr, VAddr, VIdx, WORD_SIZE},
+    addr::{PAddr, VAddr, VIdx},
     frame::Frame,
     high_level::HighLevelState,
     low_level::LowLevelState,
@@ -130,6 +130,8 @@ proof fn lemma_different_pidxs_for_different_vidxs(st: LowLevelState, vidx1: VId
                     frame2.base,
                 ).idx()
             };
+        lemma_pa_align_frame_size_must_align_word_size(frame1.base, frame1.size);
+        lemma_pa_align_frame_size_must_align_word_size(frame2.base, frame2.size);
         assert(PAddr::overlap(
             frame1.base,
             frame1.size.as_nat(),
@@ -372,13 +374,11 @@ proof fn ll_map_preserves_invariants(s1: LowLevelState, s2: LowLevelState, op: M
     if s2.pt.interpret() == s1.pt.interpret().insert(op.vaddr, op.frame) {
         // Prove mappings aligned to word size.
         assert forall|base: VAddr, frame: Frame| #[trigger]
-            s2.pt.interpret().contains_pair(base, frame) implies base.aligned(WORD_SIZE)
-            && frame.base.aligned(WORD_SIZE) by {
+            s2.pt.interpret().contains_pair(base, frame) implies base.aligned(frame.size.as_nat())
+            && frame.base.aligned(frame.size.as_nat()) by {
             if base == op.vaddr {
-                lemma_va_align_frame_size_must_align_word_size(base, frame.size);
-                assert(base.aligned(WORD_SIZE));
-                lemma_pa_align_frame_size_must_align_word_size(frame.base, frame.size);
-                assert(frame.base.aligned(WORD_SIZE));
+                assert(base.aligned(frame.size.as_nat()));
+                assert(frame.base.aligned(frame.size.as_nat()));
             } else {
                 assert(s1.pt.interpret().contains_pair(base, frame));
             }

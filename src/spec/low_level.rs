@@ -10,7 +10,7 @@
 use vstd::prelude::*;
 
 use super::{
-    addr::{PAddr, VAddr, VIdx, WORD_SIZE},
+    addr::{PAddr, VAddr, VIdx},
     frame::Frame,
     hardware::HardwareState,
     high_level::{HighLevelConstants, HighLevelState},
@@ -120,8 +120,8 @@ impl LowLevelState {
     /// All mappings (vbase, pbase) are 8-byte aligned.
     pub open spec fn mappings_aligned(self) -> bool {
         forall|base: VAddr, frame: Frame| #[trigger]
-            self.pt.interpret().contains_pair(base, frame) ==> base.aligned(WORD_SIZE)
-                && frame.base.aligned(WORD_SIZE)
+            self.pt.interpret().contains_pair(base, frame) ==> base.aligned(frame.size.as_nat())
+                && frame.base.aligned(frame.size.as_nat())
     }
 
     /// Page table mappings do not overlap in virtual memory.

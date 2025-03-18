@@ -13,21 +13,24 @@ pub enum FrameSize {
     Size2M,
     /// 1 GiB
     Size1G,
+    /// 512 GiB
+    Size512G,
 }
 
 impl FrameSize {
-    /// Convert to usize.
-    pub open spec fn as_usize(self) -> usize {
+    /// Convert to u64.
+    pub open spec fn as_u64(self) -> u64 {
         match self {
             FrameSize::Size4K => 0x1000,
             FrameSize::Size2M => 0x200000,
             FrameSize::Size1G => 0x40000000,
+            FrameSize::Size512G => 0x8000000000,
         }
     }
 
     /// Convert to nat.
     pub open spec fn as_nat(self) -> nat {
-        self.as_usize() as nat
+        self.as_u64() as nat
     }
 }
 

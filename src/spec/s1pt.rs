@@ -161,7 +161,7 @@ impl S1PageTable {
         } else {
             FrameSize::Size4K
         };
-        let offset_mask = (size.as_usize() - 1) as u64;
+        let offset_mask = (size.as_u64() - 1) as u64;
         let base = PAddr(((entry.addr << 12) | (addr & offset_mask)) as nat);
         let attr = FrameAttr {
             readable: true,
