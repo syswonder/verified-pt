@@ -1,6 +1,7 @@
 use vstd::prelude::*;
 
 pub mod addr;
+pub mod arch;
 pub mod frame;
 pub mod hardware;
 pub mod high_level;
