@@ -32,39 +32,64 @@ pub tracked enum NodeEntry {
 }
 
 impl PTTreeNode {
+    /// If the node is a leaf node
+    pub open spec fn is_leaf(self) -> bool {
+        self.level == self.arch.levels() - 1
+    }
+
+    /// Invariants of an entry in a leaf node.
+    pub open spec fn inv_entry_leaf(self, entry: NodeEntry) -> bool
+        recommends
+            self.is_leaf(),
+    {
+        match entry {
+            NodeEntry::Node(_) => false,  // Leaf node cannot have sub-nodes
+            NodeEntry::Frame(frame) => {
+                &&& frame.size == self.arch.frame_size(self.level)
+                &&& frame.base.aligned(frame.size.as_nat())
+            },
+            NodeEntry::Empty => true,
+        }
+    }
+
+    /// Invariants of an entry in an intermediate node.
+    pub open spec fn inv_entry_interm(self, entry: NodeEntry) -> bool
+        recommends
+            !self.is_leaf(),
+    {
+        match entry {
+            NodeEntry::Node(node) => {
+                &&& node.level == self.level + 1
+                &&& node.arch == self.arch
+            },
+            NodeEntry::Frame(frame) => {
+                &&& frame.size == self.arch.frame_size(self.level)
+                &&& frame.base.aligned(frame.size.as_nat())
+            },
+            NodeEntry::Empty => true,
+        }
+    }
+
+    /// Invariants of an entry in the node.
+    pub open spec fn inv_entry(self, entry: NodeEntry) -> bool {
+        if self.is_leaf() {
+            self.inv_entry_leaf(entry)
+        } else {
+            self.inv_entry_interm(entry)
+        }
+    }
+
     /// Invariants. Recursively checks the invariants of the node and its sub-nodes.
     pub open spec fn invariants(self) -> bool
         decreases self.arch.levels() - self.level,
     {
         &&& self.level < self.arch.levels()
         &&& self.entries.len() == self.arch.num_entries(self.level)
-        &&& if self.level == self.arch.levels() - 1 {
-            // Leaf node
-            forall|entry: NodeEntry|
-                self.entries.contains(entry) ==> match entry {
-                    NodeEntry::Node(_) => false,  // Leaf node cannot have sub-nodes
-                    NodeEntry::Frame(frame) => {
-                        &&& frame.size == self.arch.frame_size(self.level)
-                        &&& frame.base.aligned(frame.size.as_nat())
-                    },
-                    NodeEntry::Empty => true,
-                }
-        } else {
-            // Intermediate node
-            forall|entry: NodeEntry|
-                self.entries.contains(entry) ==> match entry {
-                    NodeEntry::Node(node) => {
-                        &&& node.level == self.level + 1
-                        &&& node.arch == self.arch
-                        &&& node.invariants()
-                    },
-                    NodeEntry::Frame(frame) => {
-                        &&& frame.size == self.arch.frame_size(self.level)
-                        &&& frame.base.aligned(frame.size.as_nat())
-                    },
-                    NodeEntry::Empty => true,
-                }
-        }
+        &&& forall|entry: NodeEntry| #[trigger]
+            self.entries.contains(entry) ==> {
+                &&& self.inv_entry(entry)
+                &&& entry is Node ==> entry->Node_0.invariants()
+            }
     }
 
     /// Creates an empty root node.
@@ -86,32 +111,41 @@ impl PTTreeNode {
     {
     }
 
-    /// Insert an entry into the node at the specified index.
-    pub open spec fn insert(self, index: int, entry: NodeEntry) -> Self {
+    /// Update an entry in the node at the specified index.
+    pub open spec fn update(self, index: int, entry: NodeEntry) -> Self
+        recommends
+            0 <= index < self.entries.len(),
+            self.inv_entry(entry),
+    {
         Self { entries: self.entries.update(index, entry), ..self }
     }
 
-    /// Theorem. `insert` function preserves invariants.
-    pub proof fn insert_preserves_invariants(self, index: int, entry: NodeEntry)
+    /// Theorem. `update` function preserves invariants.
+    pub proof fn update_preserves_invariants(self, index: int, entry: NodeEntry)
         requires
             self.invariants(),
+            0 <= index < self.entries.len(),
+            self.inv_entry(entry),
+            entry is Node ==> entry->Node_0.invariants(),
         ensures
-            self.insert(index, entry).invariants(),
+            self.update(index, entry).invariants(),
     {
-    }
-
-    /// Remove an entry from the node at the specified index.
-    pub open spec fn remove(self, index: int) -> Self {
-        Self { entries: self.entries.remove(index), ..self }
-    }
-
-    /// Theorem. `remove` function preserves invariants.
-    pub proof fn remove_preserves_invariants(self, index: int)
-        requires
-            self.invariants(),
-        ensures
-            self.remove(index).invariants(),
-    {
+        let new = self.update(index, entry);
+        assert forall|entry2: NodeEntry| #[trigger]
+            new.entries.contains(entry2) implies new.inv_entry(entry2) by {
+            if entry2 != entry {
+                assert(self.entries.contains(entry2));
+            }
+        }
+        assert forall|entry2: NodeEntry| #[trigger]
+            new.entries.contains(entry2) implies match entry2 {
+            NodeEntry::Node(node) => node.invariants(),
+            _ => true,
+        } by {
+            if entry2 != entry {
+                assert(self.entries.contains(entry2));
+            }
+        }
     }
 }
 
