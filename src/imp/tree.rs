@@ -233,7 +233,7 @@ impl PTTreeNode {
                     assert(self.visit(path) === seq![entry].add(node.visit(remain)));
                     // Recursively prove `node.visit(remain)` 
                     node.lemma_visited_nodes_satisfy_invariants(remain);
-                    
+
                     assert forall|entry2: NodeEntry| #[trigger]
                         self.visit(path).contains(entry2) implies 
                             !(entry2 is Node) || entry2->Node_0.invariants() by {
@@ -291,6 +291,54 @@ impl PTTreeNode {
     {
         // TODO
         assume(false);
+    }
+}
+
+/// Page table tree model.
+pub struct PTTreeModel {
+    /// The root node.
+    pub root: PTTreeNode,
+}
+
+impl PTTreeModel {
+    /// Invariants.
+    pub open spec fn invariants(self) -> bool {
+        self.root.invariants()
+    }
+
+    /// Map a virtual address to a physical frame.
+    /// 
+    /// If mapping succeeds, return `Ok` and the updated tree. Otherwise, return `Err` and
+    /// the original tree.
+    pub open spec fn map(self, vaddr: VAddr, frame: Frame) -> Result<Self, Self>
+        recommends
+            self.invariants(),
+    {
+        // TODO
+        Err(self)
+    }
+
+    /// Unmap a virtual address.
+    /// 
+    /// If unmapping succeeds, return `Ok` and the updated tree. Otherwise, return `Err` and
+    /// the original tree.
+    pub open spec fn unmap(self, vaddr: VAddr) -> Result<Self, Self>
+        recommends
+            self.invariants(),
+    {
+        // TODO
+        Err(self)
+    }
+
+    /// Query a virtual address, return the mapped physical frame.
+    /// 
+    /// If there is no mapping for the virtual address, return `Err(())`.
+    pub open spec fn query(self, vaddr: VAddr) -> Result<(VAddr, Frame), ()>
+        recommends
+            self.invariants(),
+    {
+        // TODO
+        Err(())
     }
 }
 
