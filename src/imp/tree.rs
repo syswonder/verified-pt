@@ -27,9 +27,14 @@ impl PTPath {
 
     /// Check if path is valid.
     pub open spec fn valid(self, arch: PTArch, start_level: nat) -> bool {
-        &&& self.len() + start_level <= arch.levels()
+        &&& self.len() + start_level <= arch.level_count()
         &&& forall|i: int|
             0 <= i < self.len() ==> self.0[i] < arch.num_entries(i as nat + start_level)
+    }
+
+    /// Get a `PTPath` from a virtual address.
+    pub open spec fn from_vaddr(vaddr: VAddr, arch: PTArch) -> PTPath {
+        PTPath(Seq::new(arch.level_count(), |i: int| arch.pte_index_of_va(vaddr, i as nat)))
     }
 }
 
@@ -62,13 +67,13 @@ pub tracked enum NodeEntry {
 impl PTTreeNode {
     /// If the node is a leaf node
     pub open spec fn is_leaf(self) -> bool {
-        self.level == self.arch.levels() - 1
+        self.level == self.arch.level_count() - 1
     }
 
     /// Invariants of an entry in a leaf node.
     pub open spec fn inv_entry_leaf(entry: NodeEntry, arch: PTArch, level: nat) -> bool
         recommends
-            level == arch.levels() - 1,
+            level == arch.level_count() - 1,
     {
         match entry {
             NodeEntry::Node(_) => false,  // Leaf node cannot have sub-nodes
@@ -83,7 +88,7 @@ impl PTTreeNode {
     /// Invariants of an entry in an intermediate node.
     pub open spec fn inv_entry_interm(entry: NodeEntry, arch: PTArch, level: nat) -> bool
         recommends
-            level < arch.levels() - 1,
+            level < arch.level_count() - 1,
     {
         match entry {
             NodeEntry::Node(node) => {
@@ -100,7 +105,7 @@ impl PTTreeNode {
 
     /// Invariants of an entry in the node at the specified level.
     pub open spec fn inv_entry(entry: NodeEntry, arch: PTArch, level: nat) -> bool {
-        if level == arch.levels() - 1 {
+        if level == arch.level_count() - 1 {
             Self::inv_entry_leaf(entry, arch, level)
         } else {
             Self::inv_entry_interm(entry, arch, level)
@@ -109,9 +114,10 @@ impl PTTreeNode {
 
     /// Invariants. Recursively checks the invariants of the node and its sub-nodes.
     pub open spec fn invariants(self) -> bool
-        decreases self.arch.levels() - self.level,
+        decreases self.arch.level_count() - self.level,
     {
-        &&& self.level < self.arch.levels()
+        &&& self.arch.invariants()
+        &&& self.level < self.arch.level_count()
         &&& self.entries.len() == self.arch.num_entries(self.level)
         &&& forall|entry: NodeEntry| #[trigger]
             self.entries.contains(entry) ==> {
@@ -121,19 +127,27 @@ impl PTTreeNode {
     }
 
     /// Creates an empty root node.
-    pub open spec fn new_root(base: VAddr, arch: PTArch) -> Self {
+    pub open spec fn new_root(base: VAddr, arch: PTArch) -> Self
+        recommends
+            arch.invariants(),
+    {
         Self { entries: seq![NodeEntry::Empty; arch.num_entries(0)], base, level: 0, arch }
     }
 
     /// Creates an empty node.
-    pub open spec fn new(base: VAddr, level: nat, arch: PTArch) -> Self {
+    pub open spec fn new(base: VAddr, level: nat, arch: PTArch) -> Self
+        recommends
+            level < arch.level_count(),
+            arch.invariants(),
+    {
         Self { entries: seq![NodeEntry::Empty; arch.num_entries(level)], base, level, arch }
     }
 
     /// Theorem. `new` function implies invariants.
     pub proof fn new_implies_invariants(base: VAddr, level: nat, arch: PTArch)
         requires
-            level < arch.levels(),
+            level < arch.level_count(),
+            arch.invariants(),
         ensures
             Self::new(base, level, arch).invariants(),
     {

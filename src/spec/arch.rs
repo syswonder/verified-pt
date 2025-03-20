@@ -1,11 +1,11 @@
 //! Page table architecture specifications.
 use vstd::prelude::*;
 
-use super::frame::FrameSize;
+use super::{addr::VAddr, frame::FrameSize, is_pow2};
 
 verus! {
 
-/// Page table architecture level.
+/// Represents a single level in a hierarchical page table structure.
 pub struct PTArchLevel {
     /// The number of entries at this level.
     pub num_entries: nat,
@@ -13,23 +13,48 @@ pub struct PTArchLevel {
     pub frame_size: FrameSize,
 }
 
-/// Page table architecture.
+/// Complete description of a page table architecture, consisting of multiple
+/// hierarchical levels from root (highest level) to leaf (lowest level).
 pub struct PTArch(pub Seq<PTArchLevel>);
 
 impl PTArch {
-    /// The number of levels in the page table.
-    pub open spec fn levels(&self) -> nat {
+    /// The number of hierarchical levels in the page table.
+    pub open spec fn level_count(self) -> nat {
         self.0.len()
     }
 
-    /// The number of entries at a given level.
-    pub open spec fn num_entries(&self, level: nat) -> nat {
+    /// The number of entries at a specified level.
+    pub open spec fn num_entries(self, level: nat) -> nat
+        recommends
+            level < self.level_count(),
+    {
         self.0[level as int].num_entries
     }
 
-    /// The frame size indicated by a block/page descriptor at a given level.
-    pub open spec fn frame_size(&self, level: nat) -> FrameSize {
+    /// The frame size associated with a block/page descriptor at a given level.
+    pub open spec fn frame_size(self, level: nat) -> FrameSize
+        recommends
+            level < self.level_count(),
+    {
         self.0[level as int].frame_size
+    }
+
+    /// Calculates the page table entry index for a virtual address at the specified level.
+    pub open spec fn pte_index_of_va(self, vaddr: VAddr, level: nat) -> nat
+        recommends
+            self.invariants(),
+            level < self.level_count(),
+    {
+        vaddr.0 / self.frame_size(level).as_nat() % self.num_entries(level)
+    }
+
+    /// Invariants.
+    pub open spec fn invariants(self) -> bool {
+        &&& self.level_count() >= 1
+        &&& forall|level: nat| #![auto] level < self.level_count() ==> is_pow2(self.num_entries(level))
+        &&& forall|level: nat|
+            1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()
+                == self.frame_size(level).as_nat() * self.num_entries(level)
     }
 }
 
@@ -51,5 +76,14 @@ pub spec const VMSAV8_S1_ARCH: PTArch = PTArch(
         PTArchLevel { num_entries: 512, frame_size: FrameSize::Size4K },
     ],
 );
+
+/// Prove `VMSAV8_S1_ARCH` satisfies its invariants.
+pub broadcast proof fn vmsav8_s1_arch_invariant()
+    by (nonlinear_arith)
+    ensures
+        #[trigger] VMSAV8_S1_ARCH.invariants(),
+{
+    assume(is_pow2(512));
+}
 
 } // verus!
