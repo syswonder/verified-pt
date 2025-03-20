@@ -6,28 +6,15 @@ use crate::spec::{addr::VAddr, arch::PTArch, frame::Frame};
 verus! {
 
 /// Represents a path from a node to an entry in the page table tree.
-pub tracked struct PTPath {
-    /// The sequence of indices representing the path.
-    pub path: Seq<nat>,
-    /// The architecture of the page table.
-    pub arch: PTArch,
-    /// The level of the starting node.
-    pub start_level: nat,
-}
+///
+/// The path is represented as a sequence of indices, where each index corresponds to
+/// an entry in the page table node at a particular level of the hierarchy.
+pub struct PTPath(pub Seq<nat>);
 
 impl PTPath {
-    /// Invariants.
-    pub open spec fn invariants(self) -> bool {
-        &&& self.start_level + self.len() <= self.arch.levels()
-        &&& forall|i: int|
-            0 <= i < self.path.len() ==> self.path[i as int] < self.arch.num_entries(
-                i as nat + self.start_level,
-            )
-    }
-
     /// Path length.
     pub open spec fn len(self) -> nat {
-        self.path.len()
+        self.0.len()
     }
 
     /// Pop head and return the remaining path.
@@ -35,10 +22,14 @@ impl PTPath {
         recommends
             self.len() > 0,
     {
-        (
-            self.path[0],
-            PTPath { path: self.path.skip(1), arch: self.arch, start_level: self.start_level + 1 },
-        )
+        (self.0[0], PTPath(self.0.skip(1)))
+    }
+
+    /// Check if path is valid.
+    pub open spec fn valid(self, arch: PTArch, start_level: nat) -> bool {
+        &&& self.len() + start_level <= arch.levels()
+        &&& forall|i: int|
+            0 <= i < self.len() ==> self.0[i] < arch.num_entries(i as nat + start_level)
     }
 }
 
@@ -192,9 +183,7 @@ impl PTTreeNode {
     pub open spec fn visit(self, path: PTPath) -> Seq<NodeEntry>
         recommends
             self.invariants(),
-            path.invariants(),
-            self.level == path.start_level,
-            self.arch == path.arch,
+            path.valid(self.arch, self.level),
         decreases path.len(),
     {
         if path.len() == 0 {
@@ -213,9 +202,7 @@ impl PTTreeNode {
     proof fn lemma_visited_nodes_satisfy_invariants(self, path: PTPath)
         requires
             self.invariants(),
-            path.invariants(),
-            self.level == path.start_level,
-            self.arch == path.arch,
+            path.valid(self.arch, self.level),
         ensures
             forall|entry: NodeEntry| #[trigger]
                 self.visit(path).contains(entry) ==> (entry is Node ==> entry->Node_0.invariants()),
@@ -231,12 +218,12 @@ impl PTTreeNode {
             match entry {
                 NodeEntry::Node(node) => {
                     assert(self.visit(path) === seq![entry].add(node.visit(remain)));
-                    // Recursively prove `node.visit(remain)` 
+                    // Recursively prove `node.visit(remain)`
                     node.lemma_visited_nodes_satisfy_invariants(remain);
 
                     assert forall|entry2: NodeEntry| #[trigger]
-                        self.visit(path).contains(entry2) implies 
-                            !(entry2 is Node) || entry2->Node_0.invariants() by {
+                        self.visit(path).contains(entry2) implies !(entry2 is Node)
+                        || entry2->Node_0.invariants() by {
                         if entry2 != entry {
                             // Satisfied because of recursive proof
                             assert(node.visit(remain).contains(entry2));
@@ -255,9 +242,7 @@ impl PTTreeNode {
     pub open spec fn recursive_update(self, path: PTPath, entry: NodeEntry) -> Self
         recommends
             self.invariants(),
-            path.invariants(),
-            self.arch == path.arch,
-            self.level + path.len() <= self.arch.levels(),
+            path.valid(self.arch, self.level),
             Self::inv_entry(entry, self.arch, (self.level + path.len() - 1) as nat),
             entry is Node ==> entry->Node_0.invariants(),
         decreases path.len(),
@@ -281,9 +266,7 @@ impl PTTreeNode {
     pub proof fn recursive_update_preserves_invariants(self, path: PTPath, entry: NodeEntry)
         requires
             self.invariants(),
-            path.invariants(),
-            self.arch == path.arch,
-            self.level + path.len() <= self.arch.levels(),
+            path.valid(self.arch, self.level),
             Self::inv_entry(entry, self.arch, (self.level + path.len() - 1) as nat),
             entry is Node ==> entry->Node_0.invariants(),
         ensures
@@ -307,7 +290,7 @@ impl PTTreeModel {
     }
 
     /// Map a virtual address to a physical frame.
-    /// 
+    ///
     /// If mapping succeeds, return `Ok` and the updated tree. Otherwise, return `Err` and
     /// the original tree.
     pub open spec fn map(self, vaddr: VAddr, frame: Frame) -> Result<Self, Self>
@@ -319,7 +302,7 @@ impl PTTreeModel {
     }
 
     /// Unmap a virtual address.
-    /// 
+    ///
     /// If unmapping succeeds, return `Ok` and the updated tree. Otherwise, return `Err` and
     /// the original tree.
     pub open spec fn unmap(self, vaddr: VAddr) -> Result<Self, Self>
@@ -331,7 +314,7 @@ impl PTTreeModel {
     }
 
     /// Query a virtual address, return the mapped physical frame.
-    /// 
+    ///
     /// If there is no mapping for the virtual address, return `Err(())`.
     pub open spec fn query(self, vaddr: VAddr) -> Result<(VAddr, Frame), ()>
         recommends
