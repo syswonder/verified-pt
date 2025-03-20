@@ -51,7 +51,9 @@ impl PTArch {
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
         &&& self.level_count() >= 1
-        &&& forall|level: nat| #![auto] level < self.level_count() ==> is_pow2(self.num_entries(level))
+        &&& forall|level: nat|
+            #![auto]
+            level < self.level_count() ==> is_pow2(self.num_entries(level))
         &&& forall|level: nat|
             1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()
                 == self.frame_size(level).as_nat() * self.num_entries(level)
