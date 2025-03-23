@@ -14,7 +14,7 @@ pub struct S1PageTable {
     /// Root address.
     pub root: PAddrExec,
     /// Frames allocated for page table.
-    pub frames: Set<FrameExec>,
+    pub frames: Vec<FrameExec>,
 }
 
 impl S1PageTable {

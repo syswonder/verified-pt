@@ -240,7 +240,19 @@ impl LowLevelState {
     /// If exists a mapping that `vaddr` lies in.
     pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
         exists|base: VAddr, frame: Frame| #[trigger]
-            self.pt.interpret().contains_pair(base, frame) && vaddr.within(
+            self.all_mappings().contains_pair(base, frame) && vaddr.within(
+                base,
+                frame.size.as_nat(),
+            )
+    }
+
+    /// Get the mapping that `vaddr` lies in.
+    pub open spec fn mapping_for(self, vaddr: VAddr) -> (VAddr, Frame)
+        recommends
+            self.has_mapping_for(vaddr),
+    {
+        choose|base: VAddr, frame: Frame| #[trigger]
+            self.all_mappings().contains_pair(base, frame) && vaddr.within(
                 base,
                 frame.size.as_nat(),
             )

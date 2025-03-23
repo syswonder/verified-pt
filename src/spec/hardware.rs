@@ -29,7 +29,7 @@ pub struct TLB(pub Map<VAddr, Frame>);
 impl TLB {
     /// Is empty.
     pub open spec fn is_empty(self) -> bool {
-        self.0.is_empty()
+        self.0 === Map::empty()
     }
 
     /// Fill a TLB entry.
@@ -76,7 +76,7 @@ impl TLB {
     #[verifier::external_body]
     pub broadcast proof fn lemma_has_conflict(self, base: VAddr, frame: Frame)
         ensures
-            match self.has_conflict(base, frame) {
+            match #[trigger] self.has_conflict(base, frame) {
                 Some(conflict) => self.0.contains_key(conflict),
                 None => !self.0.contains_key(base),
             },
@@ -111,7 +111,7 @@ impl HardwareState {
     /// Hardware init state.
     pub open spec fn init(self) -> bool {
         &&& self.tlb.is_empty()
-        &&& self.pt.interpret().is_empty()
+        &&& self.pt.interpret() === Map::empty()
     }
 
     /// Hardware state transition - memory read.
@@ -139,21 +139,19 @@ impl HardwareState {
             // 2. TLB miss, page table hit
             let (base, frame) = s1.pt_mapping_for(vaddr);
             // Check frame attributes
-            if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.readable
+            &&& if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.readable
                 && frame.attr.user_accessible {
                 &&& res is Ok
-                &&& res.unwrap() === s1.mem[vaddr.map(
-                    base,
-                    frame.base,
-                ).idx().as_int()]
-                // TLB should be updated
-                &&& s2.tlb === s1.tlb.update(base, frame)
+                &&& res.unwrap() === s1.mem[vaddr.map(base, frame.base).idx().as_int()]
             } else {
                 &&& res is Err
             }
+            // TLB should be updated
+            &&& s2.tlb === s1.tlb.update(base, frame)
         } else {
             // 3. TLB miss, page table miss
             &&& res is Err
+            &&& s2.tlb === s1.tlb
         }
     }
 
@@ -200,6 +198,7 @@ impl HardwareState {
             // 3. TLB miss, page table miss
             &&& res is Err
             &&& s2.mem === s1.mem
+            &&& s2.tlb === s1.tlb
         }
     }
 
