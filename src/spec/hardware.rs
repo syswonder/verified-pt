@@ -17,167 +17,208 @@ use vstd::prelude::*;
 use super::{
     addr::{VAddr, WORD_SIZE},
     frame::Frame,
-    op::{ReadOp, TLBEvictOp, TLBFillOp, WriteOp},
     s1pt::S1PageTable,
 };
 
 verus! {
 
+/// Translation Lookaside Buffer (TLB).
+pub struct TLB(pub Map<VAddr, Frame>);
+
+/// TLB specification.
+impl TLB {
+    /// Is empty.
+    pub open spec fn is_empty(self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Fill a TLB entry.
+    pub open spec fn fill(self, base: VAddr, frame: Frame) -> Self
+        recommends
+            !self.0.contains_key(base),
+    {
+        TLB(self.0.insert(base, frame))
+    }
+
+    /// Evict a TLB entry.
+    pub open spec fn evict(self, base: VAddr) -> Self
+        recommends
+            self.0.contains_key(base),
+    {
+        TLB(self.0.remove(base))
+    }
+
+    /// If TLB has a mapping with given base.
+    pub open spec fn contains_base(self, base: VAddr) -> bool {
+        self.0.contains_key(base)
+    }
+
+    /// If TLB has a given mapping `(base, frame)`
+    pub open spec fn contains_mapping(self, base: VAddr, frame: Frame) -> bool {
+        self.0.contains_pair(base, frame)
+    }
+
+    /// Index a TLB entry.
+    pub open spec fn index(self, base: VAddr) -> Frame
+        recommends
+            self.contains_base(base),
+    {
+        self.0[base]
+    }
+
+    /// Check if a new entry conflicts with an existing TLB entry, return the conflicting entry.
+    ///
+    /// The concrete strategy varies depending on the TLB implementation.
+    /// This specification does not dictate the eviction strategy.
+    pub open spec fn has_conflict(self, base: VAddr, frame: Frame) -> Option<VAddr>;
+
+    /// The conflict entry returned by `has_conflict` is in the TLB.
+    #[verifier::external_body]
+    pub broadcast proof fn lemma_has_conflict(self, base: VAddr, frame: Frame)
+        ensures
+            match self.has_conflict(base, frame) {
+                Some(conflict) => self.0.contains_key(conflict),
+                None => !self.0.contains_key(base),
+            },
+    {
+    }
+
+    /// Update TLB with a new entry, if there is a conflict, evict the conflicting entry.
+    pub open spec fn update(self, base: VAddr, frame: Frame) -> Self
+        recommends
+            !self.0.contains_key(base),
+    {
+        if let Some(conflict) = self.has_conflict(base, frame) {
+            self.evict(conflict).fill(base, frame)
+        } else {
+            self.fill(base, frame)
+        }
+    }
+}
+
 /// Abstract state managed by hardware.
 pub struct HardwareState {
     /// 8-byte-indexed physical memory.
-    pub mem: Seq<nat>,
+    pub mem: Seq<u64>,
     /// Page table.
     pub pt: S1PageTable,
     /// Translation Lookaside Buffer.
-    pub tlb: Map<VAddr, Frame>,
+    pub tlb: TLB,
 }
 
 /// State transition specification.
 impl HardwareState {
     /// Hardware init state.
     pub open spec fn init(self) -> bool {
-        &&& self.tlb === Map::empty()
-        &&& self.pt.interpret() === Map::empty()
+        &&& self.tlb.is_empty()
+        &&& self.pt.interpret().is_empty()
     }
 
     /// Hardware state transition - memory read.
-    pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
-        &&& op.vaddr.aligned(
+    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: Result<u64, ()>) -> bool {
+        &&& vaddr.aligned(
             WORD_SIZE,
         )
-        // Memory, page table and TLB should not be updated
+        // Memory and page table should not be updated
         &&& s1.mem === s2.mem
         &&& s1.pt === s2.pt
-        &&& s1.tlb === s2.tlb
         // Check mapping
-        &&& match op.mapping {
-            Some((base, frame)) => {
-                // If `mapping` is `Some`, it should be cached by TLB
-                &&& s1.tlb.contains_pair(
+        &&& if s1.tlb_has_mapping_for(vaddr) {
+            // 1. TLB hit
+            let (base, frame) = s1.tlb_mapping_for(vaddr);
+            // Check frame attributes
+            &&& if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.readable
+                && frame.attr.user_accessible {
+                &&& res is Ok
+                &&& res.unwrap() === s1.mem[vaddr.map(base, frame.base).idx().as_int()]
+            } else {
+                &&& res is Err
+            }
+            &&& s1.tlb === s2.tlb
+        } else if s1.pt_has_mapping_for(vaddr) {
+            // 2. TLB miss, page table hit
+            let (base, frame) = s1.pt_mapping_for(vaddr);
+            // Check frame attributes
+            if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.readable
+                && frame.attr.user_accessible {
+                &&& res is Ok
+                &&& res.unwrap() === s1.mem[vaddr.map(
                     base,
-                    frame,
-                )
-                // `vaddr` should be in the virtual page mapped by `base`
-                &&& op.vaddr.within(
-                    base,
-                    frame.size.as_nat(),
-                )
-                // `vaddr` should map to `paddr`
-                &&& op.vaddr.map(base, frame.base)
-                    === op.paddr
-                // Check frame attributes
-                &&& if op.vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.readable
-                    && frame.attr.user_accessible {
-                    // The result should be `Ok`
-                    &&& op.result is Ok
-                    &&& op.result.unwrap() === s1.mem[op.vaddr.map(base, frame.base).idx().as_int()]
-                } else {
-                    // The result should be `Err`
-                    op.result is Err
-                }
-            },
-            None => {
-                // If `mapping` is `None`
-                &&& !s1.has_mapping_for(
-                    op.vaddr,
-                )
-                // Result should be `Err`
-                &&& op.result is Err
-            },
+                    frame.base,
+                ).idx().as_int()]
+                // TLB should be updated
+                &&& s2.tlb === s1.tlb.update(base, frame)
+            } else {
+                &&& res is Err
+            }
+        } else {
+            // 3. TLB miss, page table miss
+            &&& res is Err
         }
     }
 
     /// State transition - memory write.
-    pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
-        &&& op.vaddr.aligned(
-            WORD_SIZE,
-        )
-        // Page table and TLB should not be updated
+    pub open spec fn write(
+        s1: Self,
+        s2: Self,
+        vaddr: VAddr,
+        value: u64,
+        res: Result<(), ()>,
+    ) -> bool {
+        &&& vaddr.aligned(WORD_SIZE)
+        // Page table should not be updated
         &&& s1.pt === s2.pt
-        &&& s1.tlb === s2.tlb
         // Check mapping
-        &&& match op.mapping {
-            Some((base, frame)) => {
-                // If `mapping` is `Some`, it should be cached by TLB
-                &&& s1.tlb.contains_pair(
-                    base,
-                    frame,
-                )
-                // `vaddr` should be in the virtual page mapped by `base`
-                &&& op.vaddr.within(
-                    base,
-                    frame.size.as_nat(),
-                )
-                // `vaddr` should map to `paddr`
-                &&& op.vaddr.map(base, frame.base)
-                    === op.paddr
-                // Check frame attributes
-                &&& if op.vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.writable
-                    && frame.attr.user_accessible {
-                    // The result should be `Ok`
-                    &&& op.result is Ok
-                    // Update memory
-                    &&& s2.mem === s1.mem.update(
-                        op.vaddr.map(base, frame.base).idx().as_int(),
-                        op.value,
-                    )
-                } else {
-                    // The result should be `Err`
-                    &&& op.result is Err
-                    // Memory should not be updated
-                    &&& s1.mem === s2.mem
-                }
-            },
-            None => {
-                // If `mapping` is `None`
-                &&& !s1.has_mapping_for(
-                    op.vaddr,
-                )
-                // Result should be `Err`
-                &&& op.result is Err
-                // Memory should not be updated
-                &&& s1.mem === s2.mem
-            },
+        &&& if s1.tlb_has_mapping_for(vaddr) {
+            // 1. TLB hit
+            let (base, frame) = s1.tlb_mapping_for(vaddr);
+            // Check frame attributes
+            &&& if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.writable
+                && frame.attr.user_accessible {
+                &&& res is Ok
+                &&& s2.mem === s1.mem.update(vaddr.map(base, frame.base).idx().as_int(), value)
+            } else {
+                &&& res is Err
+                &&& s2.mem === s1.mem
+            }
+            &&& s1.tlb === s2.tlb
+        } else if s1.pt_has_mapping_for(vaddr) {
+            // 2. TLB miss, page table hit
+            let (base, frame) = s1.pt_mapping_for(vaddr);
+            // Check frame attributes
+            &&& if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.writable
+                && frame.attr.user_accessible {
+                &&& res is Ok
+                &&& s2.mem === s1.mem.update(vaddr.map(base, frame.base).idx().as_int(), value)
+            } else {
+                &&& res is Err
+                &&& s2.mem === s1.mem
+            }
+            // TLB should be updated
+            &&& s2.tlb === s1.tlb.update(base, frame)
+        } else {
+            // 3. TLB miss, page table miss
+            &&& res is Err
+            &&& s2.mem === s1.mem
         }
     }
 
-    /// State transition - Page table operation.
+    /// State transition - Page table operation. This operation is performed when
+    /// page table is operated by hypervisor.
+    ///
+    /// - Memory should not be updated.
+    /// - New entries should not be added to TLB when operating the page table. They
+    /// can only be added when TLB miss occurs during memory access.
     pub open spec fn pt_op(s1: Self, s2: Self) -> bool {
-        // Memory should not be updated
-        &&& s1.mem
-            === s2.mem
-        // After page table update, hardware should ensure s2.tlb is a submap of s1.tlb
-        &&& forall|base: VAddr, frame: Frame|
-            s2.tlb.contains_pair(base, frame) ==> s1.tlb.contains_pair(base, frame)
-    }
-
-    /// State transition - TLB fill.
-    pub open spec fn tlb_fill(s1: Self, s2: Self, op: TLBFillOp) -> bool {
-        // Page table must contain the mapping
-        &&& s1.pt.interpret().contains_pair(
-            op.vaddr,
-            op.frame,
-        )
-        // Insert into tlb
-        &&& s2.tlb === s1.tlb.insert(
-            op.vaddr,
-            op.frame,
-        )
-        // Memory and page table should not be updated
         &&& s1.mem === s2.mem
-        &&& s1.pt === s2.pt
+        &&& forall|base: VAddr, frame: Frame|
+            s2.tlb.contains_mapping(base, frame) ==> s1.tlb.contains_mapping(base, frame)
     }
 
-    /// State transition - TLB eviction.
-    pub open spec fn tlb_evict(s1: Self, s2: Self, op: TLBEvictOp) -> bool {
-        // TLB must contain the mapping
-        &&& s1.tlb.contains_key(op.vaddr)
-        // Remove from tlb
-        &&& s2.tlb === s1.tlb.remove(
-            op.vaddr,
-        )
-        // Memory and page table should not be updated
+    /// State transition - explicit TLB eviction.
+    pub open spec fn tlb_evict(s1: Self, s2: Self, base: VAddr) -> bool {
+        &&& s1.tlb.contains_base(base)
+        &&& s2.tlb === s1.tlb.evict(base)
         &&& s1.mem === s2.mem
         &&& s1.pt === s2.pt
     }
@@ -185,9 +226,36 @@ impl HardwareState {
 
 /// Helper functions.
 impl HardwareState {
-    /// If exists a mapping that `vaddr` lies in.
-    pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
+    /// If TLB has a mapping for `vaddr`.
+    pub open spec fn tlb_has_mapping_for(self, vaddr: VAddr) -> bool {
         exists|base: VAddr, frame: Frame| #[trigger]
+            self.tlb.contains_mapping(base, frame) && vaddr.within(base, frame.size.as_nat())
+    }
+
+    /// Get the mapping for `vaddr` in TLB.
+    pub open spec fn tlb_mapping_for(self, vaddr: VAddr) -> (VAddr, Frame)
+        recommends
+            self.tlb_has_mapping_for(vaddr),
+    {
+        choose|base: VAddr, frame: Frame| #[trigger]
+            self.tlb.contains_mapping(base, frame) && vaddr.within(base, frame.size.as_nat())
+    }
+
+    /// If page table has a mapping for `vaddr`.
+    pub open spec fn pt_has_mapping_for(self, vaddr: VAddr) -> bool {
+        exists|base: VAddr, frame: Frame| #[trigger]
+            self.pt.interpret().contains_pair(base, frame) && vaddr.within(
+                base,
+                frame.size.as_nat(),
+            )
+    }
+
+    /// Get the mapping for `vaddr` in page table.
+    pub open spec fn pt_mapping_for(self, vaddr: VAddr) -> (VAddr, Frame)
+        recommends
+            self.pt_has_mapping_for(vaddr),
+    {
+        choose|base: VAddr, frame: Frame| #[trigger]
             self.pt.interpret().contains_pair(base, frame) && vaddr.within(
                 base,
                 frame.size.as_nat(),
