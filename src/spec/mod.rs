@@ -6,7 +6,6 @@ pub mod frame;
 pub mod hardware;
 pub mod high_level;
 pub mod low_level;
-pub mod op;
 pub mod pt_spec;
 pub mod s1pt;
 pub mod s2pt;
