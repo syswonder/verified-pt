@@ -15,7 +15,6 @@ use vstd::prelude::*;
 use super::{
     addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     frame::{Frame, FrameSize},
-    op::{MapOp, QueryOp, ReadOp, UnmapOp, WriteOp},
 };
 
 verus! {
@@ -26,7 +25,7 @@ pub struct HighLevelState {
     ///
     /// We use index rather than address. Addresses that are not aligned to 8-byte boundaries
     /// should not be used to access a value, while indexes don't face this issue.
-    pub mem: Map<VIdx, nat>,
+    pub mem: Map<VIdx, u64>,
     /// Mappings from virtual address to physical frames.
     ///
     /// The key must be the base address of a virtual page i.e. virtual range [`key`, `key + frame.size`)
@@ -51,118 +50,93 @@ impl HighLevelState {
     }
 
     /// State transition - Read.
-    pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
-        &&& op.vaddr.aligned(
+    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: Result<u64, ()>) -> bool {
+        &&& vaddr.aligned(
             WORD_SIZE,
         )
         // Memory and mappings should not be updated
         &&& s1.mappings === s2.mappings
         &&& s1.mem === s2.mem
         // Check mapping
-        &&& match op.mapping {
-            Some((base, frame)) => {
-                // If `mapping` is `Some`, `s1.mappings` should contain it
-                &&& s1.mappings.contains_pair(
-                    base,
-                    frame,
-                )
-                // `vaddr` should be in the virtual page mapped by `base`
-                &&& op.vaddr.within(
-                    base,
-                    frame.size.as_nat(),
-                )
-                // Check frame attributes
-                &&& if op.vaddr.map(base, frame.base).idx().0 < s1.constants.pmem_size
-                    && frame.attr.readable && frame.attr.user_accessible {
-                    // The result should be `Ok`
-                    &&& op.result is Ok
-                    // The value should be the value in the memory at `vidx`
-                    &&& op.result.unwrap() === s1.mem[op.vaddr.idx()]
-                } else {
-                    // The result should be `Err`
-                    op.result is Err
-                }
-            },
-            None => {
-                // If `mapping` is `None`, the memory domain should not contain `vidx`
-                &&& !s1.mem_domain_covered_by_mappings().contains(
-                    op.vaddr.idx(),
-                )
-                // Result should be `Err`
-                &&& op.result is Err
-            },
+        &&& if s1.has_mapping_for(vaddr) {
+            let (base, frame) = s1.mapping_for(vaddr);
+            // Check frame attributes
+            if vaddr.map(base, frame.base).idx().0 < s1.constants.pmem_size && frame.attr.readable
+                && frame.attr.user_accessible {
+                &&& res is Ok
+                // The value should be the value in the memory at `vidx`
+                &&& res.unwrap() === s1.mem[vaddr.idx()]
+            } else {
+                res is Err
+            }
+        } else {
+            res is Err
         }
     }
 
     /// State transition - write.
-    pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
-        &&& op.vaddr.aligned(WORD_SIZE)
+    pub open spec fn write(
+        s1: Self,
+        s2: Self,
+        vaddr: VAddr,
+        value: u64,
+        res: Result<(), ()>,
+    ) -> bool {
+        &&& vaddr.aligned(WORD_SIZE)
         // Mappings should not be updated
         &&& s1.mappings === s2.mappings
         // Check mapping
-        &&& match op.mapping {
-            Some((base, frame)) => {
-                // If `mapping` is `Some`, `s1.mappings` should contain it
-                &&& s1.mappings.contains_pair(
-                    base,
-                    frame,
-                )
-                // `vaddr` should be in the virtual page mapped by `base`
-                &&& op.vaddr.within(
-                    base,
-                    frame.size.as_nat(),
-                )
-                // Check frame attributes
-                &&& if op.vaddr.map(base, frame.base).idx().0 < s1.constants.pmem_size
-                    && frame.attr.writable && frame.attr.user_accessible {
-                    // The result should be `Ok`
-                    &&& op.result is Ok
-                    // Memory should be updated at `vidx` with `value`
-                    &&& s2.mem === s1.mem.insert(op.vaddr.idx(), op.value)
-                } else {
-                    // The result should be `Err`
-                    &&& op.result is Err
-                    // Memory should not be updated
-                    &&& s1.mem === s2.mem
-                }
-            },
-            None => {
-                // If `mapping` is `None`, the memory domain should not contain `vidx`
-                &&& !s1.mem_domain_covered_by_mappings().contains(
-                    op.vaddr.idx(),
-                )
-                // And memory should not be updated
+        &&& if s1.has_mapping_for(vaddr) {
+            let (base, frame) = s1.mapping_for(vaddr);
+            // Check frame attributes
+            if vaddr.map(base, frame.base).idx().0 < s1.constants.pmem_size && frame.attr.writable
+                && frame.attr.user_accessible {
+                &&& res is Ok
+                // Memory should be updated at `vidx` with `value`
+                &&& s2.mem === s1.mem.insert(vaddr.idx(), value)
+            } else {
+                &&& res is Err
+                // Memory should not be updated
                 &&& s1.mem === s2.mem
-                // Result should be `Err`
-                &&& op.result is Err
-            },
+            }
+        } else {
+            // The result should be `Err`
+            &&& res is Err
+            // Memory should not be updated
+            &&& s1.mem === s2.mem
         }
     }
 
     /// State transtion - Map a virtual address to a frame.
-    pub open spec fn map(s1: Self, s2: Self, op: MapOp) -> bool {
+    pub open spec fn map(
+        s1: Self,
+        s2: Self,
+        vaddr: VAddr,
+        frame: Frame,
+        res: Result<(), ()>,
+    ) -> bool {
         // Base vaddr should align to frame size
-        &&& op.vaddr.aligned(
-            op.frame.size.as_nat(),
+        &&& vaddr.aligned(
+            frame.size.as_nat(),
         )
         // Base paddr should align to frame size
-        &&& op.frame.base.aligned(
-            op.frame.size.as_nat(),
+        &&& frame.base.aligned(
+            frame.size.as_nat(),
         )
         // Frame should not overlap with existing pmem
-        &&& !s1.overlaps_pmem(op.frame)
+        &&& !s1.overlaps_pmem(frame)
         // Check vmem overlapping
-        &&& if s1.overlaps_vmem(op.vaddr, op.frame) {
+        &&& if s1.overlaps_vmem(vaddr, frame) {
             // Mapping fails
-            &&& op.result is Err
+            &&& res is Err
             // Memory and mappings should not be updated
             &&& s1.mem === s2.mem
             &&& s1.mappings === s2.mappings
         } else {
             // Mapping succeeds
-            &&& op.result is Ok
+            &&& res is Ok
             // Update mappings
-            &&& s1.mappings.insert(op.vaddr, op.frame)
+            &&& s1.mappings.insert(vaddr, frame)
                 === s2.mappings
             // Memory domain should be updated
             &&& s2.mem.dom() === s2.mem_domain_covered_by_mappings()
@@ -170,25 +144,25 @@ impl HighLevelState {
     }
 
     /// State transtion - Unmap a virtual address.
-    pub open spec fn unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, vaddr: VAddr, res: Result<(), ()>) -> bool {
         // Base vaddr should align to some valid frame size
         &&& {
-            ||| op.vaddr.aligned(FrameSize::Size4K.as_nat())
-            ||| op.vaddr.aligned(FrameSize::Size2M.as_nat())
-            ||| op.vaddr.aligned(FrameSize::Size1G.as_nat())
+            ||| vaddr.aligned(FrameSize::Size4K.as_nat())
+            ||| vaddr.aligned(FrameSize::Size2M.as_nat())
+            ||| vaddr.aligned(FrameSize::Size1G.as_nat())
         }
         // Check mapping
-        &&& if s1.mappings.contains_key(op.vaddr) {
+        &&& if s1.mappings.contains_key(vaddr) {
             // Unmapping succeeds
-            &&& op.result is Ok
+            &&& res is Ok
             // Update mappings
-            &&& s1.mappings.remove(op.vaddr)
+            &&& s1.mappings.remove(vaddr)
                 === s2.mappings
             // Memory domain should be updated
             &&& s2.mem.dom() === s2.mem_domain_covered_by_mappings()
         } else {
             // Unmapping fails
-            &&& op.result is Err
+            &&& res is Err
             // Memory and mappings should not be updated
             &&& s1.mem === s2.mem
             &&& s1.mappings === s2.mappings
@@ -196,20 +170,25 @@ impl HighLevelState {
     }
 
     /// State transition - Page table query.
-    pub open spec fn query(s1: Self, s2: Self, op: QueryOp) -> bool {
+    pub open spec fn query(
+        s1: Self,
+        s2: Self,
+        vaddr: VAddr,
+        res: Result<(VAddr, Frame), ()>,
+    ) -> bool {
         // Memory and mappings should not be updated
         &&& s1.mem === s2.mem
         &&& s1.mappings === s2.mappings
         // Check result
-        &&& match op.result {
+        &&& match res {
             Ok((base, frame)) => {
                 // Must contain the mapping
                 &&& s1.mappings.contains_pair(base, frame)
-                &&& op.vaddr.within(base, frame.size.as_nat())
+                &&& vaddr.within(base, frame.size.as_nat())
             },
             Err(_) => {
-                // Should not contain any mapping for op.vaddr
-                !s1.has_mapping_for(op.vaddr)
+                // Should not contain any mapping for vaddr
+                !s1.has_mapping_for(vaddr)
             },
         }
     }
@@ -265,6 +244,18 @@ impl HighLevelState {
     /// If there exists a mapping for `vaddr`.
     pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
         exists|base: VAddr, frame: Frame|
+            {
+                &&& #[trigger] self.mappings.contains_pair(base, frame)
+                &&& vaddr.within(base, frame.size.as_nat())
+            }
+    }
+
+    /// Get the mapping for `vaddr`.
+    pub open spec fn mapping_for(self, vaddr: VAddr) -> (VAddr, Frame)
+        recommends
+            self.has_mapping_for(vaddr),
+    {
+        choose|base: VAddr, frame: Frame|
             {
                 &&& #[trigger] self.mappings.contains_pair(base, frame)
                 &&& vaddr.within(base, frame.size.as_nat())
