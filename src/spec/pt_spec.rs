@@ -10,7 +10,6 @@ use vstd::prelude::*;
 use super::{
     addr::{PAddr, VAddr, VAddrExec, WORD_SIZE},
     frame::{Frame, FrameExec, FrameSize},
-    op::{MapOp, QueryOp, UnmapOp},
 };
 
 verus! {
@@ -37,9 +36,9 @@ impl PageTableState {
     }
 
     /// Map precondition.
-    pub open spec fn map_pre(self, vaddr: VAddr, frame: Frame) -> bool {
+    pub open spec fn map_pre(self, base: VAddr, frame: Frame) -> bool {
         // Base vaddr should align to frame size
-        &&& vaddr.aligned(
+        &&& base.aligned(
             frame.size.as_nat(),
         )
         // Base paddr should align to frame size
@@ -54,44 +53,50 @@ impl PageTableState {
     }
 
     /// State transition - map a virtual address to a physical frame.
-    pub open spec fn map(s1: Self, s2: Self, op: MapOp) -> bool {
+    pub open spec fn map(
+        s1: Self,
+        s2: Self,
+        base: VAddr,
+        frame: Frame,
+        res: Result<(), ()>,
+    ) -> bool {
         // Precondition
-        &&& s1.map_pre(op.vaddr, op.frame)
+        &&& s1.map_pre(base, frame)
         // Check vmem overlapping
-        &&& if s1.overlaps_vmem(op.vaddr, op.frame) {
+        &&& if s1.overlaps_vmem(base, frame) {
             // Mapping fails
-            &&& op.result is Err
+            &&& res is Err
             // Page table should not be updated
             &&& s1.mappings === s2.mappings
         } else {
             // Mapping succeeds
-            &&& op.result is Ok
+            &&& res is Ok
             // Update page table
-            &&& s1.mappings.insert(op.vaddr, op.frame) === s2.mappings
+            &&& s1.mappings.insert(base, frame) === s2.mappings
         }
     }
 
     /// Unmap precondition.
-    pub open spec fn unmap_pre(self, vaddr: VAddr) -> bool {
+    pub open spec fn unmap_pre(self, base: VAddr) -> bool {
         // Base vaddr should align to some valid frame size
-        ||| vaddr.aligned(FrameSize::Size4K.as_nat())
-        ||| vaddr.aligned(FrameSize::Size2M.as_nat())
-        ||| vaddr.aligned(FrameSize::Size1G.as_nat())
+        ||| base.aligned(FrameSize::Size4K.as_nat())
+        ||| base.aligned(FrameSize::Size2M.as_nat())
+        ||| base.aligned(FrameSize::Size1G.as_nat())
     }
 
     /// State transition - unmap a virtual address.
-    pub open spec fn unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, base: VAddr, res: Result<(), ()>) -> bool {
         // Precondition
-        &&& s1.unmap_pre(op.vaddr)
+        &&& s1.unmap_pre(base)
         // Check page table
-        &&& if s1.mappings.contains_key(op.vaddr) {
+        &&& if s1.mappings.contains_key(base) {
             // Unmapping succeeds
-            &&& op.result is Ok
+            &&& res is Ok
             // Update page table
-            &&& s1.mappings.remove(op.vaddr) === s2.mappings
+            &&& s1.mappings.remove(base) === s2.mappings
         } else {
             // Unmapping fails
-            &&& op.result is Err
+            &&& res is Err
             // Page table should not be updated
             &&& s1.mappings === s2.mappings
         }
@@ -104,24 +109,29 @@ impl PageTableState {
     }
 
     /// State transition - page table query.
-    pub open spec fn query(s1: Self, s2: Self, op: QueryOp) -> bool {
+    pub open spec fn query(
+        s1: Self,
+        s2: Self,
+        vaddr: VAddr,
+        res: Result<(VAddr, Frame), ()>,
+    ) -> bool {
         // Precondition
-        &&& s1.query_pre(op.vaddr)
+        &&& s1.query_pre(vaddr)
         // Page table should not be updated
         &&& s1.mappings === s2.mappings
         // Check result
-        &&& match op.result {
+        &&& match res {
             Ok((base, frame)) => {
                 // Page table must contain the mapping
                 &&& s1.mappings.contains_pair(base, frame)
-                &&& op.vaddr.within(base, frame.size.as_nat())
+                &&& vaddr.within(base, frame.size.as_nat())
             },
             Err(_) => {
-                // Page table should not contain any mapping for op.vaddr
+                // Page table should not contain any mapping for vaddr
                 !exists|base, frame|
                     {
                         &&& #[trigger] s1.mappings.contains_pair(base, frame)
-                        &&& op.vaddr.within(base, frame.size.as_nat())
+                        &&& vaddr.within(base, frame.size.as_nat())
                     }
             },
         }
@@ -193,31 +203,31 @@ pub trait PageTableInterface where Self: Sized {
     /// **EXEC** Map a virtual address to a physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (result: Result<(), ()>)
+    fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (res: Result<(), ()>)
         requires
             old(self).invariants(),
             old(self)@.map_pre(vaddr@, frame@),
         ensures
             self.invariants(),
-            PageTableState::map(old(self)@, self@, MapOp { vaddr: vaddr@, frame: frame@, result }),
+            PageTableState::map(old(self)@, self@, vaddr@, frame@, res),
     ;
 
     /// **EXEC** Unmap a virtual address.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn unmap(&mut self, vaddr: VAddrExec) -> (result: Result<(), ()>)
+    fn unmap(&mut self, vaddr: VAddrExec) -> (res: Result<(), ()>)
         requires
             old(self).invariants(),
             old(self)@.unmap_pre(vaddr@),
         ensures
             self.invariants(),
-            PageTableState::unmap(old(self)@, self@, UnmapOp { vaddr: vaddr@, result }),
+            PageTableState::unmap(old(self)@, self@, vaddr@, res),
     ;
 
     /// **EXEC** Query a virtual address, return the mapped physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn query(&mut self, vaddr: VAddrExec) -> (result: Result<(VAddrExec, FrameExec), ()>)
+    fn query(&mut self, vaddr: VAddrExec) -> (res: Result<(VAddrExec, FrameExec), ()>)
         requires
             old(self).invariants(),
             old(self)@.query_pre(vaddr@),
@@ -226,12 +236,10 @@ pub trait PageTableInterface where Self: Sized {
             PageTableState::query(
                 old(self)@,
                 self@,
-                QueryOp {
-                    vaddr: vaddr@,
-                    result: match result {
-                        Ok((vaddr, frame)) => Ok((vaddr@, frame@)),
-                        Err(()) => Err(()),
-                    },
+                vaddr@,
+                match res {
+                    Ok((vaddr, frame)) => Ok((vaddr@, frame@)),
+                    Err(()) => Err(()),
                 },
             ),
     ;

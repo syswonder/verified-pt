@@ -12,9 +12,8 @@ use vstd::prelude::*;
 use super::{
     addr::{PAddr, VAddr, VIdx},
     frame::Frame,
-    hardware::HardwareState,
+    hardware::{HardwareState, TLB},
     high_level::{HighLevelConstants, HighLevelState},
-    op::{MapOp, QueryOp, ReadOp, TLBEvictOp, TLBFillOp, UnmapOp, WriteOp},
     pt_spec::{PTConstants, PageTableState},
     s1pt::S1PageTable,
 };
@@ -28,11 +27,11 @@ verus! {
 /// - TLB: Translation Lookaside Buffer.
 pub struct LowLevelState {
     /// 8-byte-indexed physical memory.
-    pub mem: Seq<nat>,
+    pub mem: Seq<u64>,
     /// Page table.
     pub pt: S1PageTable,
     /// Translation Lookaside Buffer.
-    pub tlb: Map<VAddr, Frame>,
+    pub tlb: TLB,
 }
 
 /// State transition specification.
@@ -45,66 +44,83 @@ impl LowLevelState {
     }
 
     /// State transition - Memory read.
-    pub open spec fn read(s1: Self, s2: Self, op: ReadOp) -> bool {
-        HardwareState::read(s1.hw_state(), s2.hw_state(), op)
+    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: Result<u64, ()>) -> bool {
+        HardwareState::read(s1.hw_state(), s2.hw_state(), vaddr, res)
     }
 
     /// State transition - Memory write.
-    pub open spec fn write(s1: Self, s2: Self, op: WriteOp) -> bool {
-        HardwareState::write(s1.hw_state(), s2.hw_state(), op)
+    pub open spec fn write(
+        s1: Self,
+        s2: Self,
+        vaddr: VAddr,
+        value: u64,
+        res: Result<(), ()>,
+    ) -> bool {
+        HardwareState::write(s1.hw_state(), s2.hw_state(), vaddr, value, res)
+    }
+
+    /// State transition - Explicit TLB eviction.
+    ///
+    /// Hypervisor uses specific instructions to evict TLB entries explicitly.
+    pub open spec fn tlb_evict(s1: Self, s2: Self, base: VAddr) -> bool {
+        HardwareState::tlb_evict(s1.hw_state(), s2.hw_state(), base)
     }
 
     /// State transition - Map a frame.
-    pub open spec fn map(s1: Self, s2: Self, op: MapOp) -> bool {
+    pub open spec fn map(
+        s1: Self,
+        s2: Self,
+        base: VAddr,
+        frame: Frame,
+        res: Result<(), ()>,
+    ) -> bool {
         // Page table spec satisfied
         &&& PageTableState::map(
             s1.pt_state(),
             s2.pt_state(),
-            op,
+            base,
+            frame,
+            res,
         )
         // Hardware behaves as spec
         &&& HardwareState::pt_op(s1.hw_state(), s2.hw_state())
     }
 
     /// State transition - Unmap a frame.
-    pub open spec fn unmap(s1: Self, s2: Self, op: UnmapOp) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, base: VAddr, res: Result<(), ()>) -> bool {
         // Page table spec satisfied
         &&& PageTableState::unmap(
             s1.pt_state(),
             s2.pt_state(),
-            op,
+            base,
+            res,
         )
         // Hardware behaves as spec
         &&& HardwareState::pt_op(
             s1.hw_state(),
             s2.hw_state(),
         )
-        // Hardware ensures TLB doesn't contain the unmapped frame
-        &&& !s2.tlb.contains_key(op.vaddr)
+        // TLB doesn't contain the unmapped frame
+        // Normally, hypervisor ensures this using specific instructions.
+        &&& !s2.tlb.contains_base(base)
     }
 
     /// State transition - Query a vaddr.
-    pub open spec fn query(s1: Self, s2: Self, op: QueryOp) -> bool {
+    pub open spec fn query(
+        s1: Self,
+        s2: Self,
+        vaddr: VAddr,
+        res: Result<(VAddr, Frame), ()>,
+    ) -> bool {
         // Page table spec satisfied
         &&& PageTableState::query(
             s1.pt_state(),
             s2.pt_state(),
-            op,
+            vaddr,
+            res,
         )
         // Hardware behaves as spec
         &&& HardwareState::pt_op(s1.hw_state(), s2.hw_state())
-    }
-
-    /// State transition - TLB fill.
-    pub open spec fn tlb_fill(s1: Self, s2: Self, op: TLBFillOp) -> bool {
-        // Hardware behaves as spec
-        HardwareState::tlb_fill(s1.hw_state(), s2.hw_state(), op)
-    }
-
-    /// State transition - TLB evict.
-    pub open spec fn tlb_evict(s1: Self, s2: Self, op: TLBEvictOp) -> bool {
-        // Hardware behaves as spec
-        HardwareState::tlb_evict(s1.hw_state(), s2.hw_state(), op)
     }
 }
 
@@ -155,7 +171,7 @@ impl LowLevelState {
     /// TLB must be a submap of the page table.
     pub open spec fn tlb_is_submap_of_pt(self) -> bool {
         forall|base, frame|
-            self.tlb.contains_pair(base, frame) ==> #[trigger] self.pt.interpret().contains_pair(
+            self.tlb.contains_mapping(base, frame) ==> #[trigger] self.pt.interpret().contains_pair(
                 base,
                 frame,
             )
@@ -176,11 +192,11 @@ impl LowLevelState {
     /// Collect all page mappings managed by OS memory state (pt_mem and TLB).
     pub open spec fn all_mappings(self) -> Map<VAddr, Frame> {
         Map::new(
-            |base: VAddr| self.tlb.contains_key(base) || self.pt.interpret().contains_key(base),
+            |base: VAddr| self.tlb.contains_base(base) || self.pt.interpret().contains_key(base),
             |base: VAddr|
                 {
-                    if self.tlb.contains_key(base) {
-                        self.tlb[base]
+                    if self.tlb.contains_base(base) {
+                        self.tlb.index(base)
                     } else {
                         self.pt.interpret()[base]
                     }
@@ -189,7 +205,7 @@ impl LowLevelState {
     }
 
     /// Interpret the common memory as a map (vidx -> word value).
-    pub open spec fn interpret_mem(self) -> Map<VIdx, nat> {
+    pub open spec fn interpret_mem(self) -> Map<VIdx, u64> {
         Map::new(
             |vidx: VIdx|
                 exists|base: VAddr, frame: Frame|
