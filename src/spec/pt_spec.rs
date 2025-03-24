@@ -8,7 +8,7 @@
 use vstd::prelude::*;
 
 use super::{
-    addr::{PAddr, VAddr, VAddrExec, WORD_SIZE},
+    addr::{PAddr, PIdx, VAddr, VAddrExec, WORD_SIZE},
     frame::{Frame, FrameExec, FrameSize},
 };
 
@@ -24,8 +24,10 @@ pub struct PageTableState {
 
 /// Page table config constants.
 pub struct PTConstants {
-    /// Physical memory size (in bytes).
-    pub pmem_size: nat,
+    /// Physical memory lower bound.
+    pub pmem_lb: PIdx,
+    /// Physical memory upper bound.
+    pub pmem_ub: PIdx,
 }
 
 /// State transition specification.
@@ -46,8 +48,10 @@ impl PageTableState {
             frame.size.as_nat(),
         )
         // Frame should be within pmem
-        &&& frame.base.offset(frame.size.as_nat()).0
-            <= self.constants.pmem_size
+        &&& self.within_pmem(frame.base.idx())
+        &&& self.within_pmem(
+            frame.base.offset(frame.size.as_nat()).idx(),
+        )
         // Frame should not overlap with existing pmem
         &&& !self.overlaps_pmem(frame)
     }
@@ -60,6 +64,7 @@ impl PageTableState {
         frame: Frame,
         res: Result<(), ()>,
     ) -> bool {
+        &&& s1.constants == s2.constants
         // Precondition
         &&& s1.map_pre(base, frame)
         // Check vmem overlapping
@@ -86,6 +91,7 @@ impl PageTableState {
 
     /// State transition - unmap a virtual address.
     pub open spec fn unmap(s1: Self, s2: Self, base: VAddr, res: Result<(), ()>) -> bool {
+        &&& s1.constants == s2.constants
         // Precondition
         &&& s1.unmap_pre(base)
         // Check page table
@@ -115,6 +121,7 @@ impl PageTableState {
         vaddr: VAddr,
         res: Result<(VAddr, Frame), ()>,
     ) -> bool {
+        &&& s1.constants == s2.constants
         // Precondition
         &&& s1.query_pre(vaddr)
         // Page table should not be updated
@@ -166,6 +173,11 @@ impl PageTableState {
                     frame.size.as_nat(),
                 )
             }
+    }
+
+    /// If `pidx` is within physical memory.
+    pub open spec fn within_pmem(self, pidx: PIdx) -> bool {
+        self.constants.pmem_lb.0 <= pidx.0 < self.constants.pmem_ub.0
     }
 }
 

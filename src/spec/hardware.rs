@@ -15,12 +15,58 @@
 use vstd::prelude::*;
 
 use super::{
-    addr::{VAddr, WORD_SIZE},
+    addr::{PIdx, VAddr, WORD_SIZE},
     frame::Frame,
     s1pt::S1PageTable,
 };
 
 verus! {
+
+/// 8-byte-indexed physical memory.
+pub struct PhysMem {
+    /// Stored value
+    pub mem: Seq<u64>,
+    /// Start physical index
+    pub base: PIdx,
+}
+
+impl PhysMem {
+    /// Size of physical memory.
+    pub open spec fn len(self) -> nat {
+        self.mem.len()
+    }
+
+    /// Lower bound of physical memory.
+    pub open spec fn lb(self) -> PIdx {
+        self.base
+    }
+
+    /// Upper bound of physical memory
+    pub open spec fn ub(self) -> PIdx {
+        PIdx(self.base.0 + self.mem.len())
+    }
+
+    /// Read from physical memory.
+    pub open spec fn read(self, pidx: PIdx) -> u64
+        recommends
+            self.lb().0 <= pidx.0 < self.ub().0,
+    {
+        self.mem[pidx.0 - self.base.0]
+    }
+
+    /// Write to physical memory.
+    pub open spec fn write(self, pidx: PIdx, value: u64) -> Self
+        recommends
+            self.lb().0 <= pidx.0 < self.ub().0,
+    {
+        Self { mem: self.mem.update(pidx.0 - self.base.0, value), base: self.base }
+    }
+
+    /// If `pidx` is in the range of physical memory.
+    pub open spec fn contains(self, pidx: PIdx) -> bool {
+        self.lb().0 <= pidx.0 < self.ub().0
+    }
+}
 
 /// Translation Lookaside Buffer (TLB).
 pub struct TLB(pub Map<VAddr, Frame>);
@@ -70,13 +116,13 @@ impl TLB {
     ///
     /// The concrete strategy varies depending on the TLB implementation.
     /// This specification does not dictate the eviction strategy.
-    pub open spec fn has_conflict(self, base: VAddr, frame: Frame) -> Option<VAddr>;
+    pub open spec fn conflict(self, base: VAddr, frame: Frame) -> Option<VAddr>;
 
-    /// The conflict entry returned by `has_conflict` is in the TLB.
+    /// The conflict entry returned by `conflict` must be in the TLB.
     #[verifier::external_body]
-    pub broadcast proof fn lemma_has_conflict(self, base: VAddr, frame: Frame)
+    pub broadcast proof fn lemma_conflict(self, base: VAddr, frame: Frame)
         ensures
-            match #[trigger] self.has_conflict(base, frame) {
+            match #[trigger] self.conflict(base, frame) {
                 Some(conflict) => self.0.contains_key(conflict),
                 None => !self.0.contains_key(base),
             },
@@ -88,7 +134,7 @@ impl TLB {
         recommends
             !self.0.contains_key(base),
     {
-        if let Some(conflict) = self.has_conflict(base, frame) {
+        if let Some(conflict) = self.conflict(base, frame) {
             self.evict(conflict).fill(base, frame)
         } else {
             self.fill(base, frame)
@@ -98,8 +144,8 @@ impl TLB {
 
 /// Abstract state managed by hardware.
 pub struct HardwareState {
-    /// 8-byte-indexed physical memory.
-    pub mem: Seq<u64>,
+    /// Physical memory.
+    pub mem: PhysMem,
     /// Page table.
     pub pt: S1PageTable,
     /// Translation Lookaside Buffer.
@@ -126,11 +172,11 @@ impl HardwareState {
         &&& if s1.tlb_has_mapping_for(vaddr) {
             // 1. TLB hit
             let (base, frame) = s1.tlb_mapping_for(vaddr);
+            let pidx = vaddr.map(base, frame.base).idx();
             // Check frame attributes
-            &&& if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.readable
-                && frame.attr.user_accessible {
+            &&& if s1.mem.contains(pidx) && frame.attr.readable && frame.attr.user_accessible {
                 &&& res is Ok
-                &&& res.unwrap() === s1.mem[vaddr.map(base, frame.base).idx().as_int()]
+                &&& res.unwrap() === s1.mem.read(pidx)
             } else {
                 &&& res is Err
             }
@@ -138,11 +184,11 @@ impl HardwareState {
         } else if s1.pt_has_mapping_for(vaddr) {
             // 2. TLB miss, page table hit
             let (base, frame) = s1.pt_mapping_for(vaddr);
+            let pidx = vaddr.map(base, frame.base).idx();
             // Check frame attributes
-            &&& if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.readable
-                && frame.attr.user_accessible {
+            &&& if s1.mem.contains(pidx) && frame.attr.readable && frame.attr.user_accessible {
                 &&& res is Ok
-                &&& res.unwrap() === s1.mem[vaddr.map(base, frame.base).idx().as_int()]
+                &&& res.unwrap() === s1.mem.read(pidx)
             } else {
                 &&& res is Err
             }
@@ -170,11 +216,11 @@ impl HardwareState {
         &&& if s1.tlb_has_mapping_for(vaddr) {
             // 1. TLB hit
             let (base, frame) = s1.tlb_mapping_for(vaddr);
+            let pidx = vaddr.map(base, frame.base).idx();
             // Check frame attributes
-            &&& if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.writable
-                && frame.attr.user_accessible {
+            &&& if s1.mem.contains(pidx) && frame.attr.writable && frame.attr.user_accessible {
                 &&& res is Ok
-                &&& s2.mem === s1.mem.update(vaddr.map(base, frame.base).idx().as_int(), value)
+                &&& s2.mem === s1.mem.write(pidx, value)
             } else {
                 &&& res is Err
                 &&& s2.mem === s1.mem
@@ -183,11 +229,11 @@ impl HardwareState {
         } else if s1.pt_has_mapping_for(vaddr) {
             // 2. TLB miss, page table hit
             let (base, frame) = s1.pt_mapping_for(vaddr);
+            let pidx = vaddr.map(base, frame.base).idx();
             // Check frame attributes
-            &&& if vaddr.map(base, frame.base).idx().0 < s1.mem.len() && frame.attr.writable
-                && frame.attr.user_accessible {
+            &&& if s1.mem.contains(pidx) && frame.attr.writable && frame.attr.user_accessible {
                 &&& res is Ok
-                &&& s2.mem === s1.mem.update(vaddr.map(base, frame.base).idx().as_int(), value)
+                &&& s2.mem === s1.mem.write(pidx, value)
             } else {
                 &&& res is Err
                 &&& s2.mem === s1.mem

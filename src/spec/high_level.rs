@@ -13,7 +13,7 @@
 use vstd::prelude::*;
 
 use super::{
-    addr::{PAddr, VAddr, VIdx, WORD_SIZE},
+    addr::{PAddr, PIdx, VAddr, VIdx, WORD_SIZE},
     frame::{Frame, FrameSize},
 };
 
@@ -37,8 +37,10 @@ pub struct HighLevelState {
 
 /// High-level (abstract) memory state constants.
 pub struct HighLevelConstants {
-    /// Physical memory size (in bytes).
-    pub pmem_size: nat,
+    /// Physical memory lower bound.
+    pub pmem_lb: PIdx,
+    /// Physical memory upper bound.
+    pub pmem_ub: PIdx,
 }
 
 /// State transition specifications.
@@ -51,6 +53,8 @@ impl HighLevelState {
 
     /// State transition - Read.
     pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: Result<u64, ()>) -> bool {
+        &&& s1.constants === s2.constants
+        // vaddr should align to 8 bytes
         &&& vaddr.aligned(
             WORD_SIZE,
         )
@@ -61,7 +65,7 @@ impl HighLevelState {
         &&& if s1.has_mapping_for(vaddr) {
             let (base, frame) = s1.mapping_for(vaddr);
             // Check frame attributes
-            if vaddr.map(base, frame.base).idx().0 < s1.constants.pmem_size && frame.attr.readable
+            if s1.within_pmem(vaddr.map(base, frame.base).idx()) && frame.attr.readable
                 && frame.attr.user_accessible {
                 &&& res is Ok
                 // The value should be the value in the memory at `vidx`
@@ -82,6 +86,8 @@ impl HighLevelState {
         value: u64,
         res: Result<(), ()>,
     ) -> bool {
+        &&& s1.constants === s2.constants
+        // vaddr should align to 8 bytes
         &&& vaddr.aligned(WORD_SIZE)
         // Mappings should not be updated
         &&& s1.mappings === s2.mappings
@@ -89,7 +95,7 @@ impl HighLevelState {
         &&& if s1.has_mapping_for(vaddr) {
             let (base, frame) = s1.mapping_for(vaddr);
             // Check frame attributes
-            if vaddr.map(base, frame.base).idx().0 < s1.constants.pmem_size && frame.attr.writable
+            if s1.within_pmem(vaddr.map(base, frame.base).idx()) && frame.attr.writable
                 && frame.attr.user_accessible {
                 &&& res is Ok
                 // Memory should be updated at `vidx` with `value`
@@ -115,6 +121,8 @@ impl HighLevelState {
         frame: Frame,
         res: Result<(), ()>,
     ) -> bool {
+        &&& s1.constants
+            === s2.constants
         // Base vaddr should align to frame size
         &&& vaddr.aligned(
             frame.size.as_nat(),
@@ -145,6 +153,8 @@ impl HighLevelState {
 
     /// State transtion - Unmap a virtual address.
     pub open spec fn unmap(s1: Self, s2: Self, vaddr: VAddr, res: Result<(), ()>) -> bool {
+        &&& s1.constants
+            === s2.constants
         // Base vaddr should align to some valid frame size
         &&& {
             ||| vaddr.aligned(FrameSize::Size4K.as_nat())
@@ -176,6 +186,8 @@ impl HighLevelState {
         vaddr: VAddr,
         res: Result<(VAddr, Frame), ()>,
     ) -> bool {
+        &&& s1.constants
+            === s2.constants
         // Memory and mappings should not be updated
         &&& s1.mem === s2.mem
         &&& s1.mappings === s2.mappings
@@ -260,6 +272,11 @@ impl HighLevelState {
                 &&& #[trigger] self.mappings.contains_pair(base, frame)
                 &&& vaddr.within(base, frame.size.as_nat())
             }
+    }
+
+    /// If `pidx` is within physical memory.
+    pub open spec fn within_pmem(self, pidx: PIdx) -> bool {
+        self.constants.pmem_lb.0 <= pidx.0 < self.constants.pmem_ub.0
     }
 }
 

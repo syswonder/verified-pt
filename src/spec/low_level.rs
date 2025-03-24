@@ -12,7 +12,7 @@ use vstd::prelude::*;
 use super::{
     addr::{PAddr, VAddr, VIdx},
     frame::Frame,
-    hardware::{HardwareState, TLB},
+    hardware::{HardwareState, PhysMem, TLB},
     high_level::{HighLevelConstants, HighLevelState},
     pt_spec::{PTConstants, PageTableState},
     s1pt::S1PageTable,
@@ -26,8 +26,8 @@ verus! {
 /// - Page table: Stage 1 page table.
 /// - TLB: Translation Lookaside Buffer.
 pub struct LowLevelState {
-    /// 8-byte-indexed physical memory.
-    pub mem: Seq<u64>,
+    /// Physical memory.
+    pub mem: PhysMem,
     /// Page table.
     pub pt: S1PageTable,
     /// Translation Lookaside Buffer.
@@ -129,8 +129,8 @@ impl LowLevelState {
     /// All frames are within the physical memory bounds.
     pub open spec fn frames_within_pmem(self) -> bool {
         forall|base: VAddr, frame: Frame| #[trigger]
-            self.pt.interpret().contains_pair(base, frame) ==> frame.base.0 + frame.size.as_nat()
-                <= self.mem.len()
+            self.pt.interpret().contains_pair(base, frame) ==> self.mem.contains(frame.base.idx())
+                && self.mem.contains(frame.base.offset(frame.size.as_nat()).idx())
     }
 
     /// All mappings (vbase, pbase) are 8-byte aligned.
@@ -220,7 +220,7 @@ impl LowLevelState {
                             &&& #[trigger] self.all_mappings().contains_pair(base, frame)
                             &&& vidx.addr().within(base, frame.size.as_nat())
                         };
-                    self.mem[vidx.addr().map(base, frame.base).idx().as_int()]
+                    self.mem.read(vidx.addr().map(base, frame.base).idx())
                 },
         )
     }
@@ -230,7 +230,7 @@ impl LowLevelState {
         HighLevelState {
             mem: self.interpret_mem(),
             mappings: self.all_mappings(),
-            constants: HighLevelConstants { pmem_size: self.mem.len() },
+            constants: HighLevelConstants { pmem_lb: self.mem.lb(), pmem_ub: self.mem.ub() },
         }
     }
 }
@@ -267,7 +267,7 @@ impl LowLevelState {
     pub open spec fn pt_state(self) -> PageTableState {
         PageTableState {
             mappings: self.pt.interpret(),
-            constants: PTConstants { pmem_size: self.mem.len() },
+            constants: PTConstants { pmem_ub: self.mem.ub(), pmem_lb: self.mem.lb() },
         }
     }
 }

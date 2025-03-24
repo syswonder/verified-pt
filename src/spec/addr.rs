@@ -7,7 +7,6 @@ verus! {
 pub spec const WORD_SIZE: nat = 8;
 
 /// Representing virtual address.
-#[derive(Clone, Copy)]
 pub struct VAddr(pub nat);
 
 impl VAddr {
@@ -52,7 +51,6 @@ impl VAddr {
 }
 
 /// Representing physical address.
-#[derive(Clone, Copy)]
 pub struct PAddr(pub nat);
 
 impl PAddr {

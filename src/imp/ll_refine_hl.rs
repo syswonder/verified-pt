@@ -96,14 +96,14 @@ proof fn lemma_mapping_in_both_tlb_and_pt(st: LowLevelState, vaddr: VAddr)
         st.mapping_for(vaddr) === st.hw_state().tlb_mapping_for(vaddr),
 {
     assert(st.hw_state().pt === st.pt);
-    
+
     let (base, frame) = st.hw_state().tlb_mapping_for(vaddr);
     // TLB is submap of PT.
     assert(st.pt.interpret().contains_pair(base, frame));
     assert(st.hw_state().pt_has_mapping_for(vaddr));
     // Lemma ensures that the two mappings are equal.
     lemma_at_most_one_mapping_for_vaddr(st, vaddr);
-    
+
     lemma_pt_interpret_equals_all_mappings(st);
     assert(st.has_mapping_for(vaddr));
 }
@@ -312,21 +312,22 @@ proof fn ll_read_refines_hl_read(
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
         // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
+
         let (base, frame) = s1.mapping_for(vaddr);
-        
+
         let pidx = vaddr.map(base, frame.base).idx();
-        if pidx.0 < s1.mem.len() && frame.attr.readable && frame.attr.user_accessible {
+        if s1.mem.contains(pidx) && frame.attr.readable && frame.attr.user_accessible {
             // Values in the intepreted memory are the same as in the OS memory, because
             // there is only one mapping for `op.vaddr` (lemma).
             lemma_at_most_one_mapping_for_vaddr(s1, vaddr);
-            assert(s1.interpret_mem()[vaddr.idx()] === s1.mem[pidx.as_int()]);
+            assert(s1.interpret_mem()[vaddr.idx()] === s1.mem.read(pidx));
             assert(res is Ok);
         } else {
             assert(res is Err);
         }
     } else {
         if s1.hw_state().tlb_has_mapping_for(vaddr) {
-            // Lemma ensures TLB miss and PT miss 
+            // Lemma ensures TLB miss and PT miss
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
         assert(!s1.has_mapping_for(vaddr));
@@ -367,25 +368,26 @@ proof fn ll_write_refines_hl_write(
 {
     lemma_pt_interpret_equals_all_mappings(s1);
     assert(s1@.mappings === s2@.mappings);
-    
+
     if s1.has_mapping_for(vaddr) {
         if s1.hw_state().tlb_has_mapping_for(vaddr) {
             // Lemma tells us "TLB hit" and "TLB miss, PT hit" are equivalent.
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
         // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
+
         let (base, frame) = s1.mapping_for(vaddr);
 
         let vidx = vaddr.idx();
         let pidx = vaddr.map(base, frame.base).idx();
-        if pidx.0 < s1.mem.len() && frame.attr.writable && frame.attr.user_accessible {
+        if s1.mem.contains(pidx) && frame.attr.writable && frame.attr.user_accessible {
             // Prove that the interpreted memory is updated correctly.
             assert forall|vidx2: VIdx|
-            s2.interpret_mem().contains_key(vidx2) && s1.interpret_mem().insert(
-                vaddr.idx(),
-                value,
-            ).contains_key(vidx2) implies #[trigger] s2.interpret_mem()[vidx2]
-            == s1.interpret_mem().insert(vaddr.idx(), value)[vidx2] by {
+                s2.interpret_mem().contains_key(vidx2) && s1.interpret_mem().insert(
+                    vaddr.idx(),
+                    value,
+                ).contains_key(vidx2) implies #[trigger] s2.interpret_mem()[vidx2]
+                == s1.interpret_mem().insert(vaddr.idx(), value)[vidx2] by {
                 if vidx2 == vaddr.idx() {
                     // Prove that value at `vidx` is updated.
                     //
@@ -396,18 +398,18 @@ proof fn ll_write_refines_hl_write(
                 } else {
                     // Prove that values at other indices are unchanged.
                     let (base2, frame2) = choose|base2: VAddr, frame2: Frame|
-                    {
-                        &&& #[trigger] s1.all_mappings().contains_pair(base2, frame2)
-                        &&& vidx2.addr().within(base2, frame2.size.as_nat())
-                        &&& vidx2.addr().map(base2, frame2.base).idx().0 < s1.mem.len()
-                    };
+                        {
+                            &&& #[trigger] s1.all_mappings().contains_pair(base2, frame2)
+                            &&& vidx2.addr().within(base2, frame2.size.as_nat())
+                            &&& s1.mem.contains(vidx2.addr().map(base2, frame2.base).idx())
+                        };
                     let pidx2 = vidx2.addr().map(base2, frame2.base).idx();
                     // Only `interpret_mem()[vidx]` and `mem[pidx]` are updated.
                     //
                     // Lemma ensures that `pidx` and `pidx2` are different for different `vidx` and `vidx2`.
                     // Thus `mem[pidx2]` is not updated.
                     lemma_different_pidxs_for_different_vidxs(s1, vidx, vidx2);
-                    assert(s1.mem[pidx2.as_int()] == s2.mem[pidx2.as_int()]);
+                    assert(s1.mem.read(pidx2) == s2.mem.read(pidx2));
                 }
             }
             assert(s2.interpret_mem() === s1.interpret_mem().insert(vaddr.idx(), value));
@@ -418,7 +420,7 @@ proof fn ll_write_refines_hl_write(
         }
     } else {
         if s1.hw_state().tlb_has_mapping_for(vaddr) {
-            // Lemma ensures TLB miss and PT miss 
+            // Lemma ensures TLB miss and PT miss
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
         assert(!s1.has_mapping_for(vaddr));
@@ -455,10 +457,12 @@ proof fn ll_map_preserves_invariants(
         }
         // Prove mappings within physical memory.
         assert forall|base2: VAddr, frame2: Frame| #[trigger]
-            s2.pt.interpret().contains_pair(base2, frame2) implies frame2.base.0
-            + frame2.size.as_nat() <= s2.mem.len() by {
+            s2.pt.interpret().contains_pair(base2, frame2) implies s2.mem.contains(
+            frame2.base.idx(),
+        ) && s2.mem.contains(frame2.base.offset(frame2.size.as_nat()).idx()) by {
             if base2 == base {
-                assert(frame.base.0 + frame.size.as_nat() <= s2.mem.len());
+                assert(s2.mem.contains(frame.base.idx()));
+                assert(s2.mem.contains(frame.base.offset(frame.size.as_nat()).idx()));
             } else {
                 assert(s1.pt.interpret().contains_pair(base2, frame2));
             }
