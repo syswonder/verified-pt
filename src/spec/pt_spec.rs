@@ -9,7 +9,8 @@ use vstd::prelude::*;
 
 use super::{
     addr::{PAddr, PIdx, VAddr, VAddrExec, WORD_SIZE},
-    frame::{Frame, FrameExec, FrameSize},
+    arch::PTArch,
+    frame::{Frame, FrameExec},
 };
 
 verus! {
@@ -24,6 +25,8 @@ pub struct PageTableState {
 
 /// Page table config constants.
 pub struct PTConstants {
+    /// Page table architecture,
+    pub arch: PTArch,
     /// Physical memory lower bound.
     pub pmem_lb: PIdx,
     /// Physical memory upper bound.
@@ -39,6 +42,10 @@ impl PageTableState {
 
     /// Map precondition.
     pub open spec fn map_pre(self, base: VAddr, frame: Frame) -> bool {
+        // Arch should support frame size
+        &&& self.constants.arch.valid_frame_sizes().contains(
+            frame.size,
+        )
         // Base vaddr should align to frame size
         &&& base.aligned(
             frame.size.as_nat(),
@@ -83,10 +90,8 @@ impl PageTableState {
 
     /// Unmap precondition.
     pub open spec fn unmap_pre(self, base: VAddr) -> bool {
-        // Base vaddr should align to some valid frame size
-        ||| base.aligned(FrameSize::Size4K.as_nat())
-        ||| base.aligned(FrameSize::Size2M.as_nat())
-        ||| base.aligned(FrameSize::Size1G.as_nat())
+        // Base vaddr should align to leaf frame size
+        &&& base.aligned(self.constants.arch.leaf_frame_size().as_nat())
     }
 
     /// State transition - unmap a virtual address.

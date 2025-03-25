@@ -1,19 +1,45 @@
 //! Stage-1 VMSAv8-64 page table specification.
-use vstd::prelude::*;
+use vstd::{pervasive::unreached, prelude::*};
 
 use super::{
     addr::{PAddr, PAddrExec, VAddr},
+    arch::PTArch,
     frame::{Frame, FrameAttr, FrameExec, FrameSize},
     nat_to_u64,
 };
 
 verus! {
 
+/// Abstract model of page table memory.
+pub struct PageTableMem {
+    /// Frames allocated for the page table, the first frame is the root table.
+    pub frames: Seq<Frame>,
+    /// Page table architecture.
+    pub arch: PTArch,
+}
+
+impl PageTableMem {
+    /// Invariants.
+    pub open spec fn invariants(self) -> bool {
+        // Root table is always present.
+        &&& self.frames.len() > 0
+        // All frames should not overlap.
+        &&& forall|frame1: Frame, frame2: Frame| #[trigger]
+            self.frames.contains(frame1) && #[trigger] self.frames.contains(frame2)
+                ==> !PAddr::overlap(
+                frame1.base,
+                frame1.size.as_nat(),
+                frame2.base,
+                frame2.size.as_nat(),
+            )
+    }
+}
+
 /// Stage-1 VMSAv8-64 page table.
 pub struct S1PageTable {
-    /// Root address.
-    pub root: PAddrExec,
     /// Frames allocated for page table.
+    ///
+    /// The first frame is the root page table.
     pub frames: Vec<FrameExec>,
 }
 
@@ -34,23 +60,27 @@ impl S1PageTable {
     }
 
     /// Allocate a new physical frame.
-    pub open spec fn alloc(self, size: FrameSize) -> (frame: Frame) {
-        // TODO: allocate a new frame
-        Frame {
-            base: PAddr(0),
-            size,
-            attr: FrameAttr {
-                readable: true,
-                writable: true,
-                executable: true,
-                user_accessible: true,
-            },
-        }
+    #[verifier::external_body]
+    pub fn alloc_frame(&mut self) -> (res: Result<PAddrExec, ()>)
+        requires
+            old(self).invariants(),
+        ensures
+            self.invariants(),
+    {
+        unreached()
     }
 
     /// Deallocate a physical frame.
-    pub fn dealloc(&mut self, frame: Frame) {
-        // TODO: deallocate a frame
+    #[verifier::external_body]
+    pub fn dealloc_frame(&mut self, paddr: PAddrExec) -> (res: Result<(), ()>)
+        requires
+            old(self).invariants(),
+            exists|frame| #[trigger] old(self).frames().contains(frame) && frame.base == paddr,
+        ensures
+            self.invariants(),
+            !exists|frame| #[trigger] self.frames().contains(frame) && frame.base == paddr,
+    {
+        unreached()
     }
 
     pub open spec fn frame_view(self, frame: Frame) -> Seq<nat>;
@@ -60,7 +90,29 @@ impl S1PageTable {
         0
     }
 
-    /// Interpret as mappings.
+    pub open spec fn frames(self) -> Seq<FrameExec> {
+        Seq::new(self.frames.len() as nat, |i| self.frames[i])
+    }
+
+    /// Invariants.
+    pub open spec fn invariants(self) -> bool {
+        // Root table is always present.
+        &&& self.frames().len() > 0
+        // All frames should not overlap.
+        &&& forall|frame1: FrameExec, frame2: FrameExec| #[trigger]
+            self.frames().contains(frame1) && #[trigger] self.frames().contains(frame2)
+                ==> !PAddr::overlap(
+                frame1.base@,
+                frame1.size.as_nat(),
+                frame2.base@,
+                frame2.size.as_nat(),
+            )
+    }
+
+    /// Interpret as `(vbase, frame)` mappings.
+    ///
+    /// This function extracts all mappings that valid hardware page table walks can reach.
+    /// Hardware behavior is specified by the `walk` function.
     pub open spec fn interpret(self) -> Map<VAddr, Frame> {
         let max_vaddr: nat = 0x8000_0000;
         Map::new(

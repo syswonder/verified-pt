@@ -14,7 +14,8 @@ use vstd::prelude::*;
 
 use super::{
     addr::{PAddr, PIdx, VAddr, VIdx, WORD_SIZE},
-    frame::{Frame, FrameSize},
+    arch::PTArch,
+    frame::Frame,
 };
 
 verus! {
@@ -35,8 +36,10 @@ pub struct HighLevelState {
     pub constants: HighLevelConstants,
 }
 
-/// High-level (abstract) memory state constants.
+/// Constants for the high-level state.
 pub struct HighLevelConstants {
+    /// Page table architecture.
+    pub arch: PTArch,
     /// Physical memory lower bound.
     pub pmem_lb: PIdx,
     /// Physical memory upper bound.
@@ -123,6 +126,10 @@ impl HighLevelState {
     ) -> bool {
         &&& s1.constants
             === s2.constants
+        // Arch should support frame size
+        &&& s1.constants.arch.valid_frame_sizes().contains(
+            frame.size,
+        )
         // Base vaddr should align to frame size
         &&& vaddr.aligned(
             frame.size.as_nat(),
@@ -155,12 +162,10 @@ impl HighLevelState {
     pub open spec fn unmap(s1: Self, s2: Self, vaddr: VAddr, res: Result<(), ()>) -> bool {
         &&& s1.constants
             === s2.constants
-        // Base vaddr should align to some valid frame size
-        &&& {
-            ||| vaddr.aligned(FrameSize::Size4K.as_nat())
-            ||| vaddr.aligned(FrameSize::Size2M.as_nat())
-            ||| vaddr.aligned(FrameSize::Size1G.as_nat())
-        }
+        // Base vaddr should align to leaf frame size
+        &&& vaddr.aligned(
+            s1.constants.arch.leaf_frame_size().as_nat(),
+        )
         // Check mapping
         &&& if s1.mappings.contains_key(vaddr) {
             // Unmapping succeeds

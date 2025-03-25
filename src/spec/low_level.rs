@@ -11,6 +11,7 @@ use vstd::prelude::*;
 
 use super::{
     addr::{PAddr, VAddr, VIdx},
+    arch::PTArch,
     frame::Frame,
     hardware::{HardwareState, PhysMem, TLB},
     high_level::{HighLevelConstants, HighLevelState},
@@ -32,6 +33,14 @@ pub struct LowLevelState {
     pub pt: S1PageTable,
     /// Translation Lookaside Buffer.
     pub tlb: TLB,
+    /// Constants.
+    pub constants: LowLevelConstants,
+}
+
+/// Constants for the low-level state.
+pub struct LowLevelConstants {
+    /// Page table architecture
+    pub arch: PTArch,
 }
 
 /// State transition specification.
@@ -40,12 +49,14 @@ impl LowLevelState {
     ///
     /// The initial state must satisfy the specification.
     pub open spec fn init(self) -> bool {
-        HardwareState::init(self.hw_state())
+        &&& self.constants.arch.invariants()
+        &&& HardwareState::init(self.hw_state())
     }
 
     /// State transition - Memory read.
     pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: Result<u64, ()>) -> bool {
-        HardwareState::read(s1.hw_state(), s2.hw_state(), vaddr, res)
+        &&& s1.constants === s2.constants
+        &&& HardwareState::read(s1.hw_state(), s2.hw_state(), vaddr, res)
     }
 
     /// State transition - Memory write.
@@ -56,14 +67,16 @@ impl LowLevelState {
         value: u64,
         res: Result<(), ()>,
     ) -> bool {
-        HardwareState::write(s1.hw_state(), s2.hw_state(), vaddr, value, res)
+        &&& s1.constants === s2.constants
+        &&& HardwareState::write(s1.hw_state(), s2.hw_state(), vaddr, value, res)
     }
 
     /// State transition - Explicit TLB eviction.
     ///
     /// Hypervisor uses specific instructions to evict TLB entries explicitly.
     pub open spec fn tlb_evict(s1: Self, s2: Self, base: VAddr) -> bool {
-        HardwareState::tlb_evict(s1.hw_state(), s2.hw_state(), base)
+        &&& s1.constants === s2.constants
+        &&& HardwareState::tlb_evict(s1.hw_state(), s2.hw_state(), base)
     }
 
     /// State transition - Map a frame.
@@ -74,6 +87,7 @@ impl LowLevelState {
         frame: Frame,
         res: Result<(), ()>,
     ) -> bool {
+        &&& s1.constants === s2.constants
         // Page table spec satisfied
         &&& PageTableState::map(
             s1.pt_state(),
@@ -88,6 +102,7 @@ impl LowLevelState {
 
     /// State transition - Unmap a frame.
     pub open spec fn unmap(s1: Self, s2: Self, base: VAddr, res: Result<(), ()>) -> bool {
+        &&& s1.constants === s2.constants
         // Page table spec satisfied
         &&& PageTableState::unmap(
             s1.pt_state(),
@@ -112,6 +127,7 @@ impl LowLevelState {
         vaddr: VAddr,
         res: Result<(VAddr, Frame), ()>,
     ) -> bool {
+        &&& s1.constants === s2.constants
         // Page table spec satisfied
         &&& PageTableState::query(
             s1.pt_state(),
@@ -179,6 +195,7 @@ impl LowLevelState {
 
     /// OS state invariants.
     pub open spec fn invariants(self) -> bool {
+        &&& self.constants.arch.invariants()
         &&& self.frames_within_pmem()
         &&& self.mappings_aligned()
         &&& self.mappings_nonoverlap_in_vmem()
@@ -230,7 +247,11 @@ impl LowLevelState {
         HighLevelState {
             mem: self.interpret_mem(),
             mappings: self.all_mappings(),
-            constants: HighLevelConstants { pmem_lb: self.mem.lb(), pmem_ub: self.mem.ub() },
+            constants: HighLevelConstants {
+                arch: self.constants.arch,
+                pmem_lb: self.mem.lb(),
+                pmem_ub: self.mem.ub(),
+            },
         }
     }
 }
@@ -267,7 +288,11 @@ impl LowLevelState {
     pub open spec fn pt_state(self) -> PageTableState {
         PageTableState {
             mappings: self.pt.interpret(),
-            constants: PTConstants { pmem_ub: self.mem.ub(), pmem_lb: self.mem.lb() },
+            constants: PTConstants {
+                arch: self.constants.arch,
+                pmem_ub: self.mem.ub(),
+                pmem_lb: self.mem.lb(),
+            },
         }
     }
 }

@@ -13,8 +13,11 @@ pub struct PTArchLevel {
     pub frame_size: FrameSize,
 }
 
+/// Page table entry size.
+pub spec const PTE_SIZE: nat = 8;
+
 /// Complete description of a page table architecture, consisting of multiple
-/// hierarchical levels from root (highest level) to leaf (lowest level).
+/// hierarchical levels from root (lowest level) to leaf (highest level).
 pub struct PTArch(pub Seq<PTArchLevel>);
 
 impl PTArch {
@@ -39,6 +42,24 @@ impl PTArch {
         self.0[level as int].frame_size
     }
 
+    /// The size of a leaf frame.
+    pub open spec fn leaf_frame_size(self) -> FrameSize {
+        self.frame_size((self.level_count() - 1) as nat)
+    }
+
+    /// The size of a table at a given level.
+    pub open spec fn table_size(self, level: nat) -> nat
+        recommends
+            level < self.level_count(),
+    {
+        self.num_entries(level) * PTE_SIZE
+    }
+
+    /// All valid frame sizes in this architecture.
+    pub open spec fn valid_frame_sizes(self) -> Set<FrameSize> {
+        Seq::new(self.level_count(), |i| self.frame_size(i as nat)).to_set()
+    }
+
     /// Calculates the page table entry index for a virtual address at the specified level.
     pub open spec fn pte_index_of_va(self, vaddr: VAddr, level: nat) -> nat
         recommends
@@ -50,10 +71,15 @@ impl PTArch {
 
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
+        // At least one level.
         &&& self.level_count() >= 1
+        // Each level has 2^N entries
         &&& forall|level: nat|
             #![auto]
-            level < self.level_count() ==> is_pow2(self.num_entries(level))
+            level < self.level_count() ==> is_pow2(
+                self.num_entries(level),
+            )
+        // frame_size(N) = frame_size(N+1) * num_entries(N+1)
         &&& forall|level: nat|
             1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()
                 == self.frame_size(level).as_nat() * self.num_entries(level)
@@ -64,13 +90,13 @@ impl PTArch {
 ///
 /// | Level | Index into PT | Entry Num |  Entry Type  | Frame Size |
 /// |-------|---------------|-----------|--------------|------------|
-/// | 0     | 47:39         | 512       | Table/Block* | 512G       |
+/// | 0     | 47:39         | 512       | Table        | 512G       |
 /// | 1     | 38:30         | 512       | Table/Block  | 1G         |
 /// | 2     | 29:21         | 512       | Table/Block  | 2M         |
 /// | 3     | 20:12         | 512       | Page         | 4K         |
 ///
 /// *If effective value of TCR_ELx.DS is 0, level 0 allows Table descriptor only.
-pub spec const VMSAV8_S1_ARCH: PTArch = PTArch(
+pub spec const VMSAV8_S1_4K_ARCH: PTArch = PTArch(
     seq![
         PTArchLevel { num_entries: 512, frame_size: FrameSize::Size512G },
         PTArchLevel { num_entries: 512, frame_size: FrameSize::Size1G },
@@ -80,10 +106,10 @@ pub spec const VMSAV8_S1_ARCH: PTArch = PTArch(
 );
 
 /// Prove `VMSAV8_S1_ARCH` satisfies its invariants.
-pub broadcast proof fn vmsav8_s1_arch_invariant()
+pub broadcast proof fn vmsav8_s1_4k_arch_invariants()
     by (nonlinear_arith)
     ensures
-        #[trigger] VMSAV8_S1_ARCH.invariants(),
+        #[trigger] VMSAV8_S1_4K_ARCH.invariants(),
 {
     assume(is_pow2(512));
 }
