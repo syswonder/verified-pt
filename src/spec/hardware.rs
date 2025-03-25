@@ -17,7 +17,7 @@ use vstd::prelude::*;
 use super::{
     addr::{PIdx, VAddr, WORD_SIZE},
     frame::Frame,
-    s1pt::S1PageTable,
+    s1pt::PageTableMem,
 };
 
 verus! {
@@ -147,7 +147,7 @@ pub struct HardwareState {
     /// Physical memory.
     pub mem: PhysMem,
     /// Page table.
-    pub pt: S1PageTable,
+    pub pt: PageTableMem,
     /// Translation Lookaside Buffer.
     pub tlb: TLB,
 }

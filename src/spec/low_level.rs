@@ -16,7 +16,7 @@ use super::{
     hardware::{HardwareState, PhysMem, TLB},
     high_level::{HighLevelConstants, HighLevelState},
     pt_spec::{PTConstants, PageTableState},
-    s1pt::S1PageTable,
+    s1pt::PageTableMem,
 };
 
 verus! {
@@ -30,7 +30,7 @@ pub struct LowLevelState {
     /// Physical memory.
     pub mem: PhysMem,
     /// Page table.
-    pub pt: S1PageTable,
+    pub pt: PageTableMem,
     /// Translation Lookaside Buffer.
     pub tlb: TLB,
     /// Constants.

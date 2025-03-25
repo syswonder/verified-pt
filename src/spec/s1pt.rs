@@ -2,7 +2,7 @@
 use vstd::{pervasive::unreached, prelude::*};
 
 use super::{
-    addr::{PAddr, PAddrExec, VAddr},
+    addr::{PAddr, VAddr},
     arch::PTArch,
     frame::{Frame, FrameAttr, FrameExec, FrameSize},
     nat_to_u64,
@@ -12,8 +12,8 @@ verus! {
 
 /// Abstract model of page table memory.
 pub struct PageTableMem {
-    /// Frames allocated for the page table, the first frame is the root table.
-    pub frames: Seq<Frame>,
+    /// All tables in the hierarchical page table, the first table is the root.
+    pub tables: Seq<Frame>,
     /// Page table architecture.
     pub arch: PTArch,
 }
@@ -22,92 +22,52 @@ impl PageTableMem {
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
         // Root table is always present.
-        &&& self.frames.len() > 0
+        &&& self.tables.len() > 0
         // All frames should not overlap.
-        &&& forall|frame1: Frame, frame2: Frame| #[trigger]
-            self.frames.contains(frame1) && #[trigger] self.frames.contains(frame2)
+        &&& forall|table1: Frame, table2: Frame| #[trigger]
+            self.tables.contains(table1) && #[trigger] self.tables.contains(table2)
                 ==> !PAddr::overlap(
-                frame1.base,
-                frame1.size.as_nat(),
-                frame2.base,
-                frame2.size.as_nat(),
+                table1.base,
+                table1.size.as_nat(),
+                table2.base,
+                table2.size.as_nat(),
             )
     }
-}
 
-/// Stage-1 VMSAv8-64 page table.
-pub struct S1PageTable {
-    /// Frames allocated for page table.
-    ///
-    /// The first frame is the root page table.
-    pub frames: Vec<FrameExec>,
-}
-
-impl S1PageTable {
-    /// Physical address of the root page table.
-    pub open spec fn root(self) -> u64 {
-        0
+    /// Root page table.
+    pub open spec fn root(self) -> Frame {
+        self.tables[0]
     }
 
-    /// Read value at physical address `base + idx * WORD_SIZE`
-    pub fn read(&self, base: u64, idx: u64) -> (res: u64) {
-        0
+    /// Init State.
+    pub open spec fn init(self) -> bool {
+        &&& self.arch.invariants()
+        &&& self.tables.len() == 1
+        &&& self.root().size.as_nat() == self.arch.table_size(0)
     }
 
-    /// Write `value` to physical address `base + idx * WORD_SIZE`
-    pub fn write(&mut self, base: u64, idx: u64, value: u64) {
-        // TODO: write to memory
+    /// Alloc a new table.
+    pub open spec fn alloc_table(s1: Self, s2: Self, size: FrameSize, res: Frame) -> bool {
+        // TODO
+        true
     }
 
-    /// Allocate a new physical frame.
-    #[verifier::external_body]
-    pub fn alloc_frame(&mut self) -> (res: Result<PAddrExec, ()>)
-        requires
-            old(self).invariants(),
-        ensures
-            self.invariants(),
+    /// Dealloc a table.
+    pub open spec fn dealloc_table(s1: Self, s2: Self, table: Frame) -> bool {
+        // TODO
+        true
+    }
+
+    /// Get the table with the given base address.
+    pub open spec fn table(self, base: PAddr) -> Frame
+        recommends
+            exists|table| #[trigger] self.tables.contains(table) && table.base == base,
     {
-        unreached()
+        choose|table: Frame| #[trigger] self.tables.contains(table) && table.base == base
     }
 
-    /// Deallocate a physical frame.
-    #[verifier::external_body]
-    pub fn dealloc_frame(&mut self, paddr: PAddrExec) -> (res: Result<(), ()>)
-        requires
-            old(self).invariants(),
-            exists|frame| #[trigger] old(self).frames().contains(frame) && frame.base == paddr,
-        ensures
-            self.invariants(),
-            !exists|frame| #[trigger] self.frames().contains(frame) && frame.base == paddr,
-    {
-        unreached()
-    }
-
-    pub open spec fn frame_view(self, frame: Frame) -> Seq<nat>;
-
-    /// Specification of read operation.
-    pub open spec fn spec_read(&self, base: u64, addr: u64) -> u64 {
-        0
-    }
-
-    pub open spec fn frames(self) -> Seq<FrameExec> {
-        Seq::new(self.frames.len() as nat, |i| self.frames[i])
-    }
-
-    /// Invariants.
-    pub open spec fn invariants(self) -> bool {
-        // Root table is always present.
-        &&& self.frames().len() > 0
-        // All frames should not overlap.
-        &&& forall|frame1: FrameExec, frame2: FrameExec| #[trigger]
-            self.frames().contains(frame1) && #[trigger] self.frames().contains(frame2)
-                ==> !PAddr::overlap(
-                frame1.base@,
-                frame1.size.as_nat(),
-                frame2.base@,
-                frame2.size.as_nat(),
-            )
-    }
+    /// Read the entry at the given index in the given table.
+    pub open spec fn read(self, table: Frame, index: u64) -> u64;
 
     /// Interpret as `(vbase, frame)` mappings.
     ///
@@ -147,7 +107,7 @@ impl S1PageTable {
         self,
         addr: u64,
         level: nat,
-        table_addr: u64,
+        table: Frame,
         user_ok: bool,
         uxn_accum: bool,
         pxn_accum: bool,
@@ -159,13 +119,13 @@ impl S1PageTable {
         } else {
             let level_shift = 39 - level * 9;
             let index = (addr >> level_shift) & 0x1FF;
-            let pte = PTEntry(self.spec_read(table_addr, index))@;
+            let pte = PTEntry(self.read(table, index))@;
             match pte {
                 GhostPTEntry::Table(desc) => {
                     let new_user_ok = user_ok && desc.ap_user;
                     let new_uxn = uxn_accum || desc.uxn;
                     let new_pxn = pxn_accum || desc.pxn;
-                    let next_table = desc.addr << 12;
+                    let next_table = self.table(PAddr((desc.addr << 12) as nat));
                     self.walk_level(
                         addr,
                         (level - 1) as nat,
@@ -177,8 +137,8 @@ impl S1PageTable {
                 },
                 GhostPTEntry::Page(page_desc) => {
                     if level > 3 && page_desc.non_block {
-                        None  // Block must be at level 1-3, page only at level 1
-
+                        // Block must be at level 1-3, page only at level 1
+                        None
                     } else {
                         Some(
                             Self::compute_frame(
@@ -224,6 +184,51 @@ impl S1PageTable {
             user_accessible: user_ok && entry.ap_user,
         };
         Frame { base, size, attr }
+    }
+}
+
+/// **EXEC-MODE** Concrete implementation of page table memory.
+///
+/// Page table memory manages all frames allocated for the hierarchical page tables, and
+/// provides read/write, alloc/dealloc functionality.
+pub struct PageTableMemExec {
+    /// All tables in the hierarchical page table, the first table is the root.
+    pub tables: Vec<FrameExec>,
+    /// Page table architecture.
+    pub arch: Ghost<PTArch>,
+}
+
+impl PageTableMemExec {
+    /// View the concrete page table memory as an abstract page table memory.
+    pub open spec fn view(self) -> PageTableMem {
+        PageTableMem {
+            tables: Seq::new(self.tables.len() as nat, |i| self.tables[i]@),
+            arch: self.arch@,
+        }
+    }
+
+    /// Alloc a new table frame.
+    #[verifier::external_body]
+    pub fn alloc_table(&mut self, size: FrameSize) -> (res: FrameExec)
+        requires
+            old(self)@.invariants(),
+        ensures
+            self@.invariants(),
+            PageTableMem::alloc_table(old(self)@, self@, size, res@),
+    {
+        // TODO
+        unreached()
+    }
+
+    /// Dealloc a table frame.
+    #[verifier::external_body]
+    pub fn dealloc_table(&mut self, table: FrameExec)
+        requires
+            old(self)@.invariants(),
+        ensures
+            self@.invariants(),
+            PageTableMem::dealloc_table(old(self)@, self@, table@),
+    {
     }
 }
 
