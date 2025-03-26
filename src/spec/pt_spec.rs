@@ -204,8 +204,7 @@ pub trait PageTableInterface where Self: Sized {
     /// Get abstract page table state.
     spec fn view(self) -> PageTableState;
 
-    /// Specify the invariants that must be implied at initial state and preseved
-    /// after each operation.
+    /// Invariants that must be implied at initial state and preseved after each operation.
     spec fn invariants(self) -> bool;
 
     /// The assumptions we made about the hardware and the remaining system implies
@@ -219,7 +218,7 @@ pub trait PageTableInterface where Self: Sized {
             self.invariants(),
     ;
 
-    /// **EXEC** Map a virtual address to a physical frame.
+    /// Map a virtual address to a physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
     fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (res: Result<(), ()>)
@@ -231,7 +230,7 @@ pub trait PageTableInterface where Self: Sized {
             PageTableState::map(old(self)@, self@, vaddr@, frame@, res),
     ;
 
-    /// **EXEC** Unmap a virtual address.
+    /// Unmap a virtual address.
     ///
     /// Implementation must ensure the postconditions are satisfied.
     fn unmap(&mut self, vaddr: VAddrExec) -> (res: Result<(), ()>)
@@ -243,7 +242,7 @@ pub trait PageTableInterface where Self: Sized {
             PageTableState::unmap(old(self)@, self@, vaddr@, res),
     ;
 
-    /// **EXEC** Query a virtual address, return the mapped physical frame.
+    /// Query a virtual address, return the mapped physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
     fn query(&mut self, vaddr: VAddrExec) -> (res: Result<(VAddrExec, FrameExec), ()>)

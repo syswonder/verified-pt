@@ -1,94 +1,111 @@
-# Verifying hvisor Page Table
+# Formal Verification of VM Memory Isolation in Type-I Hypervisor
 
 Proof Target: [hvisor](https://github.com/syswonder/hvisor)
 
-## Overview
+## Introduction
+
+### Memory Isolation
+
+Ensuring VM memory isolation is crucial for the security of Type-I hypervisors. This report examines formal verification methods to validate noninterference in memory access. The following figure illustrates how a hypervisor manages VMs, each with private memory regions, alongside shared memory. Page tables enforce access controls, preventing unauthorized interference.
+
+![](docs/isolation.svg)
+
+By verifying structural and permission correctness in memory management, we ensure strict isolation between VMs. Using formal verification techniques, this study aims to establish provable security guarantees, reducing the risk of memory leaks and cross-VM attacks in hypervisor-based environments.
+
+### Key Components Ensuring Memory Isolation
+
+Two key components ensure memory isolation: the **page table** and the **memory allocator**, as shown in the following figure.
+
+![](docs/memory.svg)
+
+- **Page Table**: Enforces access control by ensuring a VM cannot read or write another VM’s private memory. It maps virtual addresses to physical memory while enforcing isolation policies.
+- **Memory Allocator**: Ensures non-overlapping private memory regions for different VMs. It partitions memory safely, allowing controlled access to shared memory when needed.
+
+Together, these mechanisms maintain strict isolation, preventing unauthorized access and ensuring virtualization security.
+
+## Formal Verification of Page Table
+
+The following figure illustrates the proof architecture for the formal verification of page tables.
 
 ![arch](docs/arch.svg)
 
+- **High-Level State Machine**: The final proof target, specifying the abstract behavior of the memory system.
+- **Low-Level State Machine**: A concrete abstraction of the memory management module, bridging the implementation and the high-level model.
+  - **Hardware Spec**: Assumptions about underlying system and hardware behavior, trusted as the proof base.
+  - **Page Table Spec**: Defines requirements for the concrete page table implementation.
+- **Page Table Map/Tree Model**: Helper models for implementation refinement proofs.
+- **Page Table Implementation**: Concrete page table implementation in executable Rust code.
+
 ## Specification
 
-The verification of the page table implementation follows a **refinement-based approach**, where lower-level specifications refine higher-level abstractions. This ensures the implementation satisfies both security and functional requirements.
+The verification follows a **refinement-based approach**, ensuring lower-level specifications refine higher-level abstractions. This guarantees the implementation satisfies both security and functional requirements.
 
 ### High-Level State Machine
 
-The high-level state machine defines the abstract behavior of the memory system, focusing on two key aspects:
-
-1. **Memory Mappings**
+The high-level state machine defines abstract memory system behavior, focusing on:
+1. **Memory Mappings**:
    - Virtual-to-physical address translations.
    - Consistency of mappings across operations.
-2. **Access Permissions**
+2. **Access Permissions**:
    - Control over read, write, and execute permissions.
    - Enforcement of user versus kernel mode restrictions.
 
-This specification serves as the **proof target**. The page table implementation must refine this abstract model to demonstrate correctness. The refinement proof confirms that the low-level state machine aligns with this specification.
+This specification serves as the **proof target**, requiring the memory system to refine this model. The refinement proof confirms alignment between low-level and high-level specifications.
 
 ```rust
-/// Abstract memory state for the high-level model.
+/// High-level (abstract) memory state.
 pub struct HighLevelState {
     /// 8-byte-indexed virtual memory.
-    /// Using indexes instead of raw addresses avoids misalignment issues.
-    pub mem: Map<VIdx, nat>,
-    /// Mappings from virtual addresses to physical frames.
-    /// The key must be the base address of a virtual page, ensuring
-    /// the entire range maps to a single physical frame.
+    pub mem: Map<VIdx, u64>,
+    /// Mappings from virtual address to physical frames.
     pub mappings: Map<VAddr, Frame>,
-    /// Constants defined for the high-level model.
+    /// Constants.
     pub constants: HighLevelConstants,
 }
 ```
 
 ### Low-Level State Machine
 
-The low-level state machine provides a more concrete abstraction of the memory management module, acting as a bridge between the implementation and the high-level specification.
-
-The verification assumes that hardware behavior refines the hardware specification. By proving the page table implementation refines the page table specification, we can conclude that the combined system (hardware + hypervisor) refines the low-level specification and, in turn, the high-level specification.
+The low-level state machine bridges the implementation and high-level specification. It assumes hardware behavior refines the hardware specification. By proving the page table implementation refines its specification, we conclude the combined system (hardware + hypervisor) refines both low-level and high-level specifications.
 
 ```rust
-/// Low-level memory state, including:
-///
-/// - Common memory: Used by the OS and applications.
-/// - Page table: Stage 1 page table.
-/// - TLB: Translation Lookaside Buffer.
+/// Low-level memory state.
 pub struct LowLevelState {
-    /// 8-byte-indexed physical memory.
-    pub mem: Seq<nat>,
-    /// Stage 1 page table.
-    pub pt: S1PageTable,
+    /// Physical memory.
+    pub mem: PhysMem,
+    /// Page table.
+    pub pt: PageTableMem,
     /// Translation Lookaside Buffer.
-    pub tlb: Map<VAddr, Frame>,
+    pub tlb: TLB,
+    /// Constants.
+    pub constants: LowLevelConstants,
 }
 ```
 
 #### Hardware Specification
 
-This module defines the abstract hardware state and its transition behaviors during memory operations. The hardware state includes:
-
+Defines abstract hardware state and transitions during memory operations, including:
 - **Physical memory**
 - **Page table**
 - **Translation Lookaside Buffer (TLB)**
 
-The module specifies hardware behavior during memory translations, TLB management, and page table updates.
-
-**Assumption:** The hardware behavior refines the hardware specification, ensuring correctness in memory translations. This specification underpins the entire verification process.
+**Assumption**: Hardware behavior refines this specification, ensuring correct memory translations. This forms the trusted base for verification.
 
 ```rust
 /// Abstract state managed by hardware.
 pub struct HardwareState {
-    /// 8-byte-indexed physical memory.
-    pub mem: Seq<nat>,
+    /// Physical memory.
+    pub mem: PhysMem,
     /// Page table.
-    pub pt: S1PageTable,
+    pub pt: PageTableMem,
     /// Translation Lookaside Buffer.
-    pub tlb: Map<VAddr, Frame>,
+    pub tlb: TLB,
 }
 ```
 
 #### Page Table Specification
 
-The page table specification defines the **proof target** for the page table implementation. Meeting this specification, alongside the hardware and OS assumptions, ensures the system refines the low-level specification.
-
-Importantly, this module itself is **not trusted**; it is part of the proof rather than a trusted base.
+Defines the **proof target** for the page table implementation. Combined with hardware assumptions, meeting this specification ensures system refinement. Notably, this module is **not trusted**—it is part of the proof, not the trusted base.
 
 ```rust
 /// Abstract state managed by the page table.
@@ -99,7 +116,7 @@ pub struct PageTableState {
     pub constants: PTConstants,
 }
 
-/// Page table config constants.
+/// Page table configuration constants.
 pub struct PTConstants {
     /// Physical memory size (in bytes).
     pub pmem_size: nat,
@@ -108,45 +125,81 @@ pub struct PTConstants {
 
 ### Refinement Relationship
 
-The **refinement relationship** between the low-level state machine and the high-level specification ensures:
+The **refinement relationship** between low-level and high-level specifications ensures:
+1. Valid low-level transitions correspond to valid high-level transitions.
+2. Page table operations preserve invariants in the low-level specification.
 
-1. Every valid low-level state transition corresponds to a valid high-level state transition.
-2. Page table operations maintain the invariants defined in the low-level specification.
-
-This relationship is established through **simulation relations** and **invariant preservation** across the layers.
+This is established through **simulation relations** and **invariant preservation** across layers.
 
 ## Implementation & Proof
 
-### Page Table Interface
+### Low-Level to High-Level Refinement
 
-The **Page Table Interface** defines the contract that any concrete page table implementation must follow to ensure correctness. This interface outlines:
+A refinement proof ensures consistency between low-level implementation and high-level specification. The following figure illustrates the proof idea.
 
-- **Invariants**: Conditions that must hold throughout the page table's lifetime to maintain consistency.
-- **View**: An abstraction that maps the concrete implementation to the abstract `PageTableState`.
-- **Operations**: The `map`, `unmap`, and `query` methods, each with well-defined preconditions and postconditions.
+![](docs/ll_refine_hl.svg)
 
-To verify correctness, the implementation must:
-
-1. **Preserve Invariants**: Demonstrate that all operations uphold the defined invariants.
-2. **Establish Initial Conditions**: Prove that the system's initialization state satisfies the required conditions.
-3. **Prove Refinement**: Ensure that the concrete implementation refines the abstract state transitions defined in `PageTableState`.
-
-By verifying these conditions and combining them with hardware and system assumptions, we can conclude that the overall system refines both the low-level and high-level specifications.
+For example, the `write` operation proof involves two theorems:
 
 ```rust
-/// Page table must implement the `PageTableInterface` and satisfy the specification.
+/// Theorem: Low-level write preserves invariants.
+proof fn ll_write_preserves_invariants(
+    s1: LowLevelState,
+    s2: LowLevelState,
+    vaddr: VAddr,
+    value: u64,
+    res: Result<(), ()>,
+)
+    requires
+        s1.invariants(),
+        LowLevelState::write(s1, s2, vaddr, value, res),
+    ensures
+        s2.invariants(),
+;
+
+/// Theorem: Low-level write refines high-level write.
+proof fn ll_write_refines_hl_write(
+    s1: LowLevelState,
+    s2: LowLevelState,
+    vaddr: VAddr,
+    value: u64,
+    res: Result<(), ()>,
+)
+    requires
+        s1.invariants(),
+        LowLevelState::write(s1, s2, vaddr, value, res),
+    ensures
+        HighLevelState::write(s1@, s2@, vaddr, value, res),
+;
+```
+
+- `ll_write_preserves_invariants` ensures invariants hold after the operation.
+- `ll_write_refines_hl_write` ensures low-level operations refine high-level specifications.
+
+Similar proofs for `read`, `map`, and `unmap` operations guarantee invariant preservation and refinement across state transitions.
+
+### Page Table Interface
+
+The **Page Table Interface** defines the contract for concrete implementations, requiring:
+- **Invariants**: Conditions maintained throughout the page table’s lifetime.
+- **View**: Abstraction mapping to the `PageTableState`.
+- **Operations**: `map`, `unmap`, and `query` with pre/postconditions.
+
+Verification requires:
+1. **Invariant Preservation**: All operations uphold invariants.
+2. **Initial Conditions**: System initialization satisfies invariants.
+3. **Refinement Proof**: Concrete implementation refines `PageTableState` transitions.
+
+```rust
+/// Page table must implement `PageTableInterface` to ensure correctness.
 pub trait PageTableInterface where Self: Sized {
     /// Get abstract page table state.
     spec fn view(self) -> PageTableState;
 
-    /// Specify the invariants that must be implied at initial state and preseved 
-    /// after each operation.
+    /// Invariants required at initialization and preserved by operations.
     spec fn invariants(self) -> bool;
 
-    /// The assumptions we made about the hardware and the remaining system implies 
-    /// `self@.init()` at the system initialization.
-    ///
-    /// Implementation must prove that the invariants are satisfied at this initial state.
+    /// Proof that invariants hold at initialization.
     proof fn init_implies_invariants(self)
         requires
             self@.init(),
@@ -154,28 +207,28 @@ pub trait PageTableInterface where Self: Sized {
             self.invariants(),
     ;
 
-    /// **EXEC** Map a virtual address to a physical frame.
-    fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (result: Result<(), ()>)
+    /// Map a virtual address to a physical frame.
+    fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (res: Result<(), ()>)
         requires
             old(self).invariants(),
             old(self)@.map_pre(vaddr@, frame@),
         ensures
             self.invariants(),
-            PageTableState::map(old(self)@, self@, MapOp { vaddr: vaddr@, frame: frame@, result }),
+            PageTableState::map(old(self)@, self@, vaddr@, frame@, res),
     ;
 
-    /// **EXEC** Unmap a virtual address.
-    fn unmap(&mut self, vaddr: VAddrExec) -> (result: Result<(), ()>)
+    /// Unmap a virtual address.
+    fn unmap(&mut self, vaddr: VAddrExec) -> (res: Result<(), ()>)
         requires
             old(self).invariants(),
             old(self)@.unmap_pre(vaddr@),
         ensures
             self.invariants(),
-            PageTableState::unmap(old(self)@, self@, UnmapOp { vaddr: vaddr@, result }),
+            PageTableState::unmap(old(self)@, self@, vaddr@, res),
     ;
 
-    /// **EXEC** Query a virtual address, return the mapped physical frame.
-    fn query(&mut self, vaddr: VAddrExec) -> (result: Result<(VAddrExec, FrameExec), ()>)
+    /// Query a virtual address.
+    fn query(&mut self, vaddr: VAddrExec) -> (res: Result<(VAddrExec, FrameExec), ()>)
         requires
             old(self).invariants(),
             old(self)@.query_pre(vaddr@),
@@ -184,14 +237,23 @@ pub trait PageTableInterface where Self: Sized {
             PageTableState::query(
                 old(self)@,
                 self@,
-                QueryOp {
-                    vaddr: vaddr@,
-                    result: match result {
-                        Ok((vaddr, frame)) => Ok((vaddr@, frame@)),
-                        Err(()) => Err(()),
-                    },
+                vaddr@,
+                match res {
+                    Ok((vaddr, frame)) => Ok((vaddr@, frame@)),
+                    Err(()) => Err(()),
                 },
             ),
     ;
 }
 ```
+
+### Page Table Model & Implementation Proof
+
+Concrete page tables must implement `PageTableInterface`. Two helper models aid proof:
+- **Page Table Map Model**: Flat map representation.
+- **Page Table Tree Model**: Tree-structured representation.
+
+![](docs/pt_model.svg)
+
+*Work in progress.*
+
