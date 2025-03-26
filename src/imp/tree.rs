@@ -29,7 +29,7 @@ impl PTPath {
     pub open spec fn valid(self, arch: PTArch, start_level: nat) -> bool {
         &&& self.len() + start_level <= arch.level_count()
         &&& forall|i: int|
-            0 <= i < self.len() ==> self.0[i] < arch.num_entries(i as nat + start_level)
+            0 <= i < self.len() ==> self.0[i] < arch.entry_count(i as nat + start_level)
     }
 
     /// Get a `PTPath` from a virtual address.
@@ -118,7 +118,7 @@ impl PTTreeNode {
     {
         &&& self.arch.invariants()
         &&& self.level < self.arch.level_count()
-        &&& self.entries.len() == self.arch.num_entries(self.level)
+        &&& self.entries.len() == self.arch.entry_count(self.level)
         &&& forall|entry: NodeEntry| #[trigger]
             self.entries.contains(entry) ==> {
                 &&& Self::inv_entry(entry, self.arch, self.level)
@@ -131,7 +131,7 @@ impl PTTreeNode {
         recommends
             arch.invariants(),
     {
-        Self { entries: seq![NodeEntry::Empty; arch.num_entries(0)], base, level: 0, arch }
+        Self { entries: seq![NodeEntry::Empty; arch.entry_count(0)], base, level: 0, arch }
     }
 
     /// Creates an empty node.
@@ -140,7 +140,7 @@ impl PTTreeNode {
             level < arch.level_count(),
             arch.invariants(),
     {
-        Self { entries: seq![NodeEntry::Empty; arch.num_entries(level)], base, level, arch }
+        Self { entries: seq![NodeEntry::Empty; arch.entry_count(level)], base, level, arch }
     }
 
     /// Theorem. `new` function implies invariants.

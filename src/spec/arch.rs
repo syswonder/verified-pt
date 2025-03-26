@@ -1,14 +1,14 @@
 //! Page table architecture specifications.
 use vstd::prelude::*;
 
-use super::{addr::VAddr, frame::FrameSize, is_pow2};
+use super::{addr::VAddr, frame::FrameSize};
 
 verus! {
 
 /// Represents a single level in a hierarchical page table structure.
 pub struct PTArchLevel {
-    /// The number of entries at this level.
-    pub num_entries: nat,
+    /// log2 of the number of entries at this level.
+    pub entry_count_log2: nat,
     /// Frame size indicated by a block/page descriptor at this level.
     pub frame_size: FrameSize,
 }
@@ -27,11 +27,19 @@ impl PTArch {
     }
 
     /// The number of entries at a specified level.
-    pub open spec fn num_entries(self, level: nat) -> nat
+    pub open spec fn entry_count(self, level: nat) -> nat
         recommends
             level < self.level_count(),
     {
-        self.0[level as int].num_entries
+        (1 << self.0[level as int].entry_count_log2) as nat
+    }
+
+    /// The index length of a virtual address at a given level.
+    pub open spec fn index_len(self, level: nat) -> nat
+        recommends
+            level < self.level_count(),
+    {
+        self.0[level as int].entry_count_log2
     }
 
     /// The frame size associated with a block/page descriptor at a given level.
@@ -52,7 +60,7 @@ impl PTArch {
         recommends
             level < self.level_count(),
     {
-        self.num_entries(level) * PTE_SIZE
+        self.entry_count(level) * PTE_SIZE
     }
 
     /// All valid frame sizes in this architecture.
@@ -66,23 +74,17 @@ impl PTArch {
             self.invariants(),
             level < self.level_count(),
     {
-        vaddr.0 / self.frame_size(level).as_nat() % self.num_entries(level)
+        vaddr.0 / self.frame_size(level).as_nat() % self.entry_count(level)
     }
 
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
         // At least one level.
         &&& self.level_count() >= 1
-        // Each level has 2^N entries
-        &&& forall|level: nat|
-            #![auto]
-            level < self.level_count() ==> is_pow2(
-                self.num_entries(level),
-            )
-        // frame_size(N) = frame_size(N+1) * num_entries(N+1)
+        // frame_size(N) = frame_size(N+1) * entry_count(N+1)
         &&& forall|level: nat|
             1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()
-                == self.frame_size(level).as_nat() * self.num_entries(level)
+                == self.frame_size(level).as_nat() * self.entry_count(level)
     }
 }
 
@@ -98,10 +100,10 @@ impl PTArch {
 /// *If effective value of TCR_ELx.DS is 0, level 0 allows Table descriptor only.
 pub spec const VMSAV8_S1_4K_ARCH: PTArch = PTArch(
     seq![
-        PTArchLevel { num_entries: 512, frame_size: FrameSize::Size512G },
-        PTArchLevel { num_entries: 512, frame_size: FrameSize::Size1G },
-        PTArchLevel { num_entries: 512, frame_size: FrameSize::Size2M },
-        PTArchLevel { num_entries: 512, frame_size: FrameSize::Size4K },
+        PTArchLevel { entry_count_log2: 9, frame_size: FrameSize::Size512G },
+        PTArchLevel { entry_count_log2: 9, frame_size: FrameSize::Size1G },
+        PTArchLevel { entry_count_log2: 9, frame_size: FrameSize::Size2M },
+        PTArchLevel { entry_count_log2: 9, frame_size: FrameSize::Size4K },
     ],
 );
 
@@ -111,7 +113,7 @@ pub broadcast proof fn vmsav8_s1_4k_arch_invariants()
     ensures
         #[trigger] VMSAV8_S1_4K_ARCH.invariants(),
 {
-    assume(is_pow2(512));
+    assume(1 << 9 == 512);
 }
 
 } // verus!
