@@ -8,7 +8,7 @@ Proof Target: [hvisor](https://github.com/syswonder/hvisor)
 
 Ensuring VM memory isolation is crucial for the security of Type-I hypervisors. This report examines formal verification methods to validate noninterference in memory access. The following figure illustrates how a hypervisor manages VMs, each with private memory regions, alongside shared memory. Page tables enforce access controls, preventing unauthorized interference.
 
-![](docs/isolation.svg)
+<img src="docs/isolation.svg" style="zoom:150%;" />
 
 By verifying structural and permission correctness in memory management, we ensure strict isolation between VMs. Using formal verification techniques, this study aims to establish provable security guarantees, reducing the risk of memory leaks and cross-VM attacks in hypervisor-based environments.
 
@@ -16,7 +16,7 @@ By verifying structural and permission correctness in memory management, we ensu
 
 Two key components ensure memory isolation: the **page table** and the **memory allocator**, as shown in the following figure.
 
-![](docs/memory.svg)
+<img src="docs/memory.svg" style="zoom:150%;" />
 
 - **Page Table**: Enforces access control by ensuring a VM cannot read or write another VM’s private memory. It maps virtual addresses to physical memory while enforcing isolation policies.
 - **Memory Allocator**: Ensures non-overlapping private memory regions for different VMs. It partitions memory safely, allowing controlled access to shared memory when needed.
@@ -27,7 +27,7 @@ Together, these mechanisms maintain strict isolation, preventing unauthorized ac
 
 The following figure illustrates the proof architecture for the formal verification of page tables.
 
-![arch](docs/arch.svg)
+<img src="docs/arch.svg" alt="arch" style="zoom:80%;" />
 
 - **High-Level State Machine**: The final proof target, specifying the abstract behavior of the memory system.
 - **Low-Level State Machine**: A concrete abstraction of the memory management module, bridging the implementation and the high-level model.
