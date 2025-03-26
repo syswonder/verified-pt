@@ -36,6 +36,8 @@ pub struct PTConstants {
 /// State transition specification.
 impl PageTableState {
     /// Init state.
+    /// 
+    /// `LowlevelState::init()` implies `PageTableState::init()`.
     pub open spec fn init(self) -> bool {
         self.mappings === Map::empty()
     }

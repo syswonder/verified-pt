@@ -92,7 +92,7 @@ impl PageTableMem {
     /// MMU's page table walk arrives at an entry mapping the frame `frame`, and the `pte.flags`
     /// must reflect the properties along the translation path.
     pub open spec fn walk(self, addr: u64, frame: Frame) -> bool {
-        match self.walk_level(addr, 4, self.root(), true, false, false) {
+        match self.walk_level(addr, self.arch.level_count(), self.root(), true, false, false) {
             Some(reached) => {
                 &&& reached.base == frame.base
                 &&& reached.size == frame.size
