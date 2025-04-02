@@ -119,7 +119,7 @@ impl TLB {
     pub open spec fn conflict(self, base: VAddr, frame: Frame) -> Option<VAddr>;
 
     /// The conflict entry returned by `conflict` must be in the TLB.
-    /// 
+    ///
     /// This is an assumption made about the concrete TLB behavior.
     #[verifier::external_body]
     pub broadcast proof fn lemma_conflict(self, base: VAddr, frame: Frame)
@@ -157,7 +157,7 @@ pub struct HardwareState {
 /// State transition specification.
 impl HardwareState {
     /// Hardware init state.
-    /// 
+    ///
     /// No mappings exist in the page table and TLB.
     pub open spec fn init(self) -> bool {
         &&& self.tlb.is_empty()

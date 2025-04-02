@@ -80,7 +80,8 @@ impl PTArch {
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
         // At least one level.
-        &&& self.level_count() >= 1
+        &&& self.level_count()
+            >= 1
         // frame_size(N) = frame_size(N+1) * entry_count(N+1)
         &&& forall|level: nat|
             1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()

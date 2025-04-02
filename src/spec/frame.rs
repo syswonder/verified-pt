@@ -40,6 +40,11 @@ impl FrameSize {
         }
     }
 
+    /// Convert to usize.
+    pub open spec fn as_usize(self) -> usize {
+        self.as_u64() as usize
+    }
+
     /// Convert to nat.
     pub open spec fn as_nat(self) -> nat {
         self.as_u64() as nat
