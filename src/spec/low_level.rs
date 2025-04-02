@@ -16,7 +16,7 @@ use super::{
     hardware::{HardwareState, PhysMem, TLB},
     high_level::{HighLevelConstants, HighLevelState},
     pt_spec::{PTConstants, PageTableState},
-    s1pt::PageTableMem,
+    pt_mem::PageTableMem,
 };
 
 verus! {

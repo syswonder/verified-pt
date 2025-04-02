@@ -17,7 +17,7 @@ use vstd::prelude::*;
 use super::{
     addr::{PIdx, VAddr, WORD_SIZE},
     frame::Frame,
-    s1pt::PageTableMem,
+    pt_mem::PageTableMem,
 };
 
 verus! {

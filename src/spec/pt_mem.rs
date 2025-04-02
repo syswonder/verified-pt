@@ -110,9 +110,9 @@ impl PageTableMem {
         } else {
             let level_shift = 3 + level * 9;
             let index = (addr >> level_shift) & 0x1FF;
-            let pte = PTEntry(self.read(table, index as nat))@;
+            let pte = S1PTEntry(self.read(table, index as nat))@;
             match pte {
-                GhostPTEntry::Table(desc) => {
+                GhostS1PTEntry::Table(desc) => {
                     let new_user_ok = user_ok && desc.ap_user;
                     let new_uxn = uxn_accum || desc.uxn;
                     let new_pxn = pxn_accum || desc.pxn;
@@ -126,7 +126,7 @@ impl PageTableMem {
                         new_pxn,
                     )
                 },
-                GhostPTEntry::Page(page_desc) => {
+                GhostS1PTEntry::Page(page_desc) => {
                     if level > 3 && page_desc.non_block {
                         // Block must be at level 1-3, page only at level 1
                         None
@@ -143,14 +143,14 @@ impl PageTableMem {
                         )
                     }
                 },
-                GhostPTEntry::Empty => None,
+                GhostS1PTEntry::Empty => None,
             }
         }
     }
 
     /// Compute physical address and flags for the reached frame.
     spec fn compute_frame(
-        entry: GhostPageDescriptor,
+        entry: GhostS1PageDescriptor,
         level: nat,
         addr: u64,
         user_ok: bool,
@@ -328,7 +328,7 @@ impl PageTableMemExec {
 }
 
 /// Abstract stage 1 VMSAv8-64 Table descriptor.
-pub ghost struct GhostTableDescriptor {
+pub ghost struct GhostS1TableDescriptor {
     /// Physical address of the table
     pub addr: u64,
     /// Accessed flag (AF) - indicates if table has been accessed
@@ -347,7 +347,7 @@ pub ghost struct GhostTableDescriptor {
 }
 
 /// Abstract stage 1 VMSAv8-64 Page & Block descriptor.
-pub ghost struct GhostPageDescriptor {
+pub ghost struct GhostS1PageDescriptor {
     /// Physical address of the page or block
     pub addr: u64,
     /// Block or page flag (true = Page, false = Block)
@@ -373,29 +373,29 @@ pub ghost struct GhostPageDescriptor {
 }
 
 /// Abstract page table entry.
-pub ghost enum GhostPTEntry {
+pub ghost enum GhostS1PTEntry {
     /// Points to next level page table
-    Table(GhostTableDescriptor),
+    Table(GhostS1TableDescriptor),
     /// Maps physical page/block with attributes
-    Page(GhostPageDescriptor),
+    Page(GhostS1PageDescriptor),
     /// Invalid/empty entry
     Empty,
 }
 
-/// Concrete page table entry, wrapping a 64-bit value.
-pub struct PTEntry(pub u64);
+/// Concrete stage-1 page table entry, wrapping a 64-bit value.
+pub struct S1PTEntry(pub u64);
 
-impl PTEntry {
+impl S1PTEntry {
     /// Maps the concrete page table entry to its abstract representation.
     ///
     /// # Returns
     /// - `GhostPTEntry::Table` if the entry is a valid table descriptor.
     /// - `GhostPTEntry::Page` if the entry is a valid page/block descriptor.
     /// - `GhostPTEntry::Empty` if the entry is invalid or empty.
-    pub open spec fn view(self) -> GhostPTEntry {
+    pub open spec fn view(self) -> GhostS1PTEntry {
         let value = self.0;
         if value & 0x1 == 0 {
-            GhostPTEntry::Empty
+            GhostS1PTEntry::Empty
         } else {
             if value & 0x2 != 0 {
                 let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
@@ -404,7 +404,7 @@ impl PTEntry {
                 let ap_user = (value & (1u64 << 6)) != 0;
                 let pxn = (value & (1u64 << 59)) != 0;
                 let uxn = (value & (1u64 << 60)) != 0;
-                GhostPTEntry::Table(GhostTableDescriptor { addr, accessed, ns, ap_user, pxn, uxn })
+                GhostS1PTEntry::Table(GhostS1TableDescriptor { addr, accessed, ns, ap_user, pxn, uxn })
             } else {
                 let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
                 let non_block = (value & (1u64 << 1)) != 0;
@@ -416,8 +416,8 @@ impl PTEntry {
                 let xn = (value & (1u64 << 54)) != 0;
                 let contiguous = (value & (1u64 << 52)) != 0;
                 let ns = (value & (1u64 << 5)) != 0;
-                GhostPTEntry::Page(
-                    GhostPageDescriptor {
+                GhostS1PTEntry::Page(
+                    GhostS1PageDescriptor {
                         addr,
                         non_block,
                         accessed,
@@ -431,6 +431,90 @@ impl PTEntry {
                     },
                 )
             }
+        }
+    }
+}
+
+/// Abstract stage 2 VMSAv8-64 Table descriptor.
+pub ghost struct GhostS2TableDescriptor {
+    /// Next-level table address
+    pub addr: u64,
+    /// Stage 2 Access Permissions (S2AP) for next level: 2 bits
+    pub s2ap: u8,
+    /// Shareability (SH) attributes: 2 bits
+    pub sh: u8,
+    /// Accessed flag (AF)
+    pub af: bool,
+    /// Non-secure bit
+    pub ns: bool,
+}
+
+/// Abstract stage 2 VMSAv8-64 Page & Block descriptor.
+pub ghost struct GhostS2PageDescriptor {
+    /// Physical address of the page or block
+    pub addr: u64,
+    /// Page/Block type (true = Page, false = Block)
+    pub is_page: bool,
+    /// Stage 2 Access Permissions (S2AP): 2 bits
+    pub s2ap: u8,
+    /// Shareability (SH) attributes: 2 bits
+    pub sh: u8,
+    /// Accessed flag (AF)
+    pub af: bool,
+    /// Memory attributes index (AttrIndx)
+    pub attr_indx: u8,
+    /// Non-secure bit
+    pub ns: bool,
+}
+
+/// Abstract stage 2 page table entry.
+pub ghost enum GhostS2PTEntry {
+    /// Points to next level page table
+    Table(GhostS2TableDescriptor),
+    /// Maps physical page/block with attributes
+    Page(GhostS2PageDescriptor),
+    /// Invalid/empty entry
+    Empty,
+}
+
+/// Concrete page table entry.
+pub struct S2PTEntry(pub u64);
+
+impl S2PTEntry {
+    /// Maps the concrete page table entry to its abstract representation.
+    pub open spec fn view(self) -> GhostS2PTEntry {
+        let value = self.0;
+        if value & 0x1 == 0 {
+            GhostS2PTEntry::Empty
+        } else if (value & 0x3) == 0x3 {
+            // Table descriptor (S2AP[1:0], SH[1:0], AF, NS)
+            let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
+            let s2ap = ((value >> 6) & 0x3) as u8;
+            let sh = ((value >> 8) & 0x3) as u8;
+            let af = (value & (1 << 10) as u64) != 0;
+            let ns = (value & (1 << 5) as u64) != 0;
+            GhostS2PTEntry::Table(GhostS2TableDescriptor { addr, s2ap, sh, af, ns })
+        } else if (value & 0x3) == 0x1 {
+            // Block/Page descriptor (S2AP[1:0], SH[1:0], AF, AttrIndx, NS)
+            let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
+            let s2ap = ((value >> 6) & 0x3) as u8;
+            let sh = ((value >> 8) & 0x3) as u8;
+            let af = (value & (1 << 10) as u64) != 0;
+            let attr_indx = ((value >> 2) & 0x7) as u8;
+            let ns = (value & (1 << 5) as u64) != 0;
+            GhostS2PTEntry::Page(
+                GhostS2PageDescriptor {
+                    addr,
+                    is_page: false,  // 0x1 indicates Block
+                    s2ap,
+                    sh,
+                    af,
+                    attr_indx,
+                    ns,
+                },
+            )
+        } else {
+            GhostS2PTEntry::Empty
         }
     }
 }

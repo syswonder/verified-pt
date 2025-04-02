@@ -7,7 +7,7 @@ pub mod hardware;
 pub mod high_level;
 pub mod low_level;
 pub mod pt_spec;
-pub mod s1pt;
+pub mod pt_mem;
 pub mod s2pt;
 
 verus! {
