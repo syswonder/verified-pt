@@ -1,4 +1,11 @@
-//! Stage-1 VMSAv8-64 page table specification.
+//! Page table memory specification and implementation.
+//!
+//! Page table memory is a memory region that stores page tables, allocated by the memory allocator.
+//! Hardware access page table memory and performs page table walks to translate VA to PA.
+//! To obtain some properties of page table memory, the correctness of the moemory allocator and raw
+//! memory access is assumed.
+//! 
+//! Page table memory is designed to be architecture independent, but yet only supports VMSAv8-64.
 use vstd::{pervasive::unreached, prelude::*};
 
 use super::{
@@ -300,6 +307,8 @@ impl PageTableMemExec {
     }
 
     /// Get a slice of `u64` reprenting the memory content of the table.
+    /// 
+    /// Assumption: Raw memory access is assumed to be valid.
     #[verifier::external_body]
     pub fn table_of(&self, table: TableExec) -> (res: &[u64])
         requires
