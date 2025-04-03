@@ -6,8 +6,8 @@ pub mod frame;
 pub mod hardware;
 pub mod high_level;
 pub mod low_level;
-pub mod pt_spec;
 pub mod pt_mem;
+pub mod pt_spec;
 
 verus! {
 

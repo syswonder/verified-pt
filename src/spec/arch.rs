@@ -77,6 +77,15 @@ impl PTArch {
         vaddr.0 / self.frame_size(level).as_nat() % self.entry_count(level)
     }
 
+    /// Calculates the virtual page base address that contains a given virtual address at the specified level.
+    pub open spec fn vbase_of_va(self, vaddr: VAddr, level: nat) -> VAddr
+        recommends
+            self.invariants(),
+            level < self.level_count(),
+    {
+        VAddr((vaddr.0 - vaddr.0 % self.frame_size(level).as_nat()) as nat)
+    }
+
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
         // At least one level.

@@ -4,7 +4,7 @@
 //! Hardware access page table memory and performs page table walks to translate VA to PA.
 //! To obtain some properties of page table memory, the correctness of the moemory allocator and raw
 //! memory access is assumed.
-//! 
+//!
 //! Page table memory is designed to be architecture independent, but yet only supports VMSAv8-64.
 use vstd::{pervasive::unreached, prelude::*};
 
@@ -307,7 +307,7 @@ impl PageTableMemExec {
     }
 
     /// Get a slice of `u64` reprenting the memory content of the table.
-    /// 
+    ///
     /// Assumption: Raw memory access is assumed to be valid.
     #[verifier::external_body]
     pub fn table_of(&self, table: TableExec) -> (res: &[u64])
@@ -330,7 +330,7 @@ impl PageTableMemExec {
             self@.tables.contains(table@),
             index < self@.table_view(table@).len(),
         ensures
-            self@.table_view(table@)[index as int] == res
+            self@.table_view(table@)[index as int] == res,
     {
         self.table_of(table)[index]
     }
@@ -413,7 +413,9 @@ impl S1PTEntry {
                 let ap_user = (value & (1u64 << 6)) != 0;
                 let pxn = (value & (1u64 << 59)) != 0;
                 let uxn = (value & (1u64 << 60)) != 0;
-                GhostS1PTEntry::Table(GhostS1TableDescriptor { addr, accessed, ns, ap_user, pxn, uxn })
+                GhostS1PTEntry::Table(
+                    GhostS1TableDescriptor { addr, accessed, ns, ap_user, pxn, uxn },
+                )
             } else {
                 let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
                 let non_block = (value & (1u64 << 1)) != 0;

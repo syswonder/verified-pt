@@ -126,14 +126,6 @@ impl PTTreeNode {
             }
     }
 
-    /// Creates an empty root node.
-    pub open spec fn new_root(base: VAddr, arch: PTArch) -> Self
-        recommends
-            arch.invariants(),
-    {
-        Self { entries: seq![NodeEntry::Empty; arch.entry_count(0)], base, level: 0, arch }
-    }
-
     /// Creates an empty node.
     pub open spec fn new(base: VAddr, level: nat, arch: PTArch) -> Self
         recommends
@@ -141,6 +133,14 @@ impl PTTreeNode {
             arch.invariants(),
     {
         Self { entries: seq![NodeEntry::Empty; arch.entry_count(level)], base, level, arch }
+    }
+
+    /// Creates an empty root node.
+    pub open spec fn new_root(base: VAddr, arch: PTArch) -> Self
+        recommends
+            arch.invariants(),
+    {
+        Self { entries: seq![NodeEntry::Empty; arch.entry_count(0)], base, level: 0, arch }
     }
 
     /// Theorem. `new` function implies invariants.
@@ -162,8 +162,142 @@ impl PTTreeNode {
         Self { entries: self.entries.update(index, entry), ..self }
     }
 
-    /// Theorem. `update` function preserves invariants.
-    pub proof fn update_preserves_invariants(self, index: int, entry: NodeEntry)
+    /// Visit the tree along `path` and return the sequence of entries visited.
+    ///
+    /// If a reached entry is `Empty` and `path` is not empty, then the visit
+    /// terminates early and returns the sequence of entries visited so far.
+    pub open spec fn recursive_visit(self, path: PTPath) -> Seq<NodeEntry>
+        recommends
+            self.invariants(),
+            path.valid(self.arch, self.level),
+        decreases path.len(),
+    {
+        if path.len() == 0 {
+            seq![]
+        } else {
+            let (idx, remain) = path.step();
+            let entry = self.entries[idx as int];
+            match entry {
+                NodeEntry::Node(node) => seq![entry].add(node.recursive_visit(remain)),
+                _ => seq![entry],
+            }
+        }
+    }
+
+    /// Recursively update the entry at `path`.
+    ///
+    /// - If a reached entry is `Empty` or `Frame`, and `path` is not empty, then the update
+    ///   will be cancelled and the tree will not be modified.
+    pub open spec fn recursive_update(self, path: PTPath, entry: NodeEntry) -> Self
+        recommends
+            self.invariants(),
+            path.valid(self.arch, self.level),
+            Self::inv_entry(entry, self.arch, (self.level + path.len() - 1) as nat),
+            entry is Node ==> entry->Node_0.invariants(),
+        decreases path.len(),
+    {
+        if path.len() == 0 {
+            self
+        } else if path.len() == 1 {
+            self.update(path.step().0 as int, entry)
+        } else {
+            let (idx, remain) = path.step();
+            let entry2 = self.entries[idx as int];
+            match entry2 {
+                NodeEntry::Node(node) => self.update(
+                    idx as int,
+                    NodeEntry::Node(node.recursive_update(remain, entry)),
+                ),
+                _ => self,
+            }
+        }
+    }
+
+    /// Lemma. Each node visited by `visit` satisfies the invariants.
+    proof fn lemma_visited_nodes_satisfy_invariants(self, path: PTPath)
+        requires
+            self.invariants(),
+            path.valid(self.arch, self.level),
+        ensures
+            forall|entry: NodeEntry| #[trigger]
+                self.recursive_visit(path).contains(entry) ==> (entry is Node
+                    ==> entry->Node_0.invariants()),
+        decreases path.len(),
+    {
+        if path.len() == 0 {
+            assert(self.recursive_visit(path) === seq![]);
+        } else {
+            let (idx, remain) = path.step();
+            let entry = self.entries[idx as int];
+            assert(self.entries.contains(entry));
+            assert(Self::inv_entry(entry, self.arch, self.level));
+            match entry {
+                NodeEntry::Node(node) => {
+                    assert(self.recursive_visit(path) === seq![entry].add(
+                        node.recursive_visit(remain),
+                    ));
+                    // Recursively prove `node.recursive_visit(remain)`
+                    node.lemma_visited_nodes_satisfy_invariants(remain);
+
+                    assert forall|entry2: NodeEntry| #[trigger]
+                        self.recursive_visit(path).contains(entry2) implies !(entry2 is Node)
+                        || entry2->Node_0.invariants() by {
+                        if entry2 != entry {
+                            // Satisfied because of recursive proof
+                            assert(node.recursive_visit(remain).contains(entry2));
+                        }
+                    }
+                },
+                _ => (),
+            }
+        }
+    }
+
+    /// Lemma. If the path length equals the height (i.e. level_count - level) of the node,
+    /// then the last entry visited is a frame or empty.
+    proof fn lemma_last_visited_entry_is_frame_or_empty(self, path: PTPath)
+        requires
+            self.invariants(),
+            path.valid(self.arch, self.level),
+            self.arch.level_count() - self.level == path.len(),
+        ensures
+            self.recursive_visit(path).last() is Frame || self.recursive_visit(
+                path,
+            ).last() is Empty,
+        decreases path.len(),
+    {
+        let visited = self.recursive_visit(path);
+        if path.len() == 1 {
+            // `self` is leaf, so the last entry is a frame or empty
+            assert(self.is_leaf());
+            let (idx, remain) = path.step();
+            let entry = self.entries[idx as int];
+            match entry {
+                NodeEntry::Frame(_) => (),
+                NodeEntry::Empty => (),
+                _ => assume(false),
+            }
+            assert(visited === seq![entry]);
+        } else {
+            // `self` is not leaf, recursively prove `self.recursive_visit(remain)`
+            assert(!self.is_leaf());
+            let (idx, remain) = path.step();
+            let entry = self.entries[idx as int];
+            match entry {
+                NodeEntry::Node(node) => {
+                    assert(self.entries.contains(entry));
+                    assert(Self::inv_entry_interm(entry, self.arch, self.level));
+                    assert(node.invariants());
+                    // Recursively prove `node.recursive_visit(remain)`
+                    node.lemma_last_visited_entry_is_frame_or_empty(remain)
+                },
+                _ => (),
+            }
+        }
+    }
+
+    /// Lemma. `update` function preserves invariants.
+    pub proof fn lemma_update_preserves_invariants(self, index: int, entry: NodeEntry)
         requires
             self.invariants(),
             0 <= index < self.entries.len(),
@@ -190,94 +324,8 @@ impl PTTreeNode {
         }
     }
 
-    /// Visit the tree along `path` and return the sequence of entries visited.
-    ///
-    /// If a reached entry is `Empty` and `path` is not empty, then the visit
-    /// terminates early and returns the sequence of entries visited so far.
-    pub open spec fn visit(self, path: PTPath) -> Seq<NodeEntry>
-        recommends
-            self.invariants(),
-            path.valid(self.arch, self.level),
-        decreases path.len(),
-    {
-        if path.len() == 0 {
-            seq![]
-        } else {
-            let (idx, remain) = path.step();
-            let entry = self.entries[idx as int];
-            match entry {
-                NodeEntry::Node(node) => seq![entry].add(node.visit(remain)),
-                _ => seq![entry],
-            }
-        }
-    }
-
-    /// Lemma. Each node visited by `visit` satisfies the invariants.
-    proof fn lemma_visited_nodes_satisfy_invariants(self, path: PTPath)
-        requires
-            self.invariants(),
-            path.valid(self.arch, self.level),
-        ensures
-            forall|entry: NodeEntry| #[trigger]
-                self.visit(path).contains(entry) ==> (entry is Node ==> entry->Node_0.invariants()),
-        decreases path.len(),
-    {
-        if path.len() == 0 {
-            assert(self.visit(path) === seq![]);
-        } else {
-            let (idx, remain) = path.step();
-            let entry = self.entries[idx as int];
-            assert(self.entries.contains(entry));
-            assert(Self::inv_entry(entry, self.arch, self.level));
-            match entry {
-                NodeEntry::Node(node) => {
-                    assert(self.visit(path) === seq![entry].add(node.visit(remain)));
-                    // Recursively prove `node.visit(remain)`
-                    node.lemma_visited_nodes_satisfy_invariants(remain);
-
-                    assert forall|entry2: NodeEntry| #[trigger]
-                        self.visit(path).contains(entry2) implies !(entry2 is Node)
-                        || entry2->Node_0.invariants() by {
-                        if entry2 != entry {
-                            // Satisfied because of recursive proof
-                            assert(node.visit(remain).contains(entry2));
-                        }
-                    }
-                },
-                _ => (),
-            }
-        }
-    }
-
-    /// Recursively update the entry at `path`.
-    ///
-    /// - If a reached entry is `Empty` or `Frame`, and `path` is not empty, then the update
-    ///   will be cancelled and the tree will not be modified.
-    pub open spec fn recursive_update(self, path: PTPath, entry: NodeEntry) -> Self
-        recommends
-            self.invariants(),
-            path.valid(self.arch, self.level),
-            Self::inv_entry(entry, self.arch, (self.level + path.len() - 1) as nat),
-            entry is Node ==> entry->Node_0.invariants(),
-        decreases path.len(),
-    {
-        if path.len() == 0 {
-            self
-        } else {
-            let (idx, remain) = path.step();
-            let entry = self.entries[idx as int];
-            match entry {
-                NodeEntry::Node(node) => self.update(
-                    idx as int,
-                    NodeEntry::Node(node.recursive_update(remain, entry)),
-                ),
-                _ => self,
-            }
-        }
-    }
-
-    /// Theorem. `recursive_update` function preserves invariants.
-    pub proof fn recursive_update_preserves_invariants(self, path: PTPath, entry: NodeEntry)
+    /// Lemma. `recursive_update` function preserves invariants.
+    pub proof fn lemma_recursive_update_preserves_invariants(self, path: PTPath, entry: NodeEntry)
         requires
             self.invariants(),
             path.valid(self.arch, self.level),
@@ -285,9 +333,34 @@ impl PTTreeNode {
             entry is Node ==> entry->Node_0.invariants(),
         ensures
             self.recursive_update(path, entry).invariants(),
+        decreases path.len(),
     {
-        // TODO
-        assume(false);
+        if path.len() == 0 {
+            // `path` is empty, the tree is not modified
+            assert(self.recursive_update(path, entry) === self);
+        } else if path.len() == 1 {
+            // Base case, proved by lemma
+            self.lemma_update_preserves_invariants(path.step().0 as int, entry);
+        } else {
+            let (idx, remain) = path.step();
+            let entry2 = self.entries[idx as int];
+            match entry2 {
+                NodeEntry::Node(node) => {
+                    assert(self.entries.contains(entry2));
+                    assert(Self::inv_entry_interm(entry2, self.arch, self.level));
+                    assert(node.invariants());
+                    // Recursively prove `node.recursive_update(remain)`
+                    node.lemma_recursive_update_preserves_invariants(remain, entry);
+                    // `node.recursive_update(remain, entry)` satisfy invariants,
+                    // so the updated `self` also satisfy invariants by lemma
+                    self.lemma_update_preserves_invariants(
+                        idx as int,
+                        NodeEntry::Node(node.recursive_update(remain, entry)),
+                    );
+                },
+                _ => assert(self.recursive_update(path, entry) === self),
+            }
+        }
     }
 }
 
@@ -298,6 +371,11 @@ pub struct PTTreeModel {
 }
 
 impl PTTreeModel {
+    /// Wrap a root node into a tree model.
+    pub open spec fn new(root: PTTreeNode) -> Self {
+        Self { root }
+    }
+
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
         self.root.invariants()
@@ -311,8 +389,10 @@ impl PTTreeModel {
         recommends
             self.invariants(),
     {
-        // TODO
-        Err(self)
+        let path = PTPath::from_vaddr(vaddr, self.root.arch);
+        let entry = NodeEntry::Frame(frame);
+        // TODO: add intermidiate nodes
+        Ok(Self::new(self.root.recursive_update(path, entry)))
     }
 
     /// Unmap a virtual address.
@@ -323,8 +403,10 @@ impl PTTreeModel {
         recommends
             self.invariants(),
     {
-        // TODO
-        Err(self)
+        let path = PTPath::from_vaddr(vaddr, self.root.arch);
+        let entry = NodeEntry::Empty;
+        // TODO: add intermidiate nodes
+        Ok(Self::new(self.root.recursive_update(path, entry)))
     }
 
     /// Query a virtual address, return the mapped physical frame.
@@ -334,8 +416,14 @@ impl PTTreeModel {
         recommends
             self.invariants(),
     {
-        // TODO
-        Err(())
+        let path = PTPath::from_vaddr(vaddr, self.root.arch);
+        let entries = self.root.recursive_visit(path);
+        match entries.last() {
+            NodeEntry::Frame(frame) => Ok(
+                (self.root.arch.vbase_of_va(vaddr, (entries.len() - 1) as nat), frame),
+            ),
+            _ => Err(()),
+        }
     }
 }
 

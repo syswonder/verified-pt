@@ -15,8 +15,8 @@ use super::{
     frame::Frame,
     hardware::{HardwareState, PhysMem, TLB},
     high_level::{HighLevelConstants, HighLevelState},
-    pt_spec::{PTConstants, PageTableState},
     pt_mem::PageTableMem,
+    pt_spec::{PTConstants, PageTableState},
 };
 
 verus! {
