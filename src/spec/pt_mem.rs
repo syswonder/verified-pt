@@ -12,7 +12,7 @@ use super::{
     addr::{PAddr, PAddrExec, VAddr},
     arch::PTArch,
     frame::{Frame, FrameAttr, FrameSize},
-    nat_to_u64, slice_to_seq,
+    nat_to_u64,
 };
 
 verus! {
@@ -306,33 +306,52 @@ impl PageTableMemExec {
         unreached()
     }
 
-    /// Get a slice of `u64` reprenting the memory content of the table.
-    ///
+    /// Get the value at the given index in the given table.
+    /// 
     /// Assumption: Raw memory access is assumed to be valid.
     #[verifier::external_body]
-    pub fn table_of(&self, table: TableExec) -> (res: &[u64])
+    pub fn read(&self, base: PAddrExec, index: usize) -> (res: u64)
         requires
-            self@.tables.contains(table@),
+            exists|table: Table| #[trigger] self@.tables.contains(table) && table.base == base@,
+            ({
+                let table = choose|table: Table| #[trigger]
+                    self@.tables.contains(table) && table.base == base@;
+                index < self@.table_view(table).len()
+            }),
         ensures
-            self@.table_view(table@) == slice_to_seq(res),
+            ({
+                let table = choose|table: Table| #[trigger]
+                    self@.tables.contains(table) && table.base == base@;
+                self@.table_view(table)[index as int] == res
+            }),
     {
         unsafe {
-            core::slice::from_raw_parts(
-                table.base.0 as *const u64,
-                table.size.as_u64() as usize / 8,
-            )
+            (base.0 as *const u64).offset(index as isize).read_volatile()
         }
     }
 
-    /// Get the value at the given index in the given table.
-    pub fn read(&self, table: TableExec, index: usize) -> (res: u64)
+    /// Write the value to the given index in the given table.
+    /// 
+    /// Assumption: Raw memory access is assumed to be valid.
+    #[verifier::external_body]
+    pub fn write(&self, base: PAddrExec, index: usize, value: u64)
         requires
-            self@.tables.contains(table@),
-            index < self@.table_view(table@).len(),
+            exists|table: Table| #[trigger] self@.tables.contains(table) && table.base == base@,
+            ({
+                let table = choose|table: Table| #[trigger]
+                    self@.tables.contains(table) && table.base == base@;
+                index < self@.table_view(table).len()
+            }),
         ensures
-            self@.table_view(table@)[index as int] == res,
+            ({
+                let table = choose|table: Table| #[trigger]
+                    self@.tables.contains(table) && table.base == base@;
+                self@.table_view(table)[index as int] == value
+            }),
     {
-        self.table_of(table)[index]
+        unsafe {
+            (base.0 as *mut u64).offset(index as isize).write_volatile(value)
+        }
     }
 }
 

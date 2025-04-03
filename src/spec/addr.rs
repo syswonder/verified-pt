@@ -115,6 +115,7 @@ pub open spec(checked) fn overlap(base1: nat, size1: nat, base2: nat, size2: nat
 }
 
 /// (EXEC-MODE) Physical Address.
+#[derive(PartialEq, Eq)]
 pub struct PAddrExec(pub usize);
 
 impl PAddrExec {
@@ -125,6 +126,7 @@ impl PAddrExec {
 }
 
 /// (EXEC-MODE) Virtual Address.
+#[derive(PartialEq, Eq)]
 pub struct VAddrExec(pub usize);
 
 impl VAddrExec {
