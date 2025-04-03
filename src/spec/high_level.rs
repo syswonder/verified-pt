@@ -24,12 +24,12 @@ verus! {
 pub struct HighLevelState {
     /// 8-byte-indexed virtual memory.
     ///
-    /// We use index rather than address. Addresses that are not aligned to 8-byte boundaries
+    /// Use index rather than address. Addresses that are not aligned to 8-byte boundaries
     /// should not be used to access a value, while indexes don't face this issue.
     pub mem: Map<VIdx, u64>,
     /// Mappings from virtual address to physical frames.
     ///
-    /// The key must be the base address of a virtual page i.e. virtual range [`key`, `key + frame.size`)
+    /// The key must be the base address of a virtual page i.e. range [`key`, `key + frame.size`)
     /// must be mapped to the same physical frame.
     pub mappings: Map<VAddr, Frame>,
     /// Constants.
@@ -109,7 +109,6 @@ impl HighLevelState {
                 &&& s1.mem === s2.mem
             }
         } else {
-            // The result should be `Err`
             &&& res is Err
             // Memory should not be updated
             &&& s1.mem === s2.mem
@@ -138,17 +137,20 @@ impl HighLevelState {
         &&& frame.base.aligned(
             frame.size.as_nat(),
         )
+        // Frame should be within pmem
+        &&& s1.within_pmem(frame.base.idx())
+        &&& s1.within_pmem(
+            frame.base.offset(frame.size.as_nat()).idx(),
+        )
         // Frame should not overlap with existing pmem
         &&& !s1.overlaps_pmem(frame)
         // Check vmem overlapping
         &&& if s1.overlaps_vmem(vaddr, frame) {
-            // Mapping fails
             &&& res is Err
             // Memory and mappings should not be updated
             &&& s1.mem === s2.mem
             &&& s1.mappings === s2.mappings
         } else {
-            // Mapping succeeds
             &&& res is Ok
             // Update mappings
             &&& s1.mappings.insert(vaddr, frame)
@@ -168,7 +170,6 @@ impl HighLevelState {
         )
         // Check mapping
         &&& if s1.mappings.contains_key(vaddr) {
-            // Unmapping succeeds
             &&& res is Ok
             // Update mappings
             &&& s1.mappings.remove(vaddr)
@@ -176,7 +177,6 @@ impl HighLevelState {
             // Memory domain should be updated
             &&& s2.mem.dom() === s2.mem_domain_covered_by_mappings()
         } else {
-            // Unmapping fails
             &&& res is Err
             // Memory and mappings should not be updated
             &&& s1.mem === s2.mem

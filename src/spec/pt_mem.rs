@@ -307,7 +307,7 @@ impl PageTableMemExec {
     }
 
     /// Get the value at the given index in the given table.
-    /// 
+    ///
     /// Assumption: Raw memory access is assumed to be valid.
     #[verifier::external_body]
     pub fn read(&self, base: PAddrExec, index: usize) -> (res: u64)
@@ -325,13 +325,11 @@ impl PageTableMemExec {
                 self@.table_view(table)[index as int] == res
             }),
     {
-        unsafe {
-            (base.0 as *const u64).offset(index as isize).read_volatile()
-        }
+        unsafe { (base.0 as *const u64).offset(index as isize).read_volatile() }
     }
 
     /// Write the value to the given index in the given table.
-    /// 
+    ///
     /// Assumption: Raw memory access is assumed to be valid.
     #[verifier::external_body]
     pub fn write(&self, base: PAddrExec, index: usize, value: u64)
@@ -349,9 +347,7 @@ impl PageTableMemExec {
                 self@.table_view(table)[index as int] == value
             }),
     {
-        unsafe {
-            (base.0 as *mut u64).offset(index as isize).write_volatile(value)
-        }
+        unsafe { (base.0 as *mut u64).offset(index as isize).write_volatile(value) }
     }
 }
 
