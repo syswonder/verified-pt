@@ -126,7 +126,7 @@ impl HighLevelState {
         &&& s1.constants
             === s2.constants
         // Arch should support frame size
-        &&& s1.constants.arch.valid_frame_sizes().contains(
+        &&& s1.constants.arch.is_valid_frame_size(
             frame.size,
         )
         // Base vaddr should align to frame size

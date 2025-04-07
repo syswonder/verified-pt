@@ -45,7 +45,7 @@ impl PageTableState {
     /// Map precondition.
     pub open spec fn map_pre(self, base: VAddr, frame: Frame) -> bool {
         // Arch should support frame size
-        &&& self.constants.arch.valid_frame_sizes().contains(
+        &&& self.constants.arch.is_valid_frame_size(
             frame.size,
         )
         // Base vaddr should align to frame size
@@ -221,25 +221,25 @@ pub trait PageTableInterface where Self: Sized {
     /// Map a virtual address to a physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn map(&mut self, vaddr: VAddrExec, frame: FrameExec) -> (res: Result<(), ()>)
+    fn map(&mut self, base: VAddrExec, frame: FrameExec) -> (res: Result<(), ()>)
         requires
             old(self).invariants(),
-            old(self)@.map_pre(vaddr@, frame@),
+            old(self)@.map_pre(base@, frame@),
         ensures
             self.invariants(),
-            PageTableState::map(old(self)@, self@, vaddr@, frame@, res),
+            PageTableState::map(old(self)@, self@, base@, frame@, res),
     ;
 
     /// Unmap a virtual address.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn unmap(&mut self, vaddr: VAddrExec) -> (res: Result<(), ()>)
+    fn unmap(&mut self, base: VAddrExec) -> (res: Result<(), ()>)
         requires
             old(self).invariants(),
-            old(self)@.unmap_pre(vaddr@),
+            old(self)@.unmap_pre(base@),
         ensures
             self.invariants(),
-            PageTableState::unmap(old(self)@, self@, vaddr@, res),
+            PageTableState::unmap(old(self)@, self@, base@, res),
     ;
 
     /// Query a virtual address, return the mapped physical frame.

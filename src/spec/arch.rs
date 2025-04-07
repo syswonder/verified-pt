@@ -63,15 +63,15 @@ impl PTArch {
         self.entry_count(level) * PTE_SIZE
     }
 
-    /// All valid frame sizes in this architecture.
-    pub open spec fn valid_frame_sizes(self) -> Set<FrameSize> {
-        Seq::new(self.level_count(), |i| self.frame_size(i as nat)).to_set()
+    /// Check if `size` is a valid frame size.
+    pub open spec fn is_valid_frame_size(self, size: FrameSize) -> bool {
+        exists|level: nat| level < self.level_count() && self.frame_size(level) == size
     }
 
     /// Get the corresponding level of a frame size.
     pub open spec fn level_of_frame_size(self, size: FrameSize) -> nat
         recommends
-            self.valid_frame_sizes().contains(size),
+            self.is_valid_frame_size(size),
     {
         choose|level: nat| level < self.level_count() && self.frame_size(level) == size
     }
@@ -98,7 +98,7 @@ impl PTArch {
     pub open spec fn invariants(self) -> bool {
         // At least one level.
         &&& self.level_count()
-            >= 1
+            > 0
         // frame_size(N) = frame_size(N+1) * entry_count(N+1)
         &&& forall|level: nat|
             1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()
