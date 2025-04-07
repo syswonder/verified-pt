@@ -186,7 +186,7 @@ impl PageTableMem {
 
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
-        &&& self.arch.invariants()
+        &&& self.arch.valid()
         // Root table is always present.
         &&& self.tables.len() > 0
         // Table size is valid.
@@ -207,7 +207,7 @@ impl PageTableMem {
 
     /// Init State.
     pub open spec fn init(self) -> bool {
-        &&& self.arch.invariants()
+        &&& self.arch.valid()
         &&& self.tables.len() == 1
         &&& self.root().size.as_nat() == self.arch.table_size(0)
     }

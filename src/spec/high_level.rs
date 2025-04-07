@@ -119,7 +119,7 @@ impl HighLevelState {
     pub open spec fn map(
         s1: Self,
         s2: Self,
-        vaddr: VAddr,
+        vbase: VAddr,
         frame: Frame,
         res: Result<(), ()>,
     ) -> bool {
@@ -130,7 +130,7 @@ impl HighLevelState {
             frame.size,
         )
         // Base vaddr should align to frame size
-        &&& vaddr.aligned(
+        &&& vbase.aligned(
             frame.size.as_nat(),
         )
         // Base paddr should align to frame size
@@ -145,7 +145,7 @@ impl HighLevelState {
         // Frame should not overlap with existing pmem
         &&& !s1.overlaps_pmem(frame)
         // Check vmem overlapping
-        &&& if s1.overlaps_vmem(vaddr, frame) {
+        &&& if s1.overlaps_vmem(vbase, frame) {
             &&& res is Err
             // Memory and mappings should not be updated
             &&& s1.mem === s2.mem
@@ -153,7 +153,7 @@ impl HighLevelState {
         } else {
             &&& res is Ok
             // Update mappings
-            &&& s1.mappings.insert(vaddr, frame)
+            &&& s1.mappings.insert(vbase, frame)
                 === s2.mappings
             // Memory domain should be updated
             &&& s2.mem.dom() === s2.mem_domain_covered_by_mappings()
@@ -161,18 +161,18 @@ impl HighLevelState {
     }
 
     /// State transtion - Unmap a virtual address.
-    pub open spec fn unmap(s1: Self, s2: Self, vaddr: VAddr, res: Result<(), ()>) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: Result<(), ()>) -> bool {
         &&& s1.constants
             === s2.constants
         // Base vaddr should align to leaf frame size
-        &&& vaddr.aligned(
+        &&& vbase.aligned(
             s1.constants.arch.leaf_frame_size().as_nat(),
         )
         // Check mapping
-        &&& if s1.mappings.contains_key(vaddr) {
+        &&& if s1.mappings.contains_key(vbase) {
             &&& res is Ok
             // Update mappings
-            &&& s1.mappings.remove(vaddr)
+            &&& s1.mappings.remove(vbase)
                 === s2.mappings
             // Memory domain should be updated
             &&& s2.mem.dom() === s2.mem_domain_covered_by_mappings()
@@ -222,22 +222,22 @@ impl HighLevelState {
     pub open spec fn mem_domain_covered_by_mappings(self) -> Set<VIdx> {
         Set::new(
             |vidx: VIdx|
-                exists|base: VAddr, frame: Frame|
+                exists|vbase: VAddr, frame: Frame|
                     {
-                        &&& #[trigger] self.mappings.contains_pair(base, frame)
-                        &&& vidx.addr().within(base, frame.size.as_nat())
+                        &&& #[trigger] self.mappings.contains_pair(vbase, frame)
+                        &&& vidx.addr().within(vbase, frame.size.as_nat())
                     },
         )
     }
 
     /// If `frame` overlaps with existing physical memory.
     pub open spec fn overlaps_pmem(self, frame: Frame) -> bool {
-        exists|frame1: Frame|
+        exists|frame2: Frame|
             {
-                &&& #[trigger] self.mappings.contains_value(frame1)
+                &&& #[trigger] self.mappings.contains_value(frame2)
                 &&& PAddr::overlap(
-                    frame1.base,
-                    frame1.size.as_nat(),
+                    frame2.base,
+                    frame2.size.as_nat(),
                     frame.base,
                     frame.size.as_nat(),
                 )
@@ -245,14 +245,14 @@ impl HighLevelState {
     }
 
     /// If mapping `(vaddr, frame)` overlaps with existing virtual memory.
-    pub open spec fn overlaps_vmem(self, vaddr: VAddr, frame: Frame) -> bool {
-        exists|base: VAddr|
+    pub open spec fn overlaps_vmem(self, vbase: VAddr, frame: Frame) -> bool {
+        exists|vbase2: VAddr|
             {
-                &&& #[trigger] self.mappings.contains_key(base)
+                &&& #[trigger] self.mappings.contains_key(vbase2)
                 &&& VAddr::overlap(
-                    base,
-                    self.mappings[base].size.as_nat(),
-                    vaddr,
+                    vbase2,
+                    self.mappings[vbase2].size.as_nat(),
+                    vbase,
                     frame.size.as_nat(),
                 )
             }
@@ -260,10 +260,10 @@ impl HighLevelState {
 
     /// If there exists a mapping for `vaddr`.
     pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
-        exists|base: VAddr, frame: Frame|
+        exists|vbase: VAddr, frame: Frame|
             {
-                &&& #[trigger] self.mappings.contains_pair(base, frame)
-                &&& vaddr.within(base, frame.size.as_nat())
+                &&& #[trigger] self.mappings.contains_pair(vbase, frame)
+                &&& vaddr.within(vbase, frame.size.as_nat())
             }
     }
 
@@ -272,10 +272,10 @@ impl HighLevelState {
         recommends
             self.has_mapping_for(vaddr),
     {
-        choose|base: VAddr, frame: Frame|
+        choose|vbase: VAddr, frame: Frame|
             {
-                &&& #[trigger] self.mappings.contains_pair(base, frame)
-                &&& vaddr.within(base, frame.size.as_nat())
+                &&& #[trigger] self.mappings.contains_pair(vbase, frame)
+                &&& vaddr.within(vbase, frame.size.as_nat())
             }
     }
 

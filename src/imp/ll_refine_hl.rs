@@ -24,16 +24,16 @@ proof fn lemma_pt_interpret_equals_all_mappings(st: LowLevelState)
     let all_mappings = st.all_mappings();
 
     // 1. Any mapping in `all_mappings` is also in `interp_pt`.
-    assert(forall|addr, frame| #[trigger]
-        all_mappings.contains_pair(addr, frame) ==> interp_pt.contains_pair(addr, frame));
+    assert(forall|vbase, frame| #[trigger]
+        all_mappings.contains_pair(vbase, frame) ==> interp_pt.contains_pair(vbase, frame));
 
     // 2. Any mapping in `interp_pt` is also in `all_mappings`.
-    assert forall|addr, frame| #[trigger]
-        interp_pt.contains_pair(addr, frame) implies all_mappings.contains_pair(addr, frame) by {
-        if tlb.contains_base(addr) {
-            assert(all_mappings.contains_pair(addr, tlb.index(addr)));
+    assert forall|vbase, frame| #[trigger]
+        interp_pt.contains_pair(vbase, frame) implies all_mappings.contains_pair(vbase, frame) by {
+        if tlb.contains_base(vbase) {
+            assert(all_mappings.contains_pair(vbase, tlb.index(vbase)));
         } else {
-            assert(all_mappings.contains_pair(addr, interp_pt[addr]));
+            assert(all_mappings.contains_pair(vbase, interp_pt[vbase]));
         }
     }
 
@@ -47,25 +47,25 @@ proof fn lemma_at_most_one_mapping_for_vaddr(st: LowLevelState, vaddr: VAddr)
     requires
         st.mappings_nonoverlap_in_vmem(),
     ensures
-        forall|base1, frame1, base2, frame2|
+        forall|vbase1, frame1, vbase2, frame2|
             {
-                &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
-                &&& vaddr.within(base1, frame1.size.as_nat())
-                &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
-                &&& vaddr.within(base2, frame2.size.as_nat())
-            } ==> base1 == base2,
+                &&& #[trigger] st.pt.interpret().contains_pair(vbase1, frame1)
+                &&& vaddr.within(vbase1, frame1.size.as_nat())
+                &&& #[trigger] st.pt.interpret().contains_pair(vbase2, frame2)
+                &&& vaddr.within(vbase2, frame2.size.as_nat())
+            } ==> vbase1 == vbase2,
 {
-    if exists|base1, frame1, base2, frame2|
+    if exists|vbase1, frame1, vbase2, frame2|
         {
-            &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
-            &&& vaddr.within(base1, frame1.size.as_nat())
-            &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
-            &&& vaddr.within(base2, frame2.size.as_nat())
-            &&& base1 != base2
+            &&& #[trigger] st.pt.interpret().contains_pair(vbase1, frame1)
+            &&& vaddr.within(vbase1, frame1.size.as_nat())
+            &&& #[trigger] st.pt.interpret().contains_pair(vbase2, frame2)
+            &&& vaddr.within(vbase2, frame2.size.as_nat())
+            &&& vbase1 != vbase2
         } {
         // Proof by contradiction. If there are two mappings for `vaddr`,
         // then there is an overlap.
-        let (base1, frame1, base2, frame2): (VAddr, Frame, VAddr, Frame) = choose|
+        let (vbase1, frame1, vbase2, frame2): (VAddr, Frame, VAddr, Frame) = choose|
             base1,
             frame1,
             base2,
@@ -78,7 +78,7 @@ proof fn lemma_at_most_one_mapping_for_vaddr(st: LowLevelState, vaddr: VAddr)
                 &&& vaddr.within(base2, frame2.size.as_nat())
                 &&& base1 != base2
             };
-        assert(VAddr::overlap(base1, frame1.size.as_nat(), base2, frame2.size.as_nat()));
+        assert(VAddr::overlap(vbase1, frame1.size.as_nat(), vbase2, frame2.size.as_nat()));
     }
 }
 
@@ -97,9 +97,9 @@ proof fn lemma_mapping_in_both_tlb_and_pt(st: LowLevelState, vaddr: VAddr)
 {
     assert(st.hw_state().pt === st.pt);
 
-    let (base, frame) = st.hw_state().tlb_mapping_for(vaddr);
+    let (vbase, frame) = st.hw_state().tlb_mapping_for(vaddr);
     // TLB is submap of PT.
-    assert(st.pt.interpret().contains_pair(base, frame));
+    assert(st.pt.interpret().contains_pair(vbase, frame));
     assert(st.hw_state().pt_has_mapping_for(vaddr));
     // Lemma ensures that the two mappings are equal.
     lemma_at_most_one_mapping_for_vaddr(st, vaddr);
@@ -116,42 +116,42 @@ proof fn lemma_different_pidxs_for_different_vidxs(st: LowLevelState, vidx1: VId
         st.mappings_aligned(),
         vidx1 != vidx2,
     ensures
-        forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
+        forall|vbase1: VAddr, frame1: Frame, vbase2: VAddr, frame2: Frame|
             {
-                &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
-                &&& vidx1.addr().within(base1, frame1.size.as_nat())
-                &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
-                &&& vidx2.addr().within(base2, frame2.size.as_nat())
-            } ==> vidx1.addr().map(base1, frame1.base).idx() != vidx2.addr().map(
-                base2,
+                &&& #[trigger] st.pt.interpret().contains_pair(vbase1, frame1)
+                &&& vidx1.addr().within(vbase1, frame1.size.as_nat())
+                &&& #[trigger] st.pt.interpret().contains_pair(vbase2, frame2)
+                &&& vidx2.addr().within(vbase2, frame2.size.as_nat())
+            } ==> vidx1.addr().map(vbase1, frame1.base).idx() != vidx2.addr().map(
+                vbase2,
                 frame2.base,
             ).idx(),
 {
-    if exists|base1, frame1, base2, frame2|
+    if exists|vbase1, frame1, vbase2, frame2|
         {
-            &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
-            &&& vidx1.addr().within(base1, frame1.size.as_nat())
-            &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
-            &&& vidx2.addr().within(base2, frame2.size.as_nat())
-            &&& vidx1.addr().map(base1, frame1.base).idx() == vidx2.addr().map(
-                base2,
+            &&& #[trigger] st.pt.interpret().contains_pair(vbase1, frame1)
+            &&& vidx1.addr().within(vbase1, frame1.size.as_nat())
+            &&& #[trigger] st.pt.interpret().contains_pair(vbase2, frame2)
+            &&& vidx2.addr().within(vbase2, frame2.size.as_nat())
+            &&& vidx1.addr().map(vbase1, frame1.base).idx() == vidx2.addr().map(
+                vbase2,
                 frame2.base,
             ).idx()
         } {
         // Proof by contradiction.
-        let (base1, frame1, base2, frame2): (VAddr, Frame, VAddr, Frame) = choose|
-            base1,
+        let (vbase1, frame1, vbase2, frame2): (VAddr, Frame, VAddr, Frame) = choose|
+            vbase1,
             frame1,
-            base2,
+            vbase2,
             frame2,
         |
             {
-                &&& #[trigger] st.pt.interpret().contains_pair(base1, frame1)
-                &&& vidx1.addr().within(base1, frame1.size.as_nat())
-                &&& #[trigger] st.pt.interpret().contains_pair(base2, frame2)
-                &&& vidx2.addr().within(base2, frame2.size.as_nat())
-                &&& vidx1.addr().map(base1, frame1.base).idx() == vidx2.addr().map(
-                    base2,
+                &&& #[trigger] st.pt.interpret().contains_pair(vbase1, frame1)
+                &&& vidx1.addr().within(vbase1, frame1.size.as_nat())
+                &&& #[trigger] st.pt.interpret().contains_pair(vbase2, frame2)
+                &&& vidx2.addr().within(vbase2, frame2.size.as_nat())
+                &&& vidx1.addr().map(vbase1, frame1.base).idx() == vidx2.addr().map(
+                    vbase2,
                     frame2.base,
                 ).idx()
             };
@@ -170,13 +170,13 @@ proof fn lemma_different_pidxs_for_different_vidxs(st: LowLevelState, vidx1: VId
 /// does not overlap with existing mappings preserves the non-overlap property.
 proof fn lemma_add_mapping_preserves_nonoverlap(
     mappings: Map<VAddr, Frame>,
-    base: VAddr,
+    vbase: VAddr,
     frame: Frame,
 )
     requires
-        forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
-            mappings.contains_pair(base1, frame1) && mappings.contains_pair(base2, frame2) ==> ((
-            base1 == base2) || !PAddr::overlap(
+        forall|vbase1: VAddr, frame1: Frame, vbase2: VAddr, frame2: Frame|
+            mappings.contains_pair(vbase1, frame1) && mappings.contains_pair(vbase2, frame2) ==> ((
+            vbase1 == vbase2) || !PAddr::overlap(
                 frame1.base,
                 frame1.size.as_nat(),
                 frame2.base,
@@ -193,29 +193,29 @@ proof fn lemma_add_mapping_preserves_nonoverlap(
                 )
             },
     ensures
-        forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
-            mappings.insert(base, frame).contains_pair(base1, frame1) && mappings.insert(
-                base,
+        forall|vbase1: VAddr, frame1: Frame, vbase2: VAddr, frame2: Frame|
+            mappings.insert(vbase, frame).contains_pair(vbase1, frame1) && mappings.insert(
+                vbase,
                 frame,
-            ).contains_pair(base2, frame2) ==> ((base1 == base2) || !PAddr::overlap(
+            ).contains_pair(vbase2, frame2) ==> ((vbase1 == vbase2) || !PAddr::overlap(
                 frame1.base,
                 frame1.size.as_nat(),
                 frame2.base,
                 frame2.size.as_nat(),
             )),
 {
-    assert forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
-        mappings.insert(base, frame).contains_pair(base1, frame1) && mappings.insert(
-            base,
+    assert forall|vbase1: VAddr, frame1: Frame, vbase2: VAddr, frame2: Frame|
+        mappings.insert(vbase, frame).contains_pair(vbase1, frame1) && mappings.insert(
+            vbase,
             frame,
-        ).contains_pair(base2, frame2) implies ((base1 == base2) || !PAddr::overlap(
+        ).contains_pair(vbase2, frame2) implies ((vbase1 == vbase2) || !PAddr::overlap(
         frame1.base,
         frame1.size.as_nat(),
         frame2.base,
         frame2.size.as_nat(),
     )) by {
-        if base1 != base2 {
-            if base1 == base {
+        if vbase1 != vbase2 {
+            if vbase1 == vbase {
                 // New mapping doesn't overlap with frame2
                 assert(mappings.contains_value(frame2));
                 assert(!PAddr::overlap(
@@ -224,7 +224,7 @@ proof fn lemma_add_mapping_preserves_nonoverlap(
                     frame2.base,
                     frame2.size.as_nat(),
                 ));
-            } else if base2 == base {
+            } else if vbase2 == vbase {
                 // New mapping doesn't overlap with frame1
                 assert(mappings.contains_value(frame1));
                 assert(!PAddr::overlap(
@@ -235,8 +235,8 @@ proof fn lemma_add_mapping_preserves_nonoverlap(
                 ));
             } else {
                 // Old mappings don't overlap
-                assert(mappings.contains_pair(base1, frame1));
-                assert(mappings.contains_pair(base2, frame2));
+                assert(mappings.contains_pair(vbase1, frame1));
+                assert(mappings.contains_pair(vbase2, frame2));
             }
         }
     }
@@ -311,11 +311,11 @@ proof fn ll_read_refines_hl_read(
             // Lemma tells us "TLB hit" and "TLB miss, PT hit" are equivalent.
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
-        // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
+        // `s1` has the mapping `(vbase, frame)` which contains `op.vaddr`.
 
-        let (base, frame) = s1.mapping_for(vaddr);
+        let (vbase, frame) = s1.mapping_for(vaddr);
 
-        let pidx = vaddr.map(base, frame.base).idx();
+        let pidx = vaddr.map(vbase, frame.base).idx();
         if s1.mem.contains(pidx) && frame.attr.readable && frame.attr.user_accessible {
             // Values in the intepreted memory are the same as in the OS memory, because
             // there is only one mapping for `op.vaddr` (lemma).
@@ -374,12 +374,12 @@ proof fn ll_write_refines_hl_write(
             // Lemma tells us "TLB hit" and "TLB miss, PT hit" are equivalent.
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
-        // `s1` has the mapping `(base, frame)` which contains `op.vaddr`.
+        // `s1` has the mapping `(vbase, frame)` which contains `op.vaddr`.
 
-        let (base, frame) = s1.mapping_for(vaddr);
+        let (vbase, frame) = s1.mapping_for(vaddr);
 
         let vidx = vaddr.idx();
-        let pidx = vaddr.map(base, frame.base).idx();
+        let pidx = vaddr.map(vbase, frame.base).idx();
         if s1.mem.contains(pidx) && frame.attr.writable && frame.attr.user_accessible {
             // Prove that the interpreted memory is updated correctly.
             assert forall|vidx2: VIdx|
@@ -432,39 +432,39 @@ proof fn ll_write_refines_hl_write(
 proof fn ll_map_preserves_invariants(
     s1: LowLevelState,
     s2: LowLevelState,
-    base: VAddr,
+    vbase: VAddr,
     frame: Frame,
     res: Result<(), ()>,
 )
     requires
         s1.invariants(),
-        LowLevelState::map(s1, s2, base, frame, res),
+        LowLevelState::map(s1, s2, vbase, frame, res),
     ensures
         s2.invariants(),
 {
-    if s2.pt.interpret() == s1.pt.interpret().insert(base, frame) {
+    if s2.pt.interpret() == s1.pt.interpret().insert(vbase, frame) {
         // Prove mappings aligned to word size.
-        assert forall|base2: VAddr, frame2: Frame| #[trigger]
-            s2.pt.interpret().contains_pair(base2, frame2) implies base2.aligned(
+        assert forall|vbase2: VAddr, frame2: Frame| #[trigger]
+            s2.pt.interpret().contains_pair(vbase2, frame2) implies vbase2.aligned(
             frame2.size.as_nat(),
         ) && frame2.base.aligned(frame2.size.as_nat()) by {
-            if base2 == base {
-                assert(base.aligned(frame.size.as_nat()));
+            if vbase2 == vbase {
+                assert(vbase.aligned(frame.size.as_nat()));
                 assert(frame.base.aligned(frame.size.as_nat()));
             } else {
-                assert(s1.pt.interpret().contains_pair(base2, frame2));
+                assert(s1.pt.interpret().contains_pair(vbase2, frame2));
             }
         }
         // Prove mappings within physical memory.
-        assert forall|base2: VAddr, frame2: Frame| #[trigger]
-            s2.pt.interpret().contains_pair(base2, frame2) implies s2.mem.contains(
+        assert forall|vbase2: VAddr, frame2: Frame| #[trigger]
+            s2.pt.interpret().contains_pair(vbase2, frame2) implies s2.mem.contains(
             frame2.base.idx(),
         ) && s2.mem.contains(frame2.base.offset(frame2.size.as_nat()).idx()) by {
-            if base2 == base {
+            if vbase2 == vbase {
                 assert(s2.mem.contains(frame.base.idx()));
                 assert(s2.mem.contains(frame.base.offset(frame.size.as_nat()).idx()));
             } else {
-                assert(s1.pt.interpret().contains_pair(base2, frame2));
+                assert(s1.pt.interpret().contains_pair(vbase2, frame2));
             }
         }
     }
@@ -473,14 +473,14 @@ proof fn ll_map_preserves_invariants(
 
     // Prove non-overlapping mappings in pmem and vmem.
     assert(s2.mappings_nonoverlap_in_vmem());
-    lemma_add_mapping_preserves_nonoverlap(s1.pt.interpret(), base, frame);
+    lemma_add_mapping_preserves_nonoverlap(s1.pt.interpret(), vbase, frame);
     assert(s2.mappings_nonoverlap_in_pmem());
 
     // Prove tlb is a subset of pt.
     assert(s1.tlb == s1.hw_state().tlb);
-    assert(forall|base, frame|
-        s1.pt.interpret().contains_pair(base, frame) ==> s2.pt.interpret().contains_pair(
-            base,
+    assert(forall|vbase, frame|
+        s1.pt.interpret().contains_pair(vbase, frame) ==> s2.pt.interpret().contains_pair(
+            vbase,
             frame,
         ));
     assert(s2.tlb_is_submap_of_pt());
@@ -490,18 +490,18 @@ proof fn ll_map_preserves_invariants(
 proof fn ll_map_refines_hl_map(
     s1: LowLevelState,
     s2: LowLevelState,
-    base: VAddr,
+    vbase: VAddr,
     frame: Frame,
     res: Result<(), ()>,
 )
     requires
         s1.invariants(),
-        LowLevelState::map(s1, s2, base, frame, res),
+        LowLevelState::map(s1, s2, vbase, frame, res),
     ensures
-        HighLevelState::map(s1@, s2@, base, frame, res),
+        HighLevelState::map(s1@, s2@, vbase, frame, res),
 {
     lemma_pt_interpret_equals_all_mappings(s1);
-    ll_map_preserves_invariants(s1, s2, base, frame, res);
+    ll_map_preserves_invariants(s1, s2, vbase, frame, res);
     lemma_pt_interpret_equals_all_mappings(s2);
 
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
@@ -512,31 +512,31 @@ proof fn ll_map_refines_hl_map(
 proof fn ll_unmap_preserves_invariants(
     s1: LowLevelState,
     s2: LowLevelState,
-    base: VAddr,
+    vbase: VAddr,
     res: Result<(), ()>,
 )
     requires
         s1.invariants(),
-        LowLevelState::unmap(s1, s2, base, res),
+        LowLevelState::unmap(s1, s2, vbase, res),
     ensures
         s2.invariants(),
 {
     // Prove s2.pt is a subset of s1.pt.
-    assert(forall|base, frame| #[trigger]
-        s2.pt.interpret().contains_pair(base, frame) ==> s1.pt.interpret().contains_pair(
-            base,
+    assert(forall|vbase, frame| #[trigger]
+        s2.pt.interpret().contains_pair(vbase, frame) ==> s1.pt.interpret().contains_pair(
+            vbase,
             frame,
         ));
 
     // Prove tlb is a subset of pt.
     assert(s1.tlb == s1.hw_state().tlb);
     // s1.tlb < s1.pt ==> s2.tlb < s1.tlb\{op.vaddr} < s1.pt\{op.vaddr} = s2.pt
-    assert forall|base, frame| #[trigger]
-        s2.tlb.contains_mapping(base, frame) implies s2.pt.interpret().contains_pair(
-        base,
+    assert forall|vbase, frame| #[trigger]
+        s2.tlb.contains_mapping(vbase, frame) implies s2.pt.interpret().contains_pair(
+        vbase,
         frame,
     ) by {
-        assert(s1.pt.interpret().contains_pair(base, frame));
+        assert(s1.pt.interpret().contains_pair(vbase, frame));
     }
     assert(s2.tlb_is_submap_of_pt());
 }
@@ -545,17 +545,17 @@ proof fn ll_unmap_preserves_invariants(
 proof fn ll_unmap_refines_hl_unmap(
     s1: LowLevelState,
     s2: LowLevelState,
-    base: VAddr,
+    vbase: VAddr,
     res: Result<(), ()>,
 )
     requires
         s1.invariants(),
-        LowLevelState::unmap(s1, s2, base, res),
+        LowLevelState::unmap(s1, s2, vbase, res),
     ensures
-        HighLevelState::unmap(s1@, s2@, base, res),
+        HighLevelState::unmap(s1@, s2@, vbase, res),
 {
     lemma_pt_interpret_equals_all_mappings(s1);
-    ll_unmap_preserves_invariants(s1, s2, base, res);
+    ll_unmap_preserves_invariants(s1, s2, vbase, res);
     lemma_pt_interpret_equals_all_mappings(s2);
 
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
@@ -600,25 +600,25 @@ proof fn ll_query_refines_hl_query(
 }
 
 /// Theorem. The low-level tlb evict operation preserves the invariants.
-proof fn ll_tlb_evict_preserves_invariants(s1: LowLevelState, s2: LowLevelState, base: VAddr)
+proof fn ll_tlb_evict_preserves_invariants(s1: LowLevelState, s2: LowLevelState, vbase: VAddr)
     requires
         s1.invariants(),
-        LowLevelState::tlb_evict(s1, s2, base),
+        LowLevelState::tlb_evict(s1, s2, vbase),
     ensures
         s2.invariants(),
 {
 }
 
 /// Theorem. The low-level tlb evict operation refines the high-level identity operation.
-proof fn ll_tlb_evict_refines_hl_id(s1: LowLevelState, s2: LowLevelState, base: VAddr)
+proof fn ll_tlb_evict_refines_hl_id(s1: LowLevelState, s2: LowLevelState, vbase: VAddr)
     requires
         s1.invariants(),
-        LowLevelState::tlb_evict(s1, s2, base),
+        LowLevelState::tlb_evict(s1, s2, vbase),
     ensures
         HighLevelState::id(s1@, s2@),
 {
     lemma_pt_interpret_equals_all_mappings(s1);
-    ll_tlb_evict_preserves_invariants(s1, s2, base);
+    ll_tlb_evict_preserves_invariants(s1, s2, vbase);
     lemma_pt_interpret_equals_all_mappings(s2);
 
     // Post condition satisfied because TLB is the subset of the page table (lemma).

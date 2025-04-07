@@ -79,7 +79,7 @@ impl PTArch {
     /// Calculates the page table entry index for a virtual address at the specified level.
     pub open spec fn pte_index_of_va(self, vaddr: VAddr, level: nat) -> nat
         recommends
-            self.invariants(),
+            self.valid(),
             level < self.level_count(),
     {
         vaddr.0 / self.frame_size(level).as_nat() % self.entry_count(level)
@@ -88,14 +88,14 @@ impl PTArch {
     /// Calculates the virtual page base address that contains a given virtual address at the specified level.
     pub open spec fn vbase_of_va(self, vaddr: VAddr, level: nat) -> VAddr
         recommends
-            self.invariants(),
+            self.valid(),
             level < self.level_count(),
     {
         VAddr((vaddr.0 - vaddr.0 % self.frame_size(level).as_nat()) as nat)
     }
 
-    /// Invariants.
-    pub open spec fn invariants(self) -> bool {
+    /// Check if the page table architecture is valid.
+    pub open spec fn valid(self) -> bool {
         // At least one level.
         &&& self.level_count()
             > 0
@@ -129,7 +129,7 @@ pub spec const VMSAV8_S1_4K_ARCH: PTArch = PTArch(
 pub broadcast proof fn vmsav8_s1_4k_arch_invariants()
     by (nonlinear_arith)
     ensures
-        #[trigger] VMSAV8_S1_4K_ARCH.invariants(),
+        #[trigger] VMSAV8_S1_4K_ARCH.valid(),
 {
     assume(1 << 9 == 512);
 }

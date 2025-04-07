@@ -43,13 +43,13 @@ impl PageTableState {
     }
 
     /// Map precondition.
-    pub open spec fn map_pre(self, base: VAddr, frame: Frame) -> bool {
+    pub open spec fn map_pre(self, vbase: VAddr, frame: Frame) -> bool {
         // Arch should support frame size
         &&& self.constants.arch.is_valid_frame_size(
             frame.size,
         )
         // Base vaddr should align to frame size
-        &&& base.aligned(
+        &&& vbase.aligned(
             frame.size.as_nat(),
         )
         // Base paddr should align to frame size
@@ -69,15 +69,15 @@ impl PageTableState {
     pub open spec fn map(
         s1: Self,
         s2: Self,
-        base: VAddr,
+        vbase: VAddr,
         frame: Frame,
         res: Result<(), ()>,
     ) -> bool {
         &&& s1.constants == s2.constants
         // Precondition
-        &&& s1.map_pre(base, frame)
+        &&& s1.map_pre(vbase, frame)
         // Check vmem overlapping
-        &&& if s1.overlaps_vmem(base, frame) {
+        &&& if s1.overlaps_vmem(vbase, frame) {
             // Mapping fails
             &&& res is Err
             // Page table should not be updated
@@ -86,27 +86,27 @@ impl PageTableState {
             // Mapping succeeds
             &&& res is Ok
             // Update page table
-            &&& s1.mappings.insert(base, frame) === s2.mappings
+            &&& s1.mappings.insert(vbase, frame) === s2.mappings
         }
     }
 
     /// Unmap precondition.
-    pub open spec fn unmap_pre(self, base: VAddr) -> bool {
+    pub open spec fn unmap_pre(self, vbase: VAddr) -> bool {
         // Base vaddr should align to leaf frame size
-        &&& base.aligned(self.constants.arch.leaf_frame_size().as_nat())
+        &&& vbase.aligned(self.constants.arch.leaf_frame_size().as_nat())
     }
 
     /// State transition - unmap a virtual address.
-    pub open spec fn unmap(s1: Self, s2: Self, base: VAddr, res: Result<(), ()>) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: Result<(), ()>) -> bool {
         &&& s1.constants == s2.constants
         // Precondition
-        &&& s1.unmap_pre(base)
+        &&& s1.unmap_pre(vbase)
         // Check page table
-        &&& if s1.mappings.contains_key(base) {
+        &&& if s1.mappings.contains_key(vbase) {
             // Unmapping succeeds
             &&& res is Ok
             // Update page table
-            &&& s1.mappings.remove(base) === s2.mappings
+            &&& s1.mappings.remove(vbase) === s2.mappings
         } else {
             // Unmapping fails
             &&& res is Err
@@ -156,12 +156,12 @@ impl PageTableState {
 impl PageTableState {
     /// If `frame` overlaps with existing physical memory.
     pub open spec fn overlaps_pmem(self, frame: Frame) -> bool {
-        exists|frame1: Frame|
+        exists|frame2: Frame|
             {
-                &&& #[trigger] self.mappings.contains_value(frame1)
+                &&& #[trigger] self.mappings.contains_value(frame2)
                 &&& PAddr::overlap(
-                    frame1.base,
-                    frame1.size.as_nat(),
+                    frame2.base,
+                    frame2.size.as_nat(),
                     frame.base,
                     frame.size.as_nat(),
                 )
@@ -169,14 +169,14 @@ impl PageTableState {
     }
 
     /// If mapping `(vaddr, frame)` overlaps with existing virtual memory.
-    pub open spec fn overlaps_vmem(self, vaddr: VAddr, frame: Frame) -> bool {
-        exists|base: VAddr|
+    pub open spec fn overlaps_vmem(self, vbase: VAddr, frame: Frame) -> bool {
+        exists|vbase2: VAddr|
             {
-                &&& #[trigger] self.mappings.contains_key(base)
+                &&& #[trigger] self.mappings.contains_key(vbase2)
                 &&& VAddr::overlap(
-                    base,
-                    self.mappings[base].size.as_nat(),
-                    vaddr,
+                    vbase2,
+                    self.mappings[vbase2].size.as_nat(),
+                    vbase,
                     frame.size.as_nat(),
                 )
             }
@@ -221,25 +221,25 @@ pub trait PageTableInterface where Self: Sized {
     /// Map a virtual address to a physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn map(&mut self, base: VAddrExec, frame: FrameExec) -> (res: Result<(), ()>)
+    fn map(&mut self, vbase: VAddrExec, frame: FrameExec) -> (res: Result<(), ()>)
         requires
             old(self).invariants(),
-            old(self)@.map_pre(base@, frame@),
+            old(self)@.map_pre(vbase@, frame@),
         ensures
             self.invariants(),
-            PageTableState::map(old(self)@, self@, base@, frame@, res),
+            PageTableState::map(old(self)@, self@, vbase@, frame@, res),
     ;
 
     /// Unmap a virtual address.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn unmap(&mut self, base: VAddrExec) -> (res: Result<(), ()>)
+    fn unmap(&mut self, vbase: VAddrExec) -> (res: Result<(), ()>)
         requires
             old(self).invariants(),
-            old(self)@.unmap_pre(base@),
+            old(self)@.unmap_pre(vbase@),
         ensures
             self.invariants(),
-            PageTableState::unmap(old(self)@, self@, base@, res),
+            PageTableState::unmap(old(self)@, self@, vbase@, res),
     ;
 
     /// Query a virtual address, return the mapped physical frame.

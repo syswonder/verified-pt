@@ -79,67 +79,67 @@ impl TLB {
     }
 
     /// Fill a TLB entry.
-    pub open spec fn fill(self, base: VAddr, frame: Frame) -> Self
+    pub open spec fn fill(self, vbase: VAddr, frame: Frame) -> Self
         recommends
-            !self.0.contains_key(base),
+            !self.0.contains_key(vbase),
     {
-        TLB(self.0.insert(base, frame))
+        TLB(self.0.insert(vbase, frame))
     }
 
     /// Evict a TLB entry.
-    pub open spec fn evict(self, base: VAddr) -> Self
+    pub open spec fn evict(self, vbase: VAddr) -> Self
         recommends
-            self.0.contains_key(base),
+            self.0.contains_key(vbase),
     {
-        TLB(self.0.remove(base))
+        TLB(self.0.remove(vbase))
     }
 
     /// If TLB has a mapping with given base.
-    pub open spec fn contains_base(self, base: VAddr) -> bool {
-        self.0.contains_key(base)
+    pub open spec fn contains_base(self, vbase: VAddr) -> bool {
+        self.0.contains_key(vbase)
     }
 
     /// If TLB has a given mapping `(base, frame)`
-    pub open spec fn contains_mapping(self, base: VAddr, frame: Frame) -> bool {
-        self.0.contains_pair(base, frame)
+    pub open spec fn contains_mapping(self, vbase: VAddr, frame: Frame) -> bool {
+        self.0.contains_pair(vbase, frame)
     }
 
     /// Index a TLB entry.
-    pub open spec fn index(self, base: VAddr) -> Frame
+    pub open spec fn index(self, vbase: VAddr) -> Frame
         recommends
-            self.contains_base(base),
+            self.contains_base(vbase),
     {
-        self.0[base]
+        self.0[vbase]
     }
 
     /// Check if a new entry conflicts with an existing TLB entry, return the conflicting entry.
     ///
     /// The concrete strategy varies depending on the TLB implementation.
     /// This specification does not dictate the eviction strategy.
-    pub open spec fn conflict(self, base: VAddr, frame: Frame) -> Option<VAddr>;
+    pub open spec fn conflict(self, vbase: VAddr, frame: Frame) -> Option<VAddr>;
 
     /// The conflict entry returned by `conflict` must be in the TLB.
     ///
     /// This is an assumption made about the concrete TLB behavior.
     #[verifier::external_body]
-    pub broadcast proof fn lemma_conflict(self, base: VAddr, frame: Frame)
+    pub broadcast proof fn lemma_conflict(self, vbase: VAddr, frame: Frame)
         ensures
-            match #[trigger] self.conflict(base, frame) {
+            match #[trigger] self.conflict(vbase, frame) {
                 Some(conflict) => self.0.contains_key(conflict),
-                None => !self.0.contains_key(base),
+                None => !self.0.contains_key(vbase),
             },
     {
     }
 
     /// Update TLB with a new entry, if there is a conflict, evict the conflicting entry.
-    pub open spec fn update(self, base: VAddr, frame: Frame) -> Self
+    pub open spec fn update(self, vbase: VAddr, frame: Frame) -> Self
         recommends
-            !self.0.contains_key(base),
+            !self.0.contains_key(vbase),
     {
-        if let Some(conflict) = self.conflict(base, frame) {
-            self.evict(conflict).fill(base, frame)
+        if let Some(conflict) = self.conflict(vbase, frame) {
+            self.evict(conflict).fill(vbase, frame)
         } else {
-            self.fill(base, frame)
+            self.fill(vbase, frame)
         }
     }
 }
@@ -260,14 +260,14 @@ impl HardwareState {
     /// can only be added when TLB miss occurs during memory access.
     pub open spec fn pt_op(s1: Self, s2: Self) -> bool {
         &&& s1.mem === s2.mem
-        &&& forall|base: VAddr, frame: Frame|
-            s2.tlb.contains_mapping(base, frame) ==> s1.tlb.contains_mapping(base, frame)
+        &&& forall|vbase: VAddr, frame: Frame|
+            s2.tlb.contains_mapping(vbase, frame) ==> s1.tlb.contains_mapping(vbase, frame)
     }
 
     /// State transition - explicit TLB eviction.
-    pub open spec fn tlb_evict(s1: Self, s2: Self, base: VAddr) -> bool {
-        &&& s1.tlb.contains_base(base)
-        &&& s2.tlb === s1.tlb.evict(base)
+    pub open spec fn tlb_evict(s1: Self, s2: Self, vbase: VAddr) -> bool {
+        &&& s1.tlb.contains_base(vbase)
+        &&& s2.tlb === s1.tlb.evict(vbase)
         &&& s1.mem === s2.mem
         &&& s1.pt === s2.pt
     }
@@ -277,8 +277,8 @@ impl HardwareState {
 impl HardwareState {
     /// If TLB has a mapping for `vaddr`.
     pub open spec fn tlb_has_mapping_for(self, vaddr: VAddr) -> bool {
-        exists|base: VAddr, frame: Frame| #[trigger]
-            self.tlb.contains_mapping(base, frame) && vaddr.within(base, frame.size.as_nat())
+        exists|vbase: VAddr, frame: Frame| #[trigger]
+            self.tlb.contains_mapping(vbase, frame) && vaddr.within(vbase, frame.size.as_nat())
     }
 
     /// Get the mapping for `vaddr` in TLB.
@@ -286,15 +286,15 @@ impl HardwareState {
         recommends
             self.tlb_has_mapping_for(vaddr),
     {
-        choose|base: VAddr, frame: Frame| #[trigger]
-            self.tlb.contains_mapping(base, frame) && vaddr.within(base, frame.size.as_nat())
+        choose|vbase: VAddr, frame: Frame| #[trigger]
+            self.tlb.contains_mapping(vbase, frame) && vaddr.within(vbase, frame.size.as_nat())
     }
 
     /// If page table has a mapping for `vaddr`.
     pub open spec fn pt_has_mapping_for(self, vaddr: VAddr) -> bool {
-        exists|base: VAddr, frame: Frame| #[trigger]
-            self.pt.interpret().contains_pair(base, frame) && vaddr.within(
-                base,
+        exists|vbase: VAddr, frame: Frame| #[trigger]
+            self.pt.interpret().contains_pair(vbase, frame) && vaddr.within(
+                vbase,
                 frame.size.as_nat(),
             )
     }
@@ -304,9 +304,9 @@ impl HardwareState {
         recommends
             self.pt_has_mapping_for(vaddr),
     {
-        choose|base: VAddr, frame: Frame| #[trigger]
-            self.pt.interpret().contains_pair(base, frame) && vaddr.within(
-                base,
+        choose|vbase: VAddr, frame: Frame| #[trigger]
+            self.pt.interpret().contains_pair(vbase, frame) && vaddr.within(
+                vbase,
                 frame.size.as_nat(),
             )
     }

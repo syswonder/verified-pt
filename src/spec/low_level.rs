@@ -49,7 +49,7 @@ impl LowLevelState {
     ///
     /// The initial state must satisfy the specification.
     pub open spec fn init(self) -> bool {
-        &&& self.constants.arch.invariants()
+        &&& self.constants.arch.valid()
         &&& HardwareState::init(self.hw_state())
     }
 
@@ -74,16 +74,16 @@ impl LowLevelState {
     /// State transition - Explicit TLB eviction.
     ///
     /// Hypervisor uses specific instructions to evict TLB entries explicitly.
-    pub open spec fn tlb_evict(s1: Self, s2: Self, base: VAddr) -> bool {
+    pub open spec fn tlb_evict(s1: Self, s2: Self, vbase: VAddr) -> bool {
         &&& s1.constants === s2.constants
-        &&& HardwareState::tlb_evict(s1.hw_state(), s2.hw_state(), base)
+        &&& HardwareState::tlb_evict(s1.hw_state(), s2.hw_state(), vbase)
     }
 
     /// State transition - Map a frame.
     pub open spec fn map(
         s1: Self,
         s2: Self,
-        base: VAddr,
+        vbase: VAddr,
         frame: Frame,
         res: Result<(), ()>,
     ) -> bool {
@@ -92,7 +92,7 @@ impl LowLevelState {
         &&& PageTableState::map(
             s1.pt_state(),
             s2.pt_state(),
-            base,
+            vbase,
             frame,
             res,
         )
@@ -101,13 +101,13 @@ impl LowLevelState {
     }
 
     /// State transition - Unmap a frame.
-    pub open spec fn unmap(s1: Self, s2: Self, base: VAddr, res: Result<(), ()>) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: Result<(), ()>) -> bool {
         &&& s1.constants === s2.constants
         // Page table spec satisfied
         &&& PageTableState::unmap(
             s1.pt_state(),
             s2.pt_state(),
-            base,
+            vbase,
             res,
         )
         // Hardware behaves as spec
@@ -117,7 +117,7 @@ impl LowLevelState {
         )
         // TLB doesn't contain the unmapped frame
         // Normally, hypervisor ensures this using specific instructions.
-        &&& !s2.tlb.contains_base(base)
+        &&& !s2.tlb.contains_base(vbase)
     }
 
     /// State transition - Query a vaddr.
@@ -144,39 +144,39 @@ impl LowLevelState {
 impl LowLevelState {
     /// All frames are within the physical memory bounds.
     pub open spec fn frames_within_pmem(self) -> bool {
-        forall|base: VAddr, frame: Frame| #[trigger]
-            self.pt.interpret().contains_pair(base, frame) ==> self.mem.contains(frame.base.idx())
+        forall|vbase: VAddr, frame: Frame| #[trigger]
+            self.pt.interpret().contains_pair(vbase, frame) ==> self.mem.contains(frame.base.idx())
                 && self.mem.contains(frame.base.offset(frame.size.as_nat()).idx())
     }
 
     /// All mappings (vbase, pbase) are 8-byte aligned.
     pub open spec fn mappings_aligned(self) -> bool {
-        forall|base: VAddr, frame: Frame| #[trigger]
-            self.pt.interpret().contains_pair(base, frame) ==> base.aligned(frame.size.as_nat())
+        forall|vbase: VAddr, frame: Frame| #[trigger]
+            self.pt.interpret().contains_pair(vbase, frame) ==> vbase.aligned(frame.size.as_nat())
                 && frame.base.aligned(frame.size.as_nat())
     }
 
     /// Page table mappings do not overlap in virtual memory.
     pub open spec fn mappings_nonoverlap_in_vmem(self) -> bool {
-        forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
-            self.pt.interpret().contains_pair(base1, frame1) && self.pt.interpret().contains_pair(
-                base2,
+        forall|vbase1: VAddr, frame1: Frame, vbase2: VAddr, frame2: Frame|
+            self.pt.interpret().contains_pair(vbase1, frame1) && self.pt.interpret().contains_pair(
+                vbase2,
                 frame2,
-            ) ==> ((base1 == base2) || !VAddr::overlap(
-                base1,
+            ) ==> ((vbase1 == vbase2) || !VAddr::overlap(
+                vbase1,
                 frame1.size.as_nat(),
-                base2,
+                vbase2,
                 frame2.size.as_nat(),
             ))
     }
 
     /// Page table mappings do not overlap in physical memory.
     pub open spec fn mappings_nonoverlap_in_pmem(self) -> bool {
-        forall|base1: VAddr, frame1: Frame, base2: VAddr, frame2: Frame|
-            self.pt.interpret().contains_pair(base1, frame1) && self.pt.interpret().contains_pair(
-                base2,
+        forall|vbase1: VAddr, frame1: Frame, vbase2: VAddr, frame2: Frame|
+            self.pt.interpret().contains_pair(vbase1, frame1) && self.pt.interpret().contains_pair(
+                vbase2,
                 frame2,
-            ) ==> ((base1 == base2) || !PAddr::overlap(
+            ) ==> ((vbase1 == vbase2) || !PAddr::overlap(
                 frame1.base,
                 frame1.size.as_nat(),
                 frame2.base,
@@ -186,16 +186,14 @@ impl LowLevelState {
 
     /// TLB must be a submap of the page table.
     pub open spec fn tlb_is_submap_of_pt(self) -> bool {
-        forall|base, frame|
-            self.tlb.contains_mapping(base, frame) ==> #[trigger] self.pt.interpret().contains_pair(
-                base,
-                frame,
-            )
+        forall|vbase, frame|
+            self.tlb.contains_mapping(vbase, frame)
+                ==> #[trigger] self.pt.interpret().contains_pair(vbase, frame)
     }
 
     /// OS state invariants.
     pub open spec fn invariants(self) -> bool {
-        &&& self.constants.arch.invariants()
+        &&& self.constants.arch.valid()
         &&& self.frames_within_pmem()
         &&& self.mappings_aligned()
         &&& self.mappings_nonoverlap_in_vmem()
@@ -209,13 +207,13 @@ impl LowLevelState {
     /// Collect all page mappings managed by OS memory state (pt_mem and TLB).
     pub open spec fn all_mappings(self) -> Map<VAddr, Frame> {
         Map::new(
-            |base: VAddr| self.tlb.contains_base(base) || self.pt.interpret().contains_key(base),
-            |base: VAddr|
+            |vbase: VAddr| self.tlb.contains_base(vbase) || self.pt.interpret().contains_key(vbase),
+            |vbase: VAddr|
                 {
-                    if self.tlb.contains_base(base) {
-                        self.tlb.index(base)
+                    if self.tlb.contains_base(vbase) {
+                        self.tlb.index(vbase)
                     } else {
-                        self.pt.interpret()[base]
+                        self.pt.interpret()[vbase]
                     }
                 },
         )
@@ -225,19 +223,19 @@ impl LowLevelState {
     pub open spec fn interpret_mem(self) -> Map<VIdx, u64> {
         Map::new(
             |vidx: VIdx|
-                exists|base: VAddr, frame: Frame|
+                exists|vbase: VAddr, frame: Frame|
                     {
-                        &&& #[trigger] self.all_mappings().contains_pair(base, frame)
-                        &&& vidx.addr().within(base, frame.size.as_nat())
+                        &&& #[trigger] self.all_mappings().contains_pair(vbase, frame)
+                        &&& vidx.addr().within(vbase, frame.size.as_nat())
                     },
             |vidx: VIdx|
                 {
-                    let (base, frame) = choose|base: VAddr, frame: Frame|
+                    let (vbase, frame) = choose|vbase: VAddr, frame: Frame|
                         {
-                            &&& #[trigger] self.all_mappings().contains_pair(base, frame)
-                            &&& vidx.addr().within(base, frame.size.as_nat())
+                            &&& #[trigger] self.all_mappings().contains_pair(vbase, frame)
+                            &&& vidx.addr().within(vbase, frame.size.as_nat())
                         };
-                    self.mem.read(vidx.addr().map(base, frame.base).idx())
+                    self.mem.read(vidx.addr().map(vbase, frame.base).idx())
                 },
         )
     }
@@ -260,9 +258,9 @@ impl LowLevelState {
 impl LowLevelState {
     /// If exists a mapping that `vaddr` lies in.
     pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
-        exists|base: VAddr, frame: Frame| #[trigger]
-            self.all_mappings().contains_pair(base, frame) && vaddr.within(
-                base,
+        exists|vbase: VAddr, frame: Frame| #[trigger]
+            self.all_mappings().contains_pair(vbase, frame) && vaddr.within(
+                vbase,
                 frame.size.as_nat(),
             )
     }
@@ -272,9 +270,9 @@ impl LowLevelState {
         recommends
             self.has_mapping_for(vaddr),
     {
-        choose|base: VAddr, frame: Frame| #[trigger]
-            self.all_mappings().contains_pair(base, frame) && vaddr.within(
-                base,
+        choose|vbase: VAddr, frame: Frame| #[trigger]
+            self.all_mappings().contains_pair(vbase, frame) && vaddr.within(
+                vbase,
                 frame.size.as_nat(),
             )
     }
