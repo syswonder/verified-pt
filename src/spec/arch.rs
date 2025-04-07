@@ -68,6 +68,14 @@ impl PTArch {
         Seq::new(self.level_count(), |i| self.frame_size(i as nat)).to_set()
     }
 
+    /// Get the corresponding level of a frame size.
+    pub open spec fn level_of_frame_size(self, size: FrameSize) -> nat
+        recommends
+            self.valid_frame_sizes().contains(size),
+    {
+        choose|level: nat| level < self.level_count() && self.frame_size(level) == size
+    }
+
     /// Calculates the page table entry index for a virtual address at the specified level.
     pub open spec fn pte_index_of_va(self, vaddr: VAddr, level: nat) -> nat
         recommends
