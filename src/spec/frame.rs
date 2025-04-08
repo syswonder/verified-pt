@@ -40,6 +40,19 @@ impl FrameSize {
         }
     }
 
+    /// Calculate the bit length of the frame size.
+    pub open spec fn bit_len(self) -> nat {
+        match self {
+            FrameSize::Size4K => 12,
+            FrameSize::Size16K => 14,
+            FrameSize::Size2M => 21,
+            FrameSize::Size32M => 23,
+            FrameSize::Size1G => 30,
+            FrameSize::Size64G => 36,
+            FrameSize::Size512G => 39,
+        }
+    }
+
     /// Convert to usize.
     pub open spec fn as_usize(self) -> usize {
         self.as_u64() as usize

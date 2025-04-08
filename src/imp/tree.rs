@@ -35,7 +35,7 @@ impl PTTreePath {
             0 <= i < self.len() ==> self.0[i] < arch.entry_count(i as nat + start_level)
     }
 
-    /// Get a `PTPath` from a virtual address, used to query the page table.
+    /// Get a `PTPath` from a virtual address, used to query the page table from root.
     ///
     /// The last query level of the returned path is `level`, and the path has length `level + 1`.
     pub open spec fn from_vaddr(vaddr: VAddr, arch: PTArch, level: nat) -> PTTreePath
@@ -44,6 +44,15 @@ impl PTTreePath {
             arch.valid(),
     {
         PTTreePath(Seq::new(level + 1, |i: int| arch.pte_index_of_va(vaddr, i as nat)))
+    }
+
+    /// Caculcate the virtual address coresponding to the path from root.
+    pub open spec fn to_vaddr(self, arch: PTArch) -> VAddr
+        recommends
+            self.valid(arch, 0),
+    {
+        let parts = Seq::new(self.len(), |i: int| self.0[i] * arch.frame_size(i as nat).as_nat());
+        VAddr(parts.fold_left(0nat, |sum: nat, part| sum + part))
     }
 
     /// Lemma. `from_vaddr` returns a valid path.
@@ -526,6 +535,25 @@ impl PTTreeModel {
     /// Architecture.
     pub open spec fn arch(self) -> PTArch {
         self.root.arch
+    }
+
+    /// View as mappings.
+    pub open spec fn view(self) -> Map<VAddr, Frame> {
+        let path_mappings = Map::new(
+            |path: PTTreePath| self.root.recursive_visit(path).last() is Frame,
+            |path: PTTreePath| self.root.recursive_visit(path).last()->Frame_0,
+        );
+        Map::new(
+            |vaddr: VAddr|
+                exists|path|
+                    path_mappings.contains_key(path) && path.to_vaddr(self.arch()) == vaddr,
+            |vaddr: VAddr|
+                {
+                    let path = choose|path|
+                        path_mappings.contains_key(path) && path.to_vaddr(self.arch()) == vaddr;
+                    path_mappings[path]
+                },
+        )
     }
 
     /// Map a virtual address to a physical frame.

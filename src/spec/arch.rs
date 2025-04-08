@@ -34,14 +34,6 @@ impl PTArch {
         (1 << self.0[level as int].entry_count_log2) as nat
     }
 
-    /// The index length of a virtual address at a given level.
-    pub open spec fn index_len(self, level: nat) -> nat
-        recommends
-            level < self.level_count(),
-    {
-        self.0[level as int].entry_count_log2
-    }
-
     /// The frame size associated with a block/page descriptor at a given level.
     pub open spec fn frame_size(self, level: nat) -> FrameSize
         recommends
