@@ -52,6 +52,7 @@ impl HighLevelState {
     pub open spec fn init(self) -> bool {
         &&& self.mem === Map::empty()
         &&& self.mappings === Map::empty()
+        &&& self.constants.arch.valid()
     }
 
     /// State transition - Read.

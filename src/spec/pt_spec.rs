@@ -25,7 +25,7 @@ pub struct PageTableState {
 
 /// Page table config constants.
 pub struct PTConstants {
-    /// Page table architecture,
+    /// Page table architecture.
     pub arch: PTArch,
     /// Physical memory lower bound.
     pub pmem_lb: PIdx,
@@ -39,7 +39,8 @@ impl PageTableState {
     ///
     /// `LowlevelState::init()` implies `PageTableState::init()`.
     pub open spec fn init(self) -> bool {
-        self.mappings === Map::empty()
+        &&& self.mappings === Map::empty()
+        &&& self.constants.arch.valid()
     }
 
     /// Map precondition.
@@ -93,7 +94,7 @@ impl PageTableState {
     /// Unmap precondition.
     pub open spec fn unmap_pre(self, vbase: VAddr) -> bool {
         // Base vaddr should align to leaf frame size
-        &&& vbase.aligned(self.constants.arch.leaf_frame_size().as_nat())
+        vbase.aligned(self.constants.arch.leaf_frame_size().as_nat())
     }
 
     /// State transition - unmap a virtual address.
