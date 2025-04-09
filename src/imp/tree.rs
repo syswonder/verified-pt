@@ -5,6 +5,7 @@ use crate::spec::{
     addr::{PAddr, VAddr},
     arch::PTArch,
     frame::Frame,
+    pt_spec::{PTConstants, PageTableState},
 };
 
 verus! {
@@ -74,7 +75,7 @@ impl PTTreePath {
         assert forall|i: int| 0 <= i < path.len() implies path.0[i] < arch.entry_count(
             i as nat,
         ) by {
-            // TODO: Verus cannot imply (a % b) < b with
+            // TODO: Verus cannot imply (a % b) < b
             // See: https://verus-lang.github.io/verus/guide/nonlinear.html
             assume(arch.pte_index_of_va(vaddr, i as nat) < arch.entry_count(i as nat))
         }
@@ -555,7 +556,7 @@ impl PTTreeModel {
         Self::new(PTTreeNode::new(config, 0))
     }
 
-    /// Invariants.
+    /// Invariants. The tree structure and node configurations are valid.
     pub open spec fn invariants(self) -> bool {
         &&& self.root.level == 0
         &&& self.root.invariants()
@@ -577,7 +578,7 @@ impl PTTreeModel {
     }
 
     /// Interpret the tree as `(vbase, frame)` mappings.
-    pub open spec fn interpret(self) -> Map<VAddr, Frame> {
+    pub open spec fn mappings(self) -> Map<VAddr, Frame> {
         let path_mappings = Map::new(
             |path: PTTreePath| self.root.recursive_visit(path).last() is Frame,
             |path: PTTreePath| self.root.recursive_visit(path).last()->Frame_0,
@@ -595,6 +596,18 @@ impl PTTreeModel {
         )
     }
 
+    /// View the tree as `PageTableState`.
+    pub open spec fn view(self) -> PageTableState {
+        PageTableState {
+            mappings: self.mappings(),
+            constants: PTConstants {
+                arch: self.arch(),
+                pmem_lb: self.pmem_lb().idx(),
+                pmem_ub: self.pmem_ub().idx(),
+            },
+        }
+    }
+
     /// Map a virtual address to a physical frame.
     ///
     /// If mapping succeeds, return `Ok` and the updated tree.
@@ -603,18 +616,16 @@ impl PTTreeModel {
             self.invariants(),
             self.arch().is_valid_frame_size(frame.size),
             vbase.aligned(frame.size.as_nat()),
-            frame.base.aligned(frame.size.as_nat()),
     {
         let path = PTTreePath::from_vaddr(
             vbase,
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        let entry = NodeEntry::Frame(frame);
         // Check if already mapped
         let visited = self.root.recursive_visit(path);
         if visited.last() is Empty {
-            Ok(Self::new(self.root.recursive_insert(path, entry)))
+            Ok(Self::new(self.root.recursive_insert(path, NodeEntry::Frame(frame))))
         } else {
             Err(())
         }
@@ -660,6 +671,71 @@ impl PTTreeModel {
             ),
             _ => Err(()),
         }
+    }
+
+    /// Lemma. A successful `map` operation adds the `(vbase, frame)` pair to mappings.
+    pub proof fn lemma_map_adds_mapping(self, vbase: VAddr, frame: Frame)
+        requires
+            self.invariants(),
+            self.arch().is_valid_frame_size(frame.size),
+            vbase.aligned(frame.size.as_nat()),
+        ensures
+            self.map(vbase, frame) is Ok ==> self.map(vbase, frame).unwrap().mappings()
+                === self.mappings().insert(vbase, frame),
+    {
+        // TODO
+        assume(false);
+    }
+
+    /// Lemma. A successful `unmap` operation removes the `(vbase, frame)` pair from mappings.
+    pub proof fn lemma_unmap_removes_mapping(self, vbase: VAddr)
+        requires
+            self.invariants(),
+        ensures
+            self.unmap(vbase) is Ok ==> self.unmap(vbase).unwrap().mappings()
+                === self.mappings().remove(vbase),
+    {
+        // TODO
+        assume(false);
+    }
+
+    /// Lemma. `query` succeeds iff the address is within a mapped region.
+    pub proof fn lemma_query_succeeds(self, vaddr: VAddr)
+        requires
+            self.invariants(),
+        ensures
+            self.query(vaddr) is Ok <==> {
+                &&& exists|vbase, frame| #[trigger]
+                    self.mappings().contains_pair(vbase, frame) && vaddr.within(
+                        vbase,
+                        frame.size.as_nat(),
+                    )
+                &&& self.query(vaddr).unwrap() == choose|vbase: VAddr, frame: Frame| #[trigger]
+                    self.mappings().contains_pair(vbase, frame) && vaddr.within(
+                        vbase,
+                        frame.size.as_nat(),
+                    )
+            },
+    {
+        // TODO
+        assume(false);
+    }
+
+    /// Lemma. `query` fails iff there is no mapping for the address.
+    pub proof fn lemma_query_fails(self, vaddr: VAddr)
+        requires
+            self.invariants(),
+        ensures
+            self.query(vaddr) is Err ==> {
+                !exists|vbase, frame| #[trigger]
+                    self.mappings().contains_pair(vbase, frame) && vaddr.within(
+                        vbase,
+                        frame.size.as_nat(),
+                    )
+            },
+    {
+        // TODO
+        assume(false);
     }
 
     /// Theorem. `map` preserves invariants.
@@ -734,6 +810,76 @@ impl PTTreeModel {
                 self.arch().level_of_frame_size(frame.size),
             );
             self.root.lemma_recursive_remove_preserves_invariants(path2);
+        }
+    }
+
+    /// Theorem. `map` refines `PageTableState::map`.
+    pub proof fn map_refinement(self, vbase: VAddr, frame: Frame)
+        requires
+            self.invariants(),
+            self@.map_pre(vbase, frame),
+        ensures
+            if let Ok(new) = self.map(vbase, frame) {
+                PageTableState::map(self@, new@, vbase, frame, Ok(()))
+            } else {
+                PageTableState::map(self@, self@, vbase, frame, Err(()))
+            },
+    {
+        let path = PTTreePath::from_vaddr(
+            vbase,
+            self.arch(),
+            self.arch().level_of_frame_size(frame.size),
+        );
+        let visited = self.root.recursive_visit(path);
+        if visited.last() is Empty {
+            // TODO
+            assume(!self@.overlaps_vmem(vbase, frame));
+            self.lemma_map_adds_mapping(vbase, frame);
+        } else {
+            // TODO
+            assume(self@.overlaps_vmem(vbase, frame));
+        }
+    }
+
+    /// Theorem. `unmap` refines `PageTableState::unmap`.
+    pub proof fn unmap_refinement(self, vbase: VAddr)
+        requires
+            self.invariants(),
+            self@.unmap_pre(vbase),
+        ensures
+            if let Ok(new) = self.unmap(vbase) {
+                PageTableState::unmap(self@, new@, vbase, Ok(()))
+            } else {
+                PageTableState::unmap(self@, self@, vbase, Err(()))
+            },
+    {
+        if let Ok((_, frame)) = self.query(vbase) {
+            self.lemma_query_succeeds(vbase);
+            // TODO
+            assume(self.mappings().contains_key(vbase));
+            self.lemma_unmap_removes_mapping(vbase);
+        } else {
+            self.lemma_query_fails(vbase);
+            if self.mappings().contains_key(vbase) {
+                // Proof by contradiction
+                assert(self.mappings().contains_pair(vbase, self.mappings()[vbase]));
+                assert(vbase.within(vbase, self.mappings()[vbase].size.as_nat()));
+            }
+            assert(!self.mappings().contains_key(vbase));
+        }
+    }
+
+    /// Theorem. `query` refines `PageTableState::query`.
+    pub proof fn query_refinement(self, vaddr: VAddr)
+        requires
+            self.invariants(),
+            self@.query_pre(vaddr),
+        ensures
+            PageTableState::query(self@, self@, vaddr, self.query(vaddr)),
+    {
+        match self.query(vaddr) {
+            Ok(_) => self.lemma_query_succeeds(vaddr),
+            Err(_) => self.lemma_query_fails(vaddr),
         }
     }
 }

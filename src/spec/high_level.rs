@@ -20,7 +20,7 @@ use super::{
 
 verus! {
 
-/// High level (abstract) memory state.
+/// High-level (abstract) memory state.
 pub struct HighLevelState {
     /// 8-byte-indexed virtual memory.
     ///
