@@ -196,6 +196,22 @@ impl PTTreePath {
         assume(sum % arch.frame_size((self.len() - 1) as nat).as_nat() == 0);
     }
 
+    /// Lemma. If `path` has a prefix `prefix`, then `path.to_vaddr()` has a maximum and a minimum.
+    pub proof fn lemma_to_vaddr_bounds(arch: PTArch, path: PTTreePath, prefix: PTTreePath)
+        requires
+            arch.valid(),
+            path.valid(arch, 0),
+            path.has_prefix(prefix),
+        ensures
+            prefix.to_vaddr(arch).0 <= path.to_vaddr(arch).0 <= prefix.to_vaddr(arch).0
+                + arch.frame_size((prefix.len() - 1) as nat).as_nat() - arch.frame_size(
+                (path.len() - 1) as nat,
+            ).as_nat(),
+    {
+        // TODO
+        assume(false);
+    }
+
     /// Lemma. If two paths `a` and `b` differ at index `first_diff_idx`, then the virtual address
     /// of `a` plus one frame is below that of `b`.
     pub proof fn lemma_path_order_implies_vaddr_order(arch: PTArch, a: PTTreePath, b: PTTreePath)
@@ -211,8 +227,65 @@ impl PTTreePath {
                 arch,
             ).0,
     {
-        // TODO
-        assume(false);
+        // Trim the paths at the first differing index
+        PTTreePath::lemma_first_diff_idx_exists(a, b);
+        let diff_idx = PTTreePath::first_diff_idx(a, b);
+        let pref_a = a.trim((diff_idx + 1) as nat);
+        let pref_b = b.trim((diff_idx + 1) as nat);
+
+        // Bound the full paths by their prefixes
+        PTTreePath::lemma_to_vaddr_bounds(arch, a, pref_a);
+        PTTreePath::lemma_to_vaddr_bounds(arch, b, pref_b);
+        assert(a.to_vaddr(arch).0 + arch.frame_size((a.len() - 1) as nat).as_nat()
+            <= pref_a.to_vaddr(arch).0 + arch.frame_size((pref_a.len() - 1) as nat).as_nat());
+        assert(pref_b.to_vaddr(arch).0 <= b.to_vaddr(arch).0);
+
+        // `common` is the same part shared by `pref_a` and `pref_b`
+        assert(pref_a.trim(diff_idx as nat).0 == pref_b.trim(diff_idx as nat).0);
+        let common = pref_a.trim(diff_idx as nat);
+
+        // Show `common_parts` is equally added when computing vaddr
+        let common_parts = Seq::new(
+            common.len(),
+            |i: int| common.0[i] * arch.frame_size(i as nat).as_nat(),
+        );
+        let pref_a_parts = Seq::new(
+            pref_a.len(),
+            |i: int| pref_a.0[i] * arch.frame_size(i as nat).as_nat(),
+        );
+        let pref_b_parts = Seq::new(
+            pref_b.len(),
+            |i: int| pref_b.0[i] * arch.frame_size(i as nat).as_nat(),
+        );
+        assert(pref_a_parts.take(diff_idx) == common_parts);
+        assert(pref_a_parts.fold_left(0, |sum: nat, part| sum + part) == common_parts.fold_left(
+            0nat,
+            |sum: nat, part| sum + part,
+        ) + pref_a.0[diff_idx] * arch.frame_size(diff_idx as nat).as_nat());
+        assert(pref_b_parts.take(diff_idx) == common_parts);
+        assert(pref_b_parts.fold_left(0, |sum: nat, part| sum + part) == common_parts.fold_left(
+            0nat,
+            |sum: nat, part| sum + part,
+        ) + pref_b.0[diff_idx] * arch.frame_size(diff_idx as nat).as_nat());
+
+        // Extract the sum as "common parts" + "difference part"
+        assert(pref_a.to_vaddr(arch).0 == common.to_vaddr(arch).0 + pref_a.0[diff_idx]
+            * arch.frame_size(diff_idx as nat).as_nat());
+        assert(pref_b.to_vaddr(arch).0 == common.to_vaddr(arch).0 + pref_b.0[diff_idx]
+            * arch.frame_size(diff_idx as nat).as_nat());
+
+        // Calculate the minimum difference between `pref_a.to_vaddr()` and `pref_b.to_vaddr()`
+        assert(pref_b.to_vaddr(arch).0 - pref_a.to_vaddr(arch).0 == (pref_b.0[diff_idx]
+            - pref_a.0[diff_idx]) * arch.frame_size(diff_idx as nat).as_nat());
+        assert(pref_b.0[diff_idx] - pref_a.0[diff_idx] >= 1);
+        assert(pref_b.to_vaddr(arch).0 - pref_a.to_vaddr(arch).0 >= arch.frame_size(
+            diff_idx as nat,
+        ).as_nat());
+
+        // Prove the bounded inequality
+        assert(a.to_vaddr(arch).0 + arch.frame_size((a.len() - 1) as nat).as_nat() <= b.to_vaddr(
+            arch,
+        ).0);
     }
 }
 
