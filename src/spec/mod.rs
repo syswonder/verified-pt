@@ -19,9 +19,4 @@ pub open spec fn nat_to_u64(v: nat) -> u64
     v as u64
 }
 
-/// View a slice as a `Seq`
-pub open spec fn slice_to_seq<T>(v: &[T]) -> Seq<T> {
-    Seq::new(v.len() as nat, |i| v[i])
-}
-
 } // verus!

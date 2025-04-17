@@ -162,12 +162,12 @@ impl LowLevelState {
             self.pt.interpret().contains_pair(vbase1, frame1) && self.pt.interpret().contains_pair(
                 vbase2,
                 frame2,
-            ) ==> ((vbase1 == vbase2) || !VAddr::overlap(
+            ) ==> vbase1 == vbase2 || !VAddr::overlap(
                 vbase1,
                 frame1.size.as_nat(),
                 vbase2,
                 frame2.size.as_nat(),
-            ))
+            )
     }
 
     /// Page table mappings do not overlap in physical memory.
@@ -176,12 +176,12 @@ impl LowLevelState {
             self.pt.interpret().contains_pair(vbase1, frame1) && self.pt.interpret().contains_pair(
                 vbase2,
                 frame2,
-            ) ==> ((vbase1 == vbase2) || !PAddr::overlap(
+            ) ==> vbase1 == vbase2 || !PAddr::overlap(
                 frame1.base,
                 frame1.size.as_nat(),
                 frame2.base,
                 frame2.size.as_nat(),
-            ))
+            )
     }
 
     /// TLB must be a submap of the page table.

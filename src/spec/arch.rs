@@ -89,12 +89,66 @@ impl PTArch {
     /// Check if the page table architecture is valid.
     pub open spec fn valid(self) -> bool {
         // At least one level.
-        &&& self.level_count()
-            > 0
-        // frame_size(N) = frame_size(N+1) * entry_count(N+1)
+        &&& self.level_count() > 0
+        // Entry count > 1.
+        &&& forall|level: nat|
+            level < self.level_count() ==> self.entry_count(level)
+                > 1
+            // frame_size(N) = frame_size(N+1) * entry_count(N+1)
         &&& forall|level: nat|
             1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()
                 == self.frame_size(level).as_nat() * self.entry_count(level)
+    }
+
+    /// Lemma (helper). a > 0, b > 1 implies a * b > a.
+    proof fn lemma_mul_gt_one(a: nat, b: nat)
+        by (nonlinear_arith)
+        requires
+            a > 0,
+            b > 1,
+        ensures
+            a * b > a,
+    {
+    }
+
+    /// Lemma. Frame size decreases as level increases.
+    pub proof fn lemma_frame_size_monotonic(self, l1: nat, l2: nat)
+        requires
+            self.valid(),
+            l1 < l2 < self.level_count(),
+        ensures
+            self.frame_size(l1).as_nat() > self.frame_size(l2).as_nat(),
+        decreases l2 - l1,
+    {
+        if l2 - l1 == 1 {
+            assert(self.frame_size(l2).as_nat() > 0);
+            assert(self.entry_count(l2) > 1);
+            Self::lemma_mul_gt_one(self.frame_size(l2).as_nat(), self.entry_count(l2));
+            assert(self.frame_size(l1).as_nat() > self.frame_size(l2).as_nat());
+        } else {
+            assert(self.frame_size(l1 + 1).as_nat() > 0);
+            assert(self.entry_count(l1 + 1) > 1);
+            Self::lemma_mul_gt_one(self.frame_size(l1 + 1).as_nat(), self.entry_count(l1 + 1));
+            assert(self.frame_size(l1).as_nat() > self.frame_size(l1 + 1).as_nat());
+            // Prove monotonicity for (l1, l1 + 1) and (l1 + 1, l2).
+            self.lemma_frame_size_monotonic(l1 + 1, l2);
+        }
+    }
+
+    /// Lemma. level_of_frame_size(frame_size(level)) == level.
+    pub proof fn lemma_frame_size_inversion(self, level: nat)
+        requires
+            self.valid(),
+            level < self.level_count(),
+        ensures
+            self.level_of_frame_size(self.frame_size(level)) == level,
+    {
+        let level2 = self.level_of_frame_size(self.frame_size(level));
+        if level2 < level {
+            self.lemma_frame_size_monotonic(level2, level);
+        } else if level2 > level {
+            self.lemma_frame_size_monotonic(level, level2);
+        }
     }
 }
 

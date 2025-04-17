@@ -175,13 +175,13 @@ proof fn lemma_add_mapping_preserves_nonoverlap(
 )
     requires
         forall|vbase1: VAddr, frame1: Frame, vbase2: VAddr, frame2: Frame|
-            mappings.contains_pair(vbase1, frame1) && mappings.contains_pair(vbase2, frame2) ==> ((
-            vbase1 == vbase2) || !PAddr::overlap(
+            mappings.contains_pair(vbase1, frame1) && mappings.contains_pair(vbase2, frame2)
+                ==> vbase1 == vbase2 || !PAddr::overlap(
                 frame1.base,
                 frame1.size.as_nat(),
                 frame2.base,
                 frame2.size.as_nat(),
-            )),
+            ),
         !exists|frame1: Frame|
             {
                 &&& #[trigger] mappings.contains_value(frame1)
@@ -197,23 +197,23 @@ proof fn lemma_add_mapping_preserves_nonoverlap(
             mappings.insert(vbase, frame).contains_pair(vbase1, frame1) && mappings.insert(
                 vbase,
                 frame,
-            ).contains_pair(vbase2, frame2) ==> ((vbase1 == vbase2) || !PAddr::overlap(
+            ).contains_pair(vbase2, frame2) ==> vbase1 == vbase2 || !PAddr::overlap(
                 frame1.base,
                 frame1.size.as_nat(),
                 frame2.base,
                 frame2.size.as_nat(),
-            )),
+            ),
 {
     assert forall|vbase1: VAddr, frame1: Frame, vbase2: VAddr, frame2: Frame|
         mappings.insert(vbase, frame).contains_pair(vbase1, frame1) && mappings.insert(
             vbase,
             frame,
-        ).contains_pair(vbase2, frame2) implies ((vbase1 == vbase2) || !PAddr::overlap(
+        ).contains_pair(vbase2, frame2) implies vbase1 == vbase2 || !PAddr::overlap(
         frame1.base,
         frame1.size.as_nat(),
         frame2.base,
         frame2.size.as_nat(),
-    )) by {
+    ) by {
         if vbase1 != vbase2 {
             if vbase1 == vbase {
                 // New mapping doesn't overlap with frame2
