@@ -89,29 +89,29 @@ impl PTTreePath {
             self.len(),
             |i: int| self.0[i] * arch.frame_size(i as nat).as_nat(),
         );
-        VAddr(parts.fold_left(0nat, |sum: nat, part| sum + part))
+        VAddr(parts.fold_left(0, |sum: nat, part| sum + part))
     }
 
     /// Lemma. A prefix of a valid path is also valid.
-    pub proof fn lemma_prefix_valid(self, arch: PTArch, start_level: nat, prefix: PTTreePath)
+    pub proof fn lemma_prefix_valid(self, arch: PTArch, start_level: nat, pref: PTTreePath)
         requires
             arch.valid(),
             self.valid(arch, start_level),
-            self.has_prefix(prefix),
+            self.has_prefix(pref),
         ensures
-            prefix.valid(arch, start_level),
+            pref.valid(arch, start_level),
     {
     }
 
     /// Lemma. If a prefix has the same length as the full path, then the two paths are equal.
-    pub proof fn lemma_prefix_equals_full(self, prefix: PTTreePath)
+    pub proof fn lemma_prefix_equals_full(self, pref: PTTreePath)
         requires
-            self.has_prefix(prefix),
-            prefix.len() == self.len(),
+            self.has_prefix(pref),
+            pref.len() == self.len(),
         ensures
-            self == prefix,
+            self == pref,
     {
-        assert(self.0 == prefix.0);
+        assert(self.0 == pref.0);
     }
 
     /// Lemma. Existence of the first differing index between two distinct paths.
@@ -154,6 +154,7 @@ impl PTTreePath {
 
     /// Lemma. `from_vaddr` produces a valid path rooted at level 0.
     pub proof fn lemma_from_vaddr_yields_valid_path(vaddr: VAddr, arch: PTArch, level: nat)
+        by (nonlinear_arith)
         requires
             level < arch.level_count(),
             arch.valid(),
@@ -196,25 +197,74 @@ impl PTTreePath {
         assume(sum % arch.frame_size((self.len() - 1) as nat).as_nat() == 0);
     }
 
-    /// Lemma. If `path` has a prefix `prefix`, then `path.to_vaddr()` has a maximum and a minimum.
-    pub proof fn lemma_to_vaddr_bounds(arch: PTArch, path: PTTreePath, prefix: PTTreePath)
+    /// Lemma. If `path` has a prefix `pref`, then `path.to_vaddr()` has a lower bound.
+    pub proof fn lemma_to_vaddr_lower_bound(arch: PTArch, path: PTTreePath, pref: PTTreePath)
         requires
             arch.valid(),
             path.valid(arch, 0),
-            path.has_prefix(prefix),
+            path.has_prefix(pref),
         ensures
-            prefix.to_vaddr(arch).0 <= path.to_vaddr(arch).0 <= prefix.to_vaddr(arch).0
-                + arch.frame_size((prefix.len() - 1) as nat).as_nat() - arch.frame_size(
-                (path.len() - 1) as nat,
-            ).as_nat(),
+            pref.to_vaddr(arch).0 <= path.to_vaddr(arch).0,
+        decreases path.len(),
+    {
+        if path.len() <= pref.len() {
+            // `pref` equals `path`
+            path.lemma_prefix_equals_full(pref);
+            assert(path.to_vaddr(arch).0 == pref.to_vaddr(arch).0);
+        } else {
+            // `pref2` is the longest prefix of `path` and not equal to `path`
+            let pref2 = path.trim((path.len() - 1) as nat);
+            let parts = Seq::new(
+                path.len(),
+                |i: int| path.0[i] * arch.frame_size(i as nat).as_nat(),
+            );
+            let pref2_parts = Seq::new(
+                pref2.len(),
+                |i: int| pref2.0[i] * arch.frame_size(i as nat).as_nat(),
+            );
+            assert(parts.take(pref2.len() as int) == pref2_parts);
+
+            // Extract the sum as "pref2 parts" + "remaining part"
+            assert(parts.fold_left(0, |sum: nat, part| sum + part) == pref2_parts.fold_left(
+                0,
+                |sum: nat, part| sum + part,
+            ) + path.0[path.len() - 1] * arch.frame_size((path.len() - 1) as nat).as_nat());
+            assert(path.to_vaddr(arch).0 >= pref2.to_vaddr(arch).0);
+
+            // Recursive proof for `pref2` and its prefix `pref`
+            assert(pref2.has_prefix(pref));
+            PTTreePath::lemma_to_vaddr_lower_bound(arch, pref2, pref);
+        }
+    }
+
+    /// Lemma. If `path` has a prefix `pref`, then `path.to_vaddr()` has an upper bound.
+    pub proof fn lemma_to_vaddr_upper_bound(arch: PTArch, path: PTTreePath, pref: PTTreePath)
+        requires
+            arch.valid(),
+            path.valid(arch, 0),
+            path.has_prefix(pref),
+        ensures
+            path.to_vaddr(arch).0 <= pref.to_vaddr(arch).0 + arch.frame_size(
+                (pref.len() - 1) as nat,
+            ).as_nat() - arch.frame_size((path.len() - 1) as nat).as_nat(),
     {
         // TODO
-        assume(false);
+        let parts = Seq::new(path.len(), |i: int| path.0[i] * arch.frame_size(i as nat).as_nat());
+        let pref_parts = Seq::new(
+            pref.len(),
+            |i: int| pref.0[i] * arch.frame_size(i as nat).as_nat(),
+        );
+        assert(parts.take(pref.len() as int) == pref_parts);
+
+        assume(path.to_vaddr(arch).0 <= pref.to_vaddr(arch).0 + arch.frame_size(
+            (pref.len() - 1) as nat,
+        ).as_nat() - arch.frame_size((path.len() - 1) as nat).as_nat());
     }
 
     /// Lemma. If two paths `a` and `b` differ at index `first_diff_idx`, then the virtual address
     /// of `a` plus one frame is below that of `b`.
     pub proof fn lemma_path_order_implies_vaddr_order(arch: PTArch, a: PTTreePath, b: PTTreePath)
+        by (nonlinear_arith)
         requires
             arch.valid(),
             a.valid(arch, 0),
@@ -234,8 +284,8 @@ impl PTTreePath {
         let pref_b = b.trim((diff_idx + 1) as nat);
 
         // Bound the full paths by their prefixes
-        PTTreePath::lemma_to_vaddr_bounds(arch, a, pref_a);
-        PTTreePath::lemma_to_vaddr_bounds(arch, b, pref_b);
+        PTTreePath::lemma_to_vaddr_upper_bound(arch, a, pref_a);
+        PTTreePath::lemma_to_vaddr_lower_bound(arch, b, pref_b);
         assert(a.to_vaddr(arch).0 + arch.frame_size((a.len() - 1) as nat).as_nat()
             <= pref_a.to_vaddr(arch).0 + arch.frame_size((pref_a.len() - 1) as nat).as_nat());
         assert(pref_b.to_vaddr(arch).0 <= b.to_vaddr(arch).0);
@@ -257,30 +307,28 @@ impl PTTreePath {
             pref_b.len(),
             |i: int| pref_b.0[i] * arch.frame_size(i as nat).as_nat(),
         );
+        let fsize = arch.frame_size(diff_idx as nat).as_nat();
+        
         assert(pref_a_parts.take(diff_idx) == common_parts);
         assert(pref_a_parts.fold_left(0, |sum: nat, part| sum + part) == common_parts.fold_left(
             0nat,
             |sum: nat, part| sum + part,
-        ) + pref_a.0[diff_idx] * arch.frame_size(diff_idx as nat).as_nat());
+        ) + pref_a.0[diff_idx] * fsize);
         assert(pref_b_parts.take(diff_idx) == common_parts);
         assert(pref_b_parts.fold_left(0, |sum: nat, part| sum + part) == common_parts.fold_left(
             0nat,
             |sum: nat, part| sum + part,
-        ) + pref_b.0[diff_idx] * arch.frame_size(diff_idx as nat).as_nat());
+        ) + pref_b.0[diff_idx] * fsize);
 
         // Extract the sum as "common parts" + "difference part"
-        assert(pref_a.to_vaddr(arch).0 == common.to_vaddr(arch).0 + pref_a.0[diff_idx]
-            * arch.frame_size(diff_idx as nat).as_nat());
-        assert(pref_b.to_vaddr(arch).0 == common.to_vaddr(arch).0 + pref_b.0[diff_idx]
-            * arch.frame_size(diff_idx as nat).as_nat());
+        assert(pref_a.to_vaddr(arch).0 == common.to_vaddr(arch).0 + pref_a.0[diff_idx] * fsize);
+        assert(pref_b.to_vaddr(arch).0 == common.to_vaddr(arch).0 + pref_b.0[diff_idx] * fsize);
 
         // Calculate the minimum difference between `pref_a.to_vaddr()` and `pref_b.to_vaddr()`
         assert(pref_b.to_vaddr(arch).0 - pref_a.to_vaddr(arch).0 == (pref_b.0[diff_idx]
-            - pref_a.0[diff_idx]) * arch.frame_size(diff_idx as nat).as_nat());
+            - pref_a.0[diff_idx]) * fsize);
         assert(pref_b.0[diff_idx] - pref_a.0[diff_idx] >= 1);
-        assert(pref_b.to_vaddr(arch).0 - pref_a.to_vaddr(arch).0 >= arch.frame_size(
-            diff_idx as nat,
-        ).as_nat());
+        assert(pref_b.to_vaddr(arch).0 - pref_a.to_vaddr(arch).0 >= fsize);
 
         // Prove the bounded inequality
         assert(a.to_vaddr(arch).0 + arch.frame_size((a.len() - 1) as nat).as_nat() <= b.to_vaddr(
