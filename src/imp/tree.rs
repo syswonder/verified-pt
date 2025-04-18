@@ -23,19 +23,19 @@ impl PTTreePath {
     }
 
     /// Pop head and return the remaining path.
-    pub open spec fn step(self) -> (nat, PTTreePath)
+    pub open spec fn step(self) -> (nat, Self)
         recommends
             self.len() > 0,
     {
-        (self.0[0], PTTreePath(self.0.skip(1)))
+        (self.0[0], Self(self.0.skip(1)))
     }
 
     /// Trim the path to the given length.
-    pub open spec fn trim(self, len: nat) -> PTTreePath
+    pub open spec fn trim(self, len: nat) -> Self
         recommends
             len <= self.len(),
     {
-        PTTreePath(self.0.take(len as int))
+        Self(self.0.take(len as int))
     }
 
     /// Check if path is valid.
@@ -50,13 +50,13 @@ impl PTTreePath {
     }
 
     /// If `self` has a non-empty prefix `p`.
-    pub open spec fn has_prefix(self, p: PTTreePath) -> bool {
+    pub open spec fn has_prefix(self, p: Self) -> bool {
         &&& 0 < p.len() <= self.len()
         &&& forall|i: int| 0 <= i < p.len() ==> self.0[i] == p.0[i]
     }
 
     /// Get the first position at which two paths differ.
-    pub open spec fn first_diff_idx(a: PTTreePath, b: PTTreePath) -> int
+    pub open spec fn first_diff_idx(a: Self, b: Self) -> int
         recommends
             a.len() > 0,
             b.len() > 0,
@@ -68,15 +68,15 @@ impl PTTreePath {
                 0 <= j < i ==> a.0[j] == b.0[j]
     }
 
-    /// Get a `PTTreePath` from a virtual address, used to query the page table from root.
+    /// Get a `Self` from a virtual address, used to query the page table from root.
     ///
     /// The last query level of the returned path is `level`, and the path length is `level + 1`.
-    pub open spec fn from_vaddr(vaddr: VAddr, arch: PTArch, level: nat) -> PTTreePath
+    pub open spec fn from_vaddr(vaddr: VAddr, arch: PTArch, level: nat) -> Self
         recommends
             arch.valid(),
             level < arch.level_count(),
     {
-        PTTreePath(Seq::new(level + 1, |i: int| arch.pte_index_of_va(vaddr, i as nat)))
+        Self(Seq::new(level + 1, |i: int| arch.pte_index_of_va(vaddr, i as nat)))
     }
 
     /// Calculate the virtual address corresponding to the path from root.
@@ -93,7 +93,7 @@ impl PTTreePath {
     }
 
     /// Lemma. A prefix of a valid path is also valid.
-    pub proof fn lemma_prefix_valid(self, arch: PTArch, start_level: nat, pref: PTTreePath)
+    pub proof fn lemma_prefix_valid(self, arch: PTArch, start_level: nat, pref: Self)
         requires
             arch.valid(),
             self.valid(arch, start_level),
@@ -104,7 +104,7 @@ impl PTTreePath {
     }
 
     /// Lemma. If a prefix has the same length as the full path, then the two paths are equal.
-    pub proof fn lemma_prefix_equals_full(self, pref: PTTreePath)
+    pub proof fn lemma_prefix_equals_full(self, pref: Self)
         requires
             self.has_prefix(pref),
             pref.len() == self.len(),
@@ -115,7 +115,7 @@ impl PTTreePath {
     }
 
     /// Lemma. Existence of the first differing index between two distinct paths.
-    pub proof fn lemma_first_diff_idx_exists(a: PTTreePath, b: PTTreePath)
+    pub proof fn lemma_first_diff_idx_exists(a: Self, b: Self)
         requires
             a.len() > 0,
             b.len() > 0,
@@ -132,7 +132,7 @@ impl PTTreePath {
     }
 
     /// Helper lemma to prove `lemma_first_diff_idx_exists` by induction.
-    proof fn lemma_first_diff_idx_exists_recursive(a: PTTreePath, b: PTTreePath, i: int)
+    proof fn lemma_first_diff_idx_exists_recursive(a: Self, b: Self, i: int)
         requires
             a.len() > 0,
             b.len() > 0,
@@ -159,9 +159,9 @@ impl PTTreePath {
             level < arch.level_count(),
             arch.valid(),
         ensures
-            PTTreePath::from_vaddr(vaddr, arch, level).valid(arch, 0),
+            Self::from_vaddr(vaddr, arch, level).valid(arch, 0),
     {
-        let path = PTTreePath::from_vaddr(vaddr, arch, level);
+        let path = Self::from_vaddr(vaddr, arch, level);
         assert forall|i: int| 0 <= i < path.len() implies path.0[i] < arch.entry_count(
             i as nat,
         ) by {
@@ -198,7 +198,7 @@ impl PTTreePath {
     }
 
     /// Lemma. If `path` has a prefix `pref`, then `path.to_vaddr()` has a lower bound.
-    pub proof fn lemma_to_vaddr_lower_bound(arch: PTArch, path: PTTreePath, pref: PTTreePath)
+    pub proof fn lemma_to_vaddr_lower_bound(arch: PTArch, path: Self, pref: Self)
         requires
             arch.valid(),
             path.valid(arch, 0),
@@ -224,7 +224,7 @@ impl PTTreePath {
             );
             assert(parts.take(pref2.len() as int) == pref2_parts);
 
-            // Extract the sum as "pref2 parts" + "remaining part"
+            // Decompose the sum as "pref2 parts" + "remaining part"
             assert(parts.fold_left(0, |sum: nat, part| sum + part) == pref2_parts.fold_left(
                 0,
                 |sum: nat, part| sum + part,
@@ -233,12 +233,13 @@ impl PTTreePath {
 
             // Recursive proof for `pref2` and its prefix `pref`
             assert(pref2.has_prefix(pref));
-            PTTreePath::lemma_to_vaddr_lower_bound(arch, pref2, pref);
+            Self::lemma_to_vaddr_lower_bound(arch, pref2, pref);
         }
     }
 
     /// Lemma. If `path` has a prefix `pref`, then `path.to_vaddr()` has an upper bound.
-    pub proof fn lemma_to_vaddr_upper_bound(arch: PTArch, path: PTTreePath, pref: PTTreePath)
+    pub proof fn lemma_to_vaddr_upper_bound(arch: PTArch, path: Self, pref: Self)
+        by (nonlinear_arith)
         requires
             arch.valid(),
             path.valid(arch, 0),
@@ -247,23 +248,54 @@ impl PTTreePath {
             path.to_vaddr(arch).0 <= pref.to_vaddr(arch).0 + arch.frame_size(
                 (pref.len() - 1) as nat,
             ).as_nat() - arch.frame_size((path.len() - 1) as nat).as_nat(),
+        decreases path.len(),
     {
-        // TODO
-        let parts = Seq::new(path.len(), |i: int| path.0[i] * arch.frame_size(i as nat).as_nat());
-        let pref_parts = Seq::new(
-            pref.len(),
-            |i: int| pref.0[i] * arch.frame_size(i as nat).as_nat(),
-        );
-        assert(parts.take(pref.len() as int) == pref_parts);
+        if path.len() <= pref.len() {
+            // `pref` equals `path`
+            path.lemma_prefix_equals_full(pref);
+            assert(path.to_vaddr(arch).0 == pref.to_vaddr(arch).0);
+        } else {
+            // `pref2` is the longest prefix of `path` and not equal to `path`
+            let pref2 = path.trim((path.len() - 1) as nat);
+            let parts = Seq::new(
+                path.len(),
+                |i: int| path.0[i] * arch.frame_size(i as nat).as_nat(),
+            );
+            let pref2_parts = Seq::new(
+                pref2.len(),
+                |i: int| pref2.0[i] * arch.frame_size(i as nat).as_nat(),
+            );
+            assert(parts.take(pref2.len() as int) == pref2_parts);
 
-        assume(path.to_vaddr(arch).0 <= pref.to_vaddr(arch).0 + arch.frame_size(
-            (pref.len() - 1) as nat,
-        ).as_nat() - arch.frame_size((path.len() - 1) as nat).as_nat());
+            // Decompose "pref2_parts" as "pref parts" + "remaining part"
+            let remain = path.0[path.len() - 1] * arch.frame_size((path.len() - 1) as nat).as_nat();
+            assert(parts.fold_left(0, |sum: nat, part| sum + part) == pref2_parts.fold_left(
+                0,
+                |sum: nat, part| sum + part,
+            ) + remain);
+
+            // The remaining part has an upper bound
+            assert(path.0[path.len() - 1] <= arch.entry_count((path.len() - 1) as nat) - 1);
+            assert(remain <= arch.frame_size((path.len() - 1) as nat).as_nat() * arch.entry_count(
+                (path.len() - 1) as nat,
+            ) - arch.frame_size((path.len() - 1) as nat).as_nat());
+            assert(remain <= arch.frame_size((pref2.len() - 1) as nat).as_nat() - arch.frame_size(
+                (path.len() - 1) as nat,
+            ).as_nat());
+
+            assert(path.to_vaddr(arch).0 <= pref2.to_vaddr(arch).0 + arch.frame_size(
+                (pref2.len() - 1) as nat,
+            ).as_nat() - arch.frame_size((path.len() - 1) as nat).as_nat());
+
+            // Recursive proof for `pref2` and its prefix `pref`
+            assert(pref2.has_prefix(pref));
+            Self::lemma_to_vaddr_upper_bound(arch, pref2, pref);
+        }
     }
 
-    /// Lemma. If two paths `a` and `b` differ at index `first_diff_idx`, then the virtual address
-    /// of `a` plus one frame is below that of `b`.
-    pub proof fn lemma_path_order_implies_vaddr_order(arch: PTArch, a: PTTreePath, b: PTTreePath)
+    /// Lemma. If `a` and `b` are not a prefix of each other, then the order of their virtual
+    /// addresses is the same as the order of their path indices.
+    pub proof fn lemma_path_order_implies_vaddr_order(arch: PTArch, a: Self, b: Self)
         by (nonlinear_arith)
         requires
             arch.valid(),
@@ -271,21 +303,21 @@ impl PTTreePath {
             b.valid(arch, 0),
             !a.has_prefix(b),
             !b.has_prefix(a),
-            a.0[PTTreePath::first_diff_idx(a, b)] < b.0[PTTreePath::first_diff_idx(a, b)],
+            a.0[Self::first_diff_idx(a, b)] < b.0[Self::first_diff_idx(a, b)],
         ensures
             a.to_vaddr(arch).0 + arch.frame_size((a.len() - 1) as nat).as_nat() <= b.to_vaddr(
                 arch,
             ).0,
     {
         // Trim the paths at the first differing index
-        PTTreePath::lemma_first_diff_idx_exists(a, b);
-        let diff_idx = PTTreePath::first_diff_idx(a, b);
+        Self::lemma_first_diff_idx_exists(a, b);
+        let diff_idx = Self::first_diff_idx(a, b);
         let pref_a = a.trim((diff_idx + 1) as nat);
         let pref_b = b.trim((diff_idx + 1) as nat);
 
         // Bound the full paths by their prefixes
-        PTTreePath::lemma_to_vaddr_upper_bound(arch, a, pref_a);
-        PTTreePath::lemma_to_vaddr_lower_bound(arch, b, pref_b);
+        Self::lemma_to_vaddr_upper_bound(arch, a, pref_a);
+        Self::lemma_to_vaddr_lower_bound(arch, b, pref_b);
         assert(a.to_vaddr(arch).0 + arch.frame_size((a.len() - 1) as nat).as_nat()
             <= pref_a.to_vaddr(arch).0 + arch.frame_size((pref_a.len() - 1) as nat).as_nat());
         assert(pref_b.to_vaddr(arch).0 <= b.to_vaddr(arch).0);
@@ -308,7 +340,7 @@ impl PTTreePath {
             |i: int| pref_b.0[i] * arch.frame_size(i as nat).as_nat(),
         );
         let fsize = arch.frame_size(diff_idx as nat).as_nat();
-        
+
         assert(pref_a_parts.take(diff_idx) == common_parts);
         assert(pref_a_parts.fold_left(0, |sum: nat, part| sum + part) == common_parts.fold_left(
             0nat,
@@ -320,7 +352,7 @@ impl PTTreePath {
             |sum: nat, part| sum + part,
         ) + pref_b.0[diff_idx] * fsize);
 
-        // Extract the sum as "common parts" + "difference part"
+        // Decompose the sum as "common parts" + "difference part"
         assert(pref_a.to_vaddr(arch).0 == common.to_vaddr(arch).0 + pref_a.0[diff_idx] * fsize);
         assert(pref_b.to_vaddr(arch).0 == common.to_vaddr(arch).0 + pref_b.0[diff_idx] * fsize);
 
@@ -493,7 +525,7 @@ impl PTTreeNode {
                 NodeEntry::Empty => self.update(
                     idx,
                     NodeEntry::Node(
-                        PTTreeNode::new(self.config, self.level + 1).recursive_insert(
+                        Self::new(self.config, self.level + 1).recursive_insert(
                             remain,
                             entry,
                         ),
