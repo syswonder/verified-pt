@@ -491,7 +491,37 @@ impl PTTreeNode {
             self.recursive_visit(path).last() is Empty,
         ensures
             self.recursive_insert(path, frame).path_mappings().contains_pair(path, frame),
+        decreases path.len(),
     {
+        let new = self.recursive_insert(path, frame);
+        let (idx, remain) = path.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+        if path.len() <= 1 {
+            match entry {
+                NodeEntry::Empty => assert(new.recursive_visit(path) == seq![
+                    NodeEntry::Frame(frame),
+                ]),
+                _ => (),  // unreachable
+            }
+        } else {
+            match entry {
+                NodeEntry::Node(node) => {
+                    assert(Self::is_entry_valid(entry, self.level, self.config));
+                    assert(node.invariants());
+                    // Recursively prove `node.recursive_insert(remain, frame)`
+                    node.lemma_path_mappings_after_insertion_contains_new_mapping(remain, frame);
+                },
+                NodeEntry::Empty => {
+                    let node = PTTreeNode::new(self.config, self.level + 1);
+                    // `node` satisfies invariants by construction
+                    assert(node.invariants());
+                    // Recursively prove `node.recursive_insert(remain, frame)`
+                    node.lemma_path_mappings_after_insertion_contains_new_mapping(remain, frame);
+                },
+                _ => (),  // unreachable
+            }
+        }
     }
 
     /// Lemma. `path_mappings` after `recursive_insert` is a superset of `path_mappings` before.
@@ -538,55 +568,6 @@ impl PTTreeNode {
                 self.recursive_insert(path, frame).path_mappings().contains_pair(path2, frame2)
                     ==> path2 == path || self.path_mappings().contains_pair(path2, frame2),
     {
-    }
-
-    /// Lemma. The entry inserted by `recursive_insert` could be visited by `recursive_visit`.
-    pub proof fn lemma_inserted_entry_visitable(self, path: PTTreePath, frame: Frame)
-        requires
-            self.invariants(),
-            path.valid(self.config.arch, self.level),
-            Self::is_entry_valid(
-                NodeEntry::Frame(frame),
-                (self.level + path.len() - 1) as nat,
-                self.config,
-            ),
-            self.recursive_visit(path).last() is Empty,
-        ensures
-            self.recursive_insert(path, frame).recursive_visit(path).len() == path.len(),
-            self.recursive_insert(path, frame).recursive_visit(path).last() == NodeEntry::Frame(
-                frame,
-            ),
-        decreases path.len(),
-    {
-        let new = self.recursive_insert(path, frame);
-        let (idx, remain) = path.step();
-        let entry = self.entries[idx as int];
-        assert(self.entries.contains(entry));
-        if path.len() <= 1 {
-            match entry {
-                NodeEntry::Empty => assert(new.recursive_visit(path) == seq![
-                    NodeEntry::Frame(frame),
-                ]),
-                _ => assert(false),
-            }
-        } else {
-            match entry {
-                NodeEntry::Node(node) => {
-                    assert(Self::is_entry_valid(entry, self.level, self.config));
-                    assert(node.invariants());
-                    // Recursively prove `node.recursive_insert(remain, frame)`
-                    node.lemma_inserted_entry_visitable(remain, frame);
-                },
-                NodeEntry::Empty => {
-                    let node = PTTreeNode::new(self.config, self.level + 1);
-                    // `node` satisfies invariants by construction
-                    assert(node.invariants());
-                    // Recursively prove `node.recursive_insert(remain, frame)`
-                    node.lemma_inserted_entry_visitable(remain, frame);
-                },
-                _ => assert(false),
-            }
-        }
     }
 
     /// Lemma. `recursive_insert` does not affect the entries that are not visited.

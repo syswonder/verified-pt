@@ -387,7 +387,7 @@ impl PTTreeModel {
         let visited = self.root.recursive_visit(path);
         if visited.last() is Empty {
             let new = Self::new(self.root.recursive_insert(path, frame));
-            self.root.lemma_inserted_entry_visitable(path, frame);
+            self.root.lemma_path_mappings_after_insertion_contains_new_mapping(path, frame);
             assert(new.path_mappings().contains_pair(path, frame));
 
             assert forall|path2: PTTreePath| new.path_mappings().contains_key(path2) implies path2
