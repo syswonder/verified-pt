@@ -544,7 +544,61 @@ impl PTTreeNode {
                     path,
                     frame,
                 ).path_mappings().contains_pair(path2, frame2),
+        decreases path.len(),
     {
+        let new = self.recursive_insert(path, frame);
+        assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
+            self.path_mappings().contains_pair(
+                path2,
+                frame2,
+            ) implies new.path_mappings().contains_pair(path2, frame2) by {
+            let (idx, remain) = path.step();
+            let (idx2, remain2) = path2.step();
+            let entry = self.entries[idx as int];
+            assert(self.entries.contains(entry));
+            // Postcondition satisfied obviously if `new == self`
+            if new != self {
+                if idx == idx2 {
+                    // `path` and `path2` share same step
+                    if path.len() > 1 {
+                        match entry {
+                            NodeEntry::Node(node) => {
+                                assert(node.path_mappings().contains_pair(remain2, frame2));
+                                // Recursively prove `node.recursive_insert(remain, frame)`
+                                node.lemma_path_mappings_after_insertion_is_superset(remain, frame);
+                                assert(node.recursive_insert(
+                                    remain,
+                                    frame,
+                                ).path_mappings().contains_pair(remain2, frame2));
+                            },
+                            _ => (),  // unreachable
+                        }
+                    }
+                } else {
+                    // `path` and `path2` do not share any prefix
+                    if path.len() > 1 {
+                        match entry {
+                            NodeEntry::Node(node) => assert(new == self.update(
+                                idx,
+                                NodeEntry::Node(node.recursive_insert(remain, frame)),
+                            )),
+                            NodeEntry::Empty => assert(new == self.update(
+                                idx,
+                                NodeEntry::Node(
+                                    Self::new(self.config, self.level + 1).recursive_insert(
+                                        remain,
+                                        frame,
+                                    ),
+                                ),
+                            )),
+                            _ => (),  // unreachable
+                        }
+                    }
+                    // Above shows `self.entry` only updates the entry at `idx`
+                    assert(self.entries[idx2 as int] == new.entries[idx2 as int]);
+                }
+            }
+        }
     }
 
     // Lemma. `path_mappings` after `recursive_insert` has one more mapping than `path_mappings` before.
@@ -568,90 +622,6 @@ impl PTTreeNode {
                 self.recursive_insert(path, frame).path_mappings().contains_pair(path2, frame2)
                     ==> path2 == path || self.path_mappings().contains_pair(path2, frame2),
     {
-    }
-
-    /// Lemma. `recursive_insert` does not affect the entries that are not visited.
-    pub proof fn lemma_insert_not_affect_other_entries(
-        self,
-        path: PTTreePath,
-        frame: Frame,
-        path2: PTTreePath,
-    )
-        requires
-            self.invariants(),
-            path.valid(self.config.arch, self.level),
-            Self::is_entry_valid(
-                NodeEntry::Frame(frame),
-                (self.level + path.len() - 1) as nat,
-                self.config,
-            ),
-            // `path2` leads to an unaffected entry
-            path2.valid(self.config.arch, self.level),
-            self.recursive_visit(path2).len() == path2.len(),
-            self.recursive_visit(path2).last() is Frame,
-        ensures
-            self.recursive_insert(path, frame).recursive_visit(path2).last()
-                == self.recursive_visit(path2).last(),
-        decreases path.len(),
-    {
-        let new = self.recursive_insert(path, frame);
-        let (idx, remain) = path.step();
-        let (idx2, remain2) = path2.step();
-        let entry = self.entries[idx as int];
-        assert(self.entries.contains(entry));
-
-        if new != self {
-            if idx == idx2 {
-                // `path` and `path2` share same step
-                if path.len() > 1 {
-                    match entry {
-                        NodeEntry::Node(node) => {
-                            let new_node = node.recursive_insert(remain, frame);
-                            assert(self.recursive_visit(path2).last() == node.recursive_visit(
-                                remain2,
-                            ).last());
-                            assert(new.recursive_visit(path2).last() == new_node.recursive_visit(
-                                remain2,
-                            ).last());
-                            // Recursively prove `node.recursive_insert(remain, frame)`
-                            node.lemma_insert_not_affect_other_entries(remain, frame, remain2);
-                        },
-                        _ => assert(false),
-                    }
-                }
-            } else {
-                // `path` and `path2` do not share any prefix
-                assert(exists|entry|
-                    #![auto]
-                    Self::is_entry_valid(entry, self.level, self.config) && new == self.update(
-                        idx,
-                        entry,
-                    )) by {
-                    if path.len() > 1 {
-                        match entry {
-                            NodeEntry::Node(node) => {
-                                assert(new == self.update(
-                                    idx,
-                                    NodeEntry::Node(node.recursive_insert(remain, frame)),
-                                ))
-                            },
-                            NodeEntry::Empty => assert(new == self.update(
-                                idx,
-                                NodeEntry::Node(
-                                    Self::new(self.config, self.level + 1).recursive_insert(
-                                        remain,
-                                        frame,
-                                    ),
-                                ),
-                            )),
-                            _ => assert(false),
-                        }
-                    }
-                }
-                // The above assertion shows `self.entry` only updates the entry at `idx`
-                assert(self.entries[idx2 as int] == new.entries[idx2 as int]);
-            }
-        }
     }
 
     /// Lemma. `recursive_remove` preserves invariants.
