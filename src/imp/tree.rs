@@ -408,8 +408,8 @@ impl PTTreeNode {
         self.level == self.config.arch.level_count() - 1
     }
 
-    /// Invariants of a node entry at the specified level under the given configuration.
-    pub open spec fn inv_entry(entry: NodeEntry, level: nat, config: PTConfig) -> bool
+    /// If a node entry at the specified level is valid under the given configuration.
+    pub open spec fn is_entry_valid(entry: NodeEntry, level: nat, config: PTConfig) -> bool
         recommends
             level < config.arch.level_count(),
     {
@@ -443,7 +443,7 @@ impl PTTreeNode {
         &&& self.entries.len() == self.config.arch.entry_count(self.level)
         &&& forall|entry: NodeEntry| #[trigger]
             self.entries.contains(entry) ==> {
-                &&& Self::inv_entry(entry, self.level, self.config)
+                &&& Self::is_entry_valid(entry, self.level, self.config)
                 &&& entry is Node ==> entry->Node_0.invariants()
             }
     }
@@ -461,7 +461,7 @@ impl PTTreeNode {
     pub open spec fn update(self, index: nat, entry: NodeEntry) -> Self
         recommends
             index < self.entries.len(),
-            Self::inv_entry(entry, self.level, self.config),
+            Self::is_entry_valid(entry, self.level, self.config),
     {
         Self { entries: self.entries.update(index as int, entry), ..self }
     }
@@ -504,7 +504,11 @@ impl PTTreeNode {
         recommends
             self.invariants(),
             path.valid(self.config.arch, self.level),
-            Self::inv_entry(NodeEntry::Frame(frame), (self.level + path.len() - 1) as nat, self.config),
+            Self::is_entry_valid(
+                NodeEntry::Frame(frame),
+                (self.level + path.len() - 1) as nat,
+                self.config,
+            ),
         decreases path.len(),
     {
         let (idx, remain) = path.step();
@@ -589,7 +593,7 @@ impl PTTreeNode {
         }
     }
 
-    /// Lemma. Every entry returned by `recursive_visit` satisfies `inv_entry`.
+    /// Lemma. Every entry returned by `recursive_visit` satisfies `is_entry_valid`.
     pub proof fn lemma_visited_entries_satisfy_invariants(self, path: PTTreePath)
         requires
             self.invariants(),
@@ -597,7 +601,7 @@ impl PTTreeNode {
         ensures
             forall|i: int|
                 #![auto]
-                0 <= i < self.recursive_visit(path).len() ==> Self::inv_entry(
+                0 <= i < self.recursive_visit(path).len() ==> Self::is_entry_valid(
                     self.recursive_visit(path)[i],
                     self.level + i as nat,
                     self.config,
@@ -607,7 +611,7 @@ impl PTTreeNode {
         let (idx, remain) = path.step();
         let entry = self.entries[idx as int];
         assert(self.entries.contains(entry));
-        assert(Self::inv_entry(entry, self.level, self.config));
+        assert(Self::is_entry_valid(entry, self.level, self.config));
         if path.len() > 1 {
             match entry {
                 NodeEntry::Node(node) => {
@@ -637,7 +641,7 @@ impl PTTreeNode {
         let (idx, remain) = path.step();
         let entry = self.entries[idx as int];
         assert(self.entries.contains(entry));
-        assert(Self::inv_entry(entry, self.level, self.config));
+        assert(Self::is_entry_valid(entry, self.level, self.config));
         if path.len() > 1 {
             match entry {
                 NodeEntry::Node(node) => {
@@ -740,14 +744,14 @@ impl PTTreeNode {
         requires
             self.invariants(),
             0 <= index < self.entries.len(),
-            Self::inv_entry(entry, self.level, self.config),
+            Self::is_entry_valid(entry, self.level, self.config),
             entry is Node ==> entry->Node_0.invariants(),
         ensures
             self.update(index, entry).invariants(),
     {
         let new = self.update(index, entry);
         assert forall|entry2: NodeEntry| #[trigger]
-            new.entries.contains(entry2) implies Self::inv_entry(
+            new.entries.contains(entry2) implies Self::is_entry_valid(
             entry2,
             self.level,
             self.config,
@@ -772,7 +776,11 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.config.arch, self.level),
-            Self::inv_entry(NodeEntry::Frame(frame), (self.level + path.len() - 1) as nat, self.config),
+            Self::is_entry_valid(
+                NodeEntry::Frame(frame),
+                (self.level + path.len() - 1) as nat,
+                self.config,
+            ),
         ensures
             self.recursive_insert(path, frame).invariants(),
         decreases path.len(),
@@ -786,11 +794,11 @@ impl PTTreeNode {
         } else {
             match entry {
                 NodeEntry::Node(node) => {
-                    assert(Self::inv_entry(entry, self.level, self.config));
+                    assert(Self::is_entry_valid(entry, self.level, self.config));
                     assert(node.invariants());
-                    // Recursively prove `node.recursive_insert(remain)`
+                    // Recursively prove `node.recursive_insert(remain, frame)`
                     node.lemma_insert_preserves_invariants(remain, frame);
-                    // `node.recursive_update(remain, entry)` satisfies invariants,
+                    // `node.recursive_update(remain, frame)` satisfies invariants,
                     // so the updated `self` also satisfy invariants by lemma
                     self.lemma_update_preserves_invariants(
                         idx,
@@ -801,9 +809,9 @@ impl PTTreeNode {
                     let new = PTTreeNode::new(self.config, self.level + 1);
                     // `new` satisfies invariants by construction
                     assert(new.invariants());
-                    // Recursively prove `new.recursive_insert(remain)`
+                    // Recursively prove `new.recursive_insert(remain, frame)`
                     new.lemma_insert_preserves_invariants(remain, frame);
-                    // `new.recursive_insert(remain, entry)` satisfies invariants,
+                    // `new.recursive_insert(remain, frame)` satisfies invariants,
                     // so the updated `self` also satisfy invariants by lemma
                     self.lemma_update_preserves_invariants(
                         idx,
@@ -814,17 +822,23 @@ impl PTTreeNode {
             }
         }
     }
-    
+
     /// Lemma. The entry inserted by `recursive_insert` could be visited by `recursive_visit`.
     pub proof fn lemma_inserted_entry_visitable(self, path: PTTreePath, frame: Frame)
         requires
             self.invariants(),
             path.valid(self.config.arch, self.level),
-            Self::inv_entry(NodeEntry::Frame(frame), (self.level + path.len() - 1) as nat, self.config),
+            Self::is_entry_valid(
+                NodeEntry::Frame(frame),
+                (self.level + path.len() - 1) as nat,
+                self.config,
+            ),
             self.recursive_visit(path).last() is Empty,
         ensures
             self.recursive_insert(path, frame).recursive_visit(path).len() == path.len(),
-            self.recursive_insert(path, frame).recursive_visit(path).last() == NodeEntry::Frame(frame),
+            self.recursive_insert(path, frame).recursive_visit(path).last() == NodeEntry::Frame(
+                frame,
+            ),
         decreases path.len(),
     {
         let new = self.recursive_insert(path, frame);
@@ -832,24 +846,25 @@ impl PTTreeNode {
         let entry = self.entries[idx as int];
         assert(self.entries.contains(entry));
         if path.len() <= 1 {
-            // Base case, proved by lemma
             match entry {
-                NodeEntry::Empty => assert(new.recursive_visit(path) == seq![NodeEntry::Frame(frame)]),
+                NodeEntry::Empty => assert(new.recursive_visit(path) == seq![
+                    NodeEntry::Frame(frame),
+                ]),
                 _ => assert(false),
             }
         } else {
             match entry {
                 NodeEntry::Node(node) => {
-                    assert(Self::inv_entry(entry, self.level, self.config));
+                    assert(Self::is_entry_valid(entry, self.level, self.config));
                     assert(node.invariants());
-                    // Recursively prove `node.recursive_insert(remain)`
+                    // Recursively prove `node.recursive_insert(remain, frame)`
                     node.lemma_inserted_entry_visitable(remain, frame);
                 },
                 NodeEntry::Empty => {
                     let node = PTTreeNode::new(self.config, self.level + 1);
                     // `node` satisfies invariants by construction
                     assert(node.invariants());
-                    // Recursively prove `node.recursive_insert(remain)`
+                    // Recursively prove `node.recursive_insert(remain, frame)`
                     node.lemma_inserted_entry_visitable(remain, frame);
                 },
                 _ => assert(false),
@@ -858,18 +873,87 @@ impl PTTreeNode {
     }
 
     /// Lemma. `recursive_insert` does not affect the entries that are not visited.
-    pub proof fn lemma_insert_not_affect_other_entries(self, path: PTTreePath, frame: Frame, path2: PTTreePath)
+    pub proof fn lemma_insert_not_affect_other_entries(
+        self,
+        path: PTTreePath,
+        frame: Frame,
+        path2: PTTreePath,
+    )
         requires
             self.invariants(),
             path.valid(self.config.arch, self.level),
-            Self::inv_entry(NodeEntry::Frame(frame), (self.level + path.len() - 1) as nat, self.config),
+            Self::is_entry_valid(
+                NodeEntry::Frame(frame),
+                (self.level + path.len() - 1) as nat,
+                self.config,
+            ),
             // `path2` leads to an unaffected entry
             path2.valid(self.config.arch, self.level),
             self.recursive_visit(path2).len() == path2.len(),
             self.recursive_visit(path2).last() is Frame,
         ensures
-            self.recursive_insert(path, frame).recursive_visit(path2) == self.recursive_visit(path2),
+            self.recursive_insert(path, frame).recursive_visit(path2).last()
+                == self.recursive_visit(path2).last(),
+        decreases path.len(),
     {
+        let new = self.recursive_insert(path, frame);
+        let (idx, remain) = path.step();
+        let (idx2, remain2) = path2.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+
+        if new != self {
+            if idx == idx2 {
+                // `path` and `path2` share same step
+                if path.len() > 1 {
+                    match entry {
+                        NodeEntry::Node(node) => {
+                            let new_node = node.recursive_insert(remain, frame);
+                            assert(self.recursive_visit(path2).last() == node.recursive_visit(
+                                remain2,
+                            ).last());
+                            assert(new.recursive_visit(path2).last() == new_node.recursive_visit(
+                                remain2,
+                            ).last());
+                            // Recursively prove `node.recursive_insert(remain, frame)`
+                            node.lemma_insert_not_affect_other_entries(remain, frame, remain2);
+                        },
+                        _ => assert(false),
+                    }
+                }
+            } else {
+                // `path` and `path2` do not share any prefix
+                assert(exists|entry|
+                    #![auto]
+                    Self::is_entry_valid(entry, self.level, self.config) && new == self.update(
+                        idx,
+                        entry,
+                    )) by {
+                    if path.len() > 1 {
+                        match entry {
+                            NodeEntry::Node(node) => {
+                                assert(new == self.update(
+                                    idx,
+                                    NodeEntry::Node(node.recursive_insert(remain, frame)),
+                                ))
+                            },
+                            NodeEntry::Empty => assert(new == self.update(
+                                idx,
+                                NodeEntry::Node(
+                                    Self::new(self.config, self.level + 1).recursive_insert(
+                                        remain,
+                                        frame,
+                                    ),
+                                ),
+                            )),
+                            _ => assert(false),
+                        }
+                    }
+                }
+                // The above assertion shows `self.entry` only updates the entry at `idx`
+                assert(self.entries[idx2 as int] == new.entries[idx2 as int]);
+            }
+        }
     }
 
     /// Lemma. `recursive_remove` preserves invariants.
@@ -890,7 +974,7 @@ impl PTTreeNode {
         } else {
             match entry {
                 NodeEntry::Node(node) => {
-                    assert(Self::inv_entry(entry, self.level, self.config));
+                    assert(Self::is_entry_valid(entry, self.level, self.config));
                     assert(node.invariants());
                     // Recursively prove `node.recursive_remove(remain)`
                     node.lemma_remove_preserves_invariants(remain);
@@ -1075,7 +1159,7 @@ impl PTTreeModel {
         } by {
             // Prove the reached frame satisfy the invariants
             self.root.lemma_visited_entries_satisfy_invariants(path);
-            assert(PTTreeNode::inv_entry(
+            assert(PTTreeNode::is_entry_valid(
                 NodeEntry::Frame(frame),
                 (path.len() - 1) as nat,
                 self.root.config,
@@ -1286,7 +1370,9 @@ impl PTTreeModel {
             assert forall|path2: PTTreePath| new.path_mappings().contains_key(path2) implies path2
                 == path || self.path_mappings().contains_key(path2) by {
                 if path2 != path {
-                    assert(self.root.recursive_visit(path2).last() != NodeEntry::Frame(frame));
+                    assert(self.root.recursive_visit(path2).last() == new.root.recursive_visit(
+                        path2,
+                    ).last());
                 }
             }
             assert(new.path_mappings() === self.path_mappings().insert(path, frame));
@@ -1407,7 +1493,7 @@ impl PTTreeModel {
             // There is a mapping with base address `base`
             // The last visited entry satisfies invariants
             self.root.lemma_visited_entries_satisfy_invariants(path);
-            assert(PTTreeNode::inv_entry(
+            assert(PTTreeNode::is_entry_valid(
                 visited.last(),
                 (visited.len() - 1) as nat,
                 self.root.config,
