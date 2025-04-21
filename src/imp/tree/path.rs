@@ -1,10 +1,7 @@
 //! The visit path of the abstract page table tree.
 use vstd::prelude::*;
 
-use crate::spec::{
-    arch::PTArch,
-    addr::VAddr,
-};
+use crate::spec::{addr::VAddr, arch::PTArch};
 
 verus! {
 

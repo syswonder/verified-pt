@@ -1,19 +1,19 @@
 //! Abstract page table tree model, provides refinement proof.
 use vstd::prelude::*;
 
+use super::{
+    node::{NodeEntry, PTConfig, PTTreeNode},
+    path::PTTreePath,
+};
 use crate::spec::{
-    addr::{VAddr, PAddr},
+    addr::{PAddr, VAddr},
     arch::PTArch,
     frame::Frame,
-    pt_spec::{PageTableState, PTConstants},
-};
-use super::{
-    path::PTTreePath,
-    node::{PTTreeNode, NodeEntry, PTConfig},
+    pt_spec::{PTConstants, PageTableState},
 };
 
 verus! {
-    
+
 /// Page table tree model.
 pub struct PTTreeModel {
     /// The root node.
