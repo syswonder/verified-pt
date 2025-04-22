@@ -87,6 +87,28 @@ impl PTTreePath {
         VAddr(parts.fold_left(0, |sum: nat, part| sum + part))
     }
 
+    /// Lemma. Two paths are equal if they have the same first element and the same tail.
+    pub proof fn lemma_eq_step(self, other: Self)
+        requires
+            self.len() > 0,
+            other.len() > 0,
+            self.step() == other.step(),
+        ensures
+            self == other,
+    {
+        let (idx1, remain1) = self.step();
+        let (idx2, remain2) = other.step();
+        assert(remain1.len() == self.len() - 1);
+        assert forall|i| 0 <= i < self.len() implies self.0[i] == other.0[i] by {
+            if i == 0 {
+                assert(idx1 == idx2);
+            } else {
+                assert(remain1.0[i - 1] == remain2.0[i - 1]);
+            }
+        }
+        assert(self.0 == other.0);
+    }
+
     /// Lemma. A prefix of a valid path is also valid.
     pub proof fn lemma_prefix_valid(self, arch: PTArch, start_level: nat, pref: Self)
         requires
