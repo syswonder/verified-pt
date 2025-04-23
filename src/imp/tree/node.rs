@@ -554,7 +554,7 @@ impl PTTreeNode {
     }
 
     /// Lemma. Path mappings can not have 2 keys `a` and `b` such that `a` is prefix of `b`.
-    pub proof fn lemma_path_mappings_no_prefix(self)
+    pub proof fn lemma_path_mappings_nonprefix(self)
         requires
             self.invariants(),
         ensures
@@ -616,7 +616,7 @@ impl PTTreeNode {
             frame2.size.as_nat(),
         ) by {
             if path1 != path2 {
-                self.lemma_path_mappings_no_prefix();
+                self.lemma_path_mappings_nonprefix();
                 assert(!path1.has_prefix(path2));
                 assert(!path2.has_prefix(path1));
                 PTTreePath::lemma_first_diff_idx_exists(path1, path2);
@@ -641,6 +641,42 @@ impl PTTreeNode {
                     assert(path2.to_vaddr(self.config.arch).0 + frame2.size.as_nat()
                         <= path1.to_vaddr(self.config.arch).0);
                 }
+            }
+        }
+    }
+
+    /// Lemma. `path_mappings` has at most one path `path` such that `path.to_vaddr() == vbase`.
+    pub proof fn lemma_at_most_one_path_for_vbase_in_path_mappings(self, vbase: VAddr)
+        requires
+            self.invariants(),
+            self.level == 0,
+        ensures
+            forall|path1: PTTreePath, path2: PTTreePath|
+                #![auto]
+                {
+                    &&& self.path_mappings().contains_key(path1)
+                    &&& self.path_mappings().contains_key(path2)
+                    &&& path1.to_vaddr(self.config.arch) == vbase
+                    &&& path2.to_vaddr(self.config.arch) == vbase
+                } ==> path1 == path2,
+    {
+        assert forall|path1: PTTreePath, path2: PTTreePath|
+            #![auto]
+            {
+                &&& self.path_mappings().contains_key(path1)
+                &&& self.path_mappings().contains_key(path2)
+                &&& path1.to_vaddr(self.config.arch) == vbase
+                &&& path2.to_vaddr(self.config.arch) == vbase
+            } implies path1 == path2 by {
+            if path1 != path2 {
+                // Proof by contradiction
+                self.lemma_path_mappings_nonprefix();
+                PTTreePath::lemma_nonprefix_implies_vaddr_inequality(
+                    self.config.arch,
+                    path1,
+                    path2,
+                );
+                assert(path1.to_vaddr(self.config.arch) != path2.to_vaddr(self.config.arch));
             }
         }
     }
@@ -899,7 +935,7 @@ impl PTTreeNode {
     }
 
     /// Lemma. `recursive_insert` adds a mapping to `path_mappings`.
-    pub proof fn lemma_insert_adds_mapping(self, path: PTTreePath, frame: Frame)
+    pub proof fn lemma_insert_adds_path_mapping(self, path: PTTreePath, frame: Frame)
         requires
             self.invariants(),
             path.valid(self.config.arch, self.level),

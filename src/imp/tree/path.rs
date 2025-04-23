@@ -384,6 +384,40 @@ impl PTTreePath {
             arch,
         ).0);
     }
+
+    /// Lemma. If `a` and `b` are not a prefix of each other, then `a.vaddr() != b.vaddr()`.
+    pub proof fn lemma_nonprefix_implies_vaddr_inequality(arch: PTArch, a: Self, b: Self)
+        requires
+            arch.valid(),
+            a.valid(arch, 0),
+            b.valid(arch, 0),
+            !a.has_prefix(b),
+            !b.has_prefix(a),
+        ensures
+            a.to_vaddr(arch) != b.to_vaddr(arch),
+    {
+        Self::lemma_first_diff_idx_exists(a, b);
+        let diff_idx = Self::first_diff_idx(a, b);
+        if a.0[diff_idx] < b.0[diff_idx] {
+            Self::lemma_path_order_implies_vaddr_order(arch, a, b);
+        } else {
+            Self::lemma_path_order_implies_vaddr_order(arch, b, a);
+        }
+    }
+
+    // Lemma. `to_vaddr` is the inverse of `from_vaddr`
+    pub proof fn lemma_to_vaddr_is_inverse_of_from_vaddr(arch: PTArch, vaddr: VAddr, path: Self)
+        requires
+            arch.valid(),
+            path.valid(arch, 0),
+            vaddr.aligned(arch.frame_size((path.len() - 1) as nat).as_nat()),
+            path == Self::from_vaddr(vaddr, arch, (path.len() - 1) as nat),
+        ensures
+            path.to_vaddr(arch) == vaddr,
+    {
+        // TODO
+        assume(false);
+    }
 }
 
 } // verus!
