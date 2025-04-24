@@ -139,10 +139,9 @@ impl HighLevelState {
             frame.size.as_nat(),
         )
         // Frame should be within pmem
-        &&& s1.within_pmem(frame.base.idx())
-        &&& s1.within_pmem(
-            frame.base.offset(frame.size.as_nat()).idx(),
-        )
+        &&& frame.base.idx().0 >= s1.constants.pmem_lb.0
+        &&& frame.base.offset(frame.size.as_nat()).idx().0
+            <= s1.constants.pmem_ub.0
         // Frame should not overlap with existing pmem
         &&& !s1.overlaps_pmem(frame)
         // Check vmem overlapping

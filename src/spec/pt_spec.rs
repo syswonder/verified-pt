@@ -8,7 +8,7 @@
 use vstd::prelude::*;
 
 use super::{
-    addr::{PAddr, PIdx, VAddr, VAddrExec, WORD_SIZE},
+    addr::{PAddr, VAddr, VAddrExec, WORD_SIZE},
     arch::PTArch,
     frame::{Frame, FrameExec},
 };
@@ -28,9 +28,9 @@ pub struct PTConstants {
     /// Page table architecture.
     pub arch: PTArch,
     /// Physical memory lower bound.
-    pub pmem_lb: PIdx,
+    pub pmem_lb: PAddr,
     /// Physical memory upper bound.
-    pub pmem_ub: PIdx,
+    pub pmem_ub: PAddr,
 }
 
 /// State transition specification.
@@ -58,10 +58,9 @@ impl PageTableState {
             frame.size.as_nat(),
         )
         // Frame should be within pmem
-        &&& self.within_pmem(frame.base.idx())
-        &&& self.within_pmem(
-            frame.base.offset(frame.size.as_nat()).idx(),
-        )
+        &&& frame.base.0 >= self.constants.pmem_lb.0
+        &&& frame.base.0 + frame.size.as_nat()
+            <= self.constants.pmem_ub.0
         // Frame should not overlap with existing pmem
         &&& !self.overlaps_pmem(frame)
     }
@@ -181,11 +180,6 @@ impl PageTableState {
                     frame.size.as_nat(),
                 )
             }
-    }
-
-    /// If `pidx` is within physical memory.
-    pub open spec fn within_pmem(self, pidx: PIdx) -> bool {
-        self.constants.pmem_lb.0 <= pidx.0 < self.constants.pmem_ub.0
     }
 }
 

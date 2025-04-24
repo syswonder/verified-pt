@@ -3,7 +3,7 @@ use vstd::prelude::*;
 
 use super::lemmas::*;
 use crate::spec::{
-    addr::{PAddr, VAddr, VIdx},
+    addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     frame::Frame,
     high_level::HighLevelState,
     low_level::LowLevelState,
@@ -311,10 +311,8 @@ proof fn ll_read_refines_hl_read(
             // Lemma tells us "TLB hit" and "TLB miss, PT hit" are equivalent.
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
-        // `s1` has the mapping `(vbase, frame)` which contains `op.vaddr`.
-
         let (vbase, frame) = s1.mapping_for(vaddr);
-
+        // `s1` has mapping `(vbase, frame)` which contains `op.vaddr`.
         let pidx = vaddr.map(vbase, frame.base).idx();
         if s1.mem.contains(pidx) && frame.attr.readable && frame.attr.user_accessible {
             // Values in the intepreted memory are the same as in the OS memory, because
@@ -360,6 +358,7 @@ proof fn ll_write_refines_hl_write(
     value: u64,
     res: Result<(), ()>,
 )
+    by (nonlinear_arith)
     requires
         s1.invariants(),
         LowLevelState::write(s1, s2, vaddr, value, res),
@@ -374,19 +373,19 @@ proof fn ll_write_refines_hl_write(
             // Lemma tells us "TLB hit" and "TLB miss, PT hit" are equivalent.
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
-        // `s1` has the mapping `(vbase, frame)` which contains `op.vaddr`.
-
         let (vbase, frame) = s1.mapping_for(vaddr);
-
+        // `s1` has mapping `(vbase, frame)` which contains `op.vaddr`.
         let vidx = vaddr.idx();
+        assert(vaddr.0 >= vbase.0);
         let pidx = vaddr.map(vbase, frame.base).idx();
         if s1.mem.contains(pidx) && frame.attr.writable && frame.attr.user_accessible {
             // Prove that the interpreted memory is updated correctly.
             assert forall|vidx2: VIdx|
+                #![auto]
                 s2.interpret_mem().contains_key(vidx2) && s1.interpret_mem().insert(
                     vaddr.idx(),
                     value,
-                ).contains_key(vidx2) implies #[trigger] s2.interpret_mem()[vidx2]
+                ).contains_key(vidx2) implies s2.interpret_mem()[vidx2]
                 == s1.interpret_mem().insert(vaddr.idx(), value)[vidx2] by {
                 if vidx2 == vaddr.idx() {
                     // Prove that value at `vidx` is updated.
@@ -397,18 +396,30 @@ proof fn ll_write_refines_hl_write(
                     assert(s2.interpret_mem()[vidx2] == value);
                 } else {
                     // Prove that values at other indices are unchanged.
-                    let (base2, frame2) = choose|base2: VAddr, frame2: Frame|
+                    let (vbase2, frame2) = choose|vbase2: VAddr, frame2: Frame|
+                        #![auto]
                         {
-                            &&& #[trigger] s1.all_mappings().contains_pair(base2, frame2)
-                            &&& vidx2.addr().within(base2, frame2.size.as_nat())
-                            &&& s1.mem.contains(vidx2.addr().map(base2, frame2.base).idx())
+                            &&& s1.all_mappings().contains_pair(vbase2, frame2)
+                            &&& vidx2.addr().within(vbase2, frame2.size.as_nat())
                         };
-                    let pidx2 = vidx2.addr().map(base2, frame2.base).idx();
+                    let paddr2 = vidx2.addr().map(vbase2, frame2.base);
+                    let pidx2 = paddr2.idx();
+                    // Prove `pidx2` is within physical memory.
+                    lemma_vaddr_in_vpage_implies_paddr_in_pframe(vidx2.addr(), vbase2, frame2);
+                    lemma_pa_align_frame_size_must_align_word_size(frame2.base, frame2.size);
+                    lemma_sum_align_word_size(frame2.base.0, frame2.size.as_nat());
+                    assert(frame2.base.offset(frame2.size.as_nat()).aligned(WORD_SIZE));
+                    lemma_paddr_neq_implies_pidx_neq(
+                        paddr2, 
+                        frame2.base.offset(frame2.size.as_nat())
+                    );
+                    assert(pidx2.0 < frame2.base.offset(frame2.size.as_nat()).idx().0);
                     // Only `interpret_mem()[vidx]` and `mem[pidx]` are updated.
                     //
                     // Lemma ensures that `pidx` and `pidx2` are different for different `vidx` and `vidx2`.
                     // Thus `mem[pidx2]` is not updated.
                     lemma_different_pidxs_for_different_vidxs(s1, vidx, vidx2);
+                    assert(pidx != pidx2);
                     assert(s1.mem.read(pidx2) == s2.mem.read(pidx2));
                 }
             }
@@ -457,12 +468,12 @@ proof fn ll_map_preserves_invariants(
         }
         // Prove mappings within physical memory.
         assert forall|vbase2: VAddr, frame2: Frame| #[trigger]
-            s2.pt.interpret().contains_pair(vbase2, frame2) implies s2.mem.contains(
-            frame2.base.idx(),
-        ) && s2.mem.contains(frame2.base.offset(frame2.size.as_nat()).idx()) by {
+            s2.pt.interpret().contains_pair(vbase2, frame2) implies s2.mem.lb().0
+            <= frame2.base.idx().0 && frame2.base.offset(frame2.size.as_nat()).idx().0
+            <= s2.mem.ub().0 by {
             if vbase2 == vbase {
-                assert(s2.mem.contains(frame.base.idx()));
-                assert(s2.mem.contains(frame.base.offset(frame.size.as_nat()).idx()));
+                assert(s2.mem.ub().0 >= frame.base.offset(frame.size.as_nat()).idx().0
+                    >= frame.base.idx().0 >= s2.mem.lb().0);
             } else {
                 assert(s1.pt.interpret().contains_pair(vbase2, frame2));
             }

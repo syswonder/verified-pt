@@ -3,7 +3,7 @@ use vstd::prelude::*;
 
 use crate::spec::{
     addr::{PAddr, VAddr, WORD_SIZE},
-    frame::FrameSize,
+    frame::{Frame, FrameSize},
 };
 
 verus! {
@@ -74,6 +74,36 @@ pub proof fn lemma_pa_align_frame_size_must_align_word_size(paddr: PAddr, fsize:
         paddr.aligned(fsize.as_nat()),
     ensures
         paddr.aligned(WORD_SIZE),
+{
+}
+
+/// Lemma. PAddr inequality implies PIdx inequality.
+pub proof fn lemma_paddr_neq_implies_pidx_neq(paddr1: PAddr, paddr2: PAddr)
+    requires
+        paddr1.0 < paddr2.0,
+        paddr2.aligned(WORD_SIZE),
+    ensures
+        paddr1.idx().0 < paddr2.idx().0,
+{
+}
+
+/// Lemma. VAddr within virtual page implies PAddr within physical frame.
+pub proof fn lemma_vaddr_in_vpage_implies_paddr_in_pframe(vaddr: VAddr, vbase: VAddr, frame: Frame)
+    requires
+        vaddr.within(vbase, frame.size.as_nat()),
+    ensures
+        vaddr.map(vbase, frame.base).within(frame.base, frame.size.as_nat()),
+{
+}
+
+/// Lemma. `a % WORD_SIZE == 0` and `b % WORD_SIZE == 0` implies `(a + b) % WORD_SIZE == 0`.
+pub proof fn lemma_sum_align_word_size(a: nat, b: nat)
+    by (nonlinear_arith)
+    requires
+        a % WORD_SIZE == 0,
+        b % WORD_SIZE == 0,
+    ensures
+        (a + b) % WORD_SIZE == 0,
 {
 }
 

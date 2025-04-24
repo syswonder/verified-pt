@@ -145,8 +145,9 @@ impl LowLevelState {
     /// All frames are within the physical memory bounds.
     pub open spec fn frames_within_pmem(self) -> bool {
         forall|vbase: VAddr, frame: Frame| #[trigger]
-            self.pt.interpret().contains_pair(vbase, frame) ==> self.mem.contains(frame.base.idx())
-                && self.mem.contains(frame.base.offset(frame.size.as_nat()).idx())
+            self.pt.interpret().contains_pair(vbase, frame) ==> self.mem.lb().0
+                <= frame.base.idx().0 && frame.base.offset(frame.size.as_nat()).idx().0
+                <= self.mem.ub().0
     }
 
     /// All mappings (vbase, pbase) are 8-byte aligned.
@@ -288,8 +289,8 @@ impl LowLevelState {
             mappings: self.pt.interpret(),
             constants: PTConstants {
                 arch: self.constants.arch,
-                pmem_ub: self.mem.ub(),
-                pmem_lb: self.mem.lb(),
+                pmem_ub: self.mem.ub().addr(),
+                pmem_lb: self.mem.lb().addr(),
             },
         }
     }

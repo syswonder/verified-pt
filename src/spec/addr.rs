@@ -15,11 +15,6 @@ impl VAddr {
         self.0 % size == 0
     }
 
-    /// If addr is in range `[lb, ub)`.
-    pub open spec fn between(self, lb: Self, ub: Self) -> bool {
-        lb.0 <= self.0 < ub.0
-    }
-
     /// If addr is in range `[base, base + size)`.
     pub open spec fn within(self, base: Self, size: nat) -> bool {
         base.0 <= self.0 < base.0 + size
@@ -54,14 +49,14 @@ impl VAddr {
 pub struct PAddr(pub nat);
 
 impl PAddr {
-    /// Convert to word index.
-    pub open spec fn idx(self) -> PIdx {
-        PIdx(self.0 / WORD_SIZE)
-    }
-
     /// If addr is aligned to `size` bytes.
     pub open spec fn aligned(self, size: nat) -> bool {
         self.0 % size == 0
+    }
+    
+    /// If addr is in range `[base, base + size)`.
+    pub open spec fn within(self, base: Self, size: nat) -> bool {
+        base.0 <= self.0 < base.0 + size
     }
 
     /// If physical region (base1, size1) and physical region (base2, size2) overlap.
@@ -72,6 +67,11 @@ impl PAddr {
     /// Offset `self` by `offset` bytes.
     pub open spec fn offset(self, offset: nat) -> PAddr {
         PAddr(self.0 + offset)
+    }
+
+    /// Convert to word index.
+    pub open spec fn idx(self) -> PIdx {
+        PIdx(self.0 / WORD_SIZE)
     }
 }
 
