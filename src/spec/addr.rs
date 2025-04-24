@@ -53,7 +53,7 @@ impl PAddr {
     pub open spec fn aligned(self, size: nat) -> bool {
         self.0 % size == 0
     }
-    
+
     /// If addr is in range `[base, base + size)`.
     pub open spec fn within(self, base: Self, size: nat) -> bool {
         base.0 <= self.0 < base.0 + size

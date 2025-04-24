@@ -165,7 +165,7 @@ impl PTTreeNode {
         }
     }
 
-    /// Removes any entry at `path` by setting it to `Empty`.
+    /// Removes a frame at `path` by setting it to `Empty`.
     ///
     /// Does nothing if the entry at `path` is already `Empty`.
     pub open spec fn recursive_remove(self, path: PTTreePath) -> Self
@@ -177,7 +177,10 @@ impl PTTreeNode {
         let (idx, remain) = path.step();
         let entry = self.entries[idx as int];
         if path.len() <= 1 {
-            self.update(idx, NodeEntry::Empty)
+            match entry {
+                NodeEntry::Frame(_) => self.update(idx, NodeEntry::Empty),
+                _ => self,
+            }
         } else {
             match entry {
                 NodeEntry::Node(node) => self.update(
@@ -764,8 +767,8 @@ impl PTTreeNode {
             let (idx2, remain2) = path2.step();
             let entry = self.entries[idx as int];
             assert(self.entries.contains(entry));
-            // Postcondition satisfied obviously if `new == self` or `path.len() == 1`
-            if new != self && path.len() > 1 {
+            // Postcondition satisfied obviously if `path.len() == 1`
+            if path.len() > 1 {
                 if idx == idx2 {
                     // `path` and `path2` share same step
                     match entry {
@@ -778,7 +781,7 @@ impl PTTreeNode {
                                 frame,
                             ).path_mappings().contains_pair(remain2, frame2));
                         },
-                        _ => (),  // unreachable
+                        _ => assert(new == self),
                     }
                 } else {
                     // `path` and `path2` do not share any prefix
@@ -796,7 +799,7 @@ impl PTTreeNode {
                                 ),
                             ),
                         )),
-                        _ => (),  // unreachable
+                        _ => assert(new == self),
                     }
                     // `self.entries` only updates at `idx`
                     assert(self.entries[idx2 as int] == new.entries[idx2 as int]);
@@ -805,12 +808,8 @@ impl PTTreeNode {
         }
     }
 
-    // Lemma. `path_mappings` after `recursive_insert` has one more mapping than `path_mappings` before.
-    pub proof fn lemma_path_mappings_after_insertion_has_one_more_mapping(
-        self,
-        path: PTTreePath,
-        frame: Frame,
-    )
+    // Lemma. `recursive_insert` does not affect other mappings.
+    pub proof fn lemma_insert_not_affect_other_mappings(self, path: PTTreePath, frame: Frame)
         requires
             self.invariants(),
             path.valid(self.config.arch, self.level),
@@ -863,10 +862,7 @@ impl PTTreeNode {
                             assert(new_node == node.recursive_insert(remain, frame));
                             assert(new_node.path_mappings().contains_pair(remain2, frame2));
                             // Recursive prove that `new_node` has one more mapping than `node`
-                            node.lemma_path_mappings_after_insertion_has_one_more_mapping(
-                                remain,
-                                frame,
-                            );
+                            node.lemma_insert_not_affect_other_mappings(remain, frame);
                             assert(remain == remain2 || node.path_mappings().contains_pair(
                                 remain2,
                                 frame2,
@@ -883,10 +879,7 @@ impl PTTreeNode {
                             assert(new_node == node.recursive_insert(remain, frame));
                             assert(new_node.path_mappings().contains_pair(remain2, frame2));
                             // Recursive prove that `new_node` has one more mapping than `node`
-                            node.lemma_path_mappings_after_insertion_has_one_more_mapping(
-                                remain,
-                                frame,
-                            );
+                            node.lemma_insert_not_affect_other_mappings(remain, frame);
                             assert(remain == remain2 || node.path_mappings().contains_pair(
                                 remain2,
                                 frame2,
@@ -957,8 +950,8 @@ impl PTTreeNode {
         self.lemma_path_mappings_after_insertion_contains_new_mapping(path, frame);
         // `new.path_mappings()` is a superset of `self.path_mappings()`
         self.lemma_path_mappings_after_insertion_is_superset(path, frame);
-        // `new.path_mappings()` has one more mapping `(path, frame)` than `self.path_mappings()`
-        self.lemma_path_mappings_after_insertion_has_one_more_mapping(path, frame);
+        // Other mappings are preserved
+        self.lemma_insert_not_affect_other_mappings(path, frame);
 
         // `new.path_mappings()` is a subset of `self.path_mappings().insert(path, frame)`
         assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
@@ -983,6 +976,214 @@ impl PTTreeNode {
             }
         }
         lemma_map_eq_pair(self.path_mappings().insert(path, frame), new.path_mappings());
+    }
+
+    /// Lemma. `path_mappings` after removal does not contain the removed mapping.
+    pub proof fn lemma_path_mappings_after_removal_not_contain_mapping(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.config.arch, self.level),
+        ensures
+            !self.recursive_remove(path).path_mappings().contains_key(path),
+        decreases path.len(),
+    {
+        let new = self.recursive_remove(path);
+        let (idx, remain) = path.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+        if path.len() <= 1 {
+            match entry {
+                NodeEntry::Frame(_) => assert(new.recursive_visit(path) == seq![NodeEntry::Empty]),
+                _ => assert(!new.is_frame_path(path)),
+            }
+        } else {
+            match entry {
+                NodeEntry::Node(node) => {
+                    assert(Self::is_entry_valid(entry, self.level, self.config));
+                    assert(node.invariants());
+                    // Recursively prove `node.recursive_remove(remain)`
+                    node.lemma_path_mappings_after_removal_not_contain_mapping(remain);
+                },
+                _ => assert(!new.is_frame_path(path)),
+            }
+        }
+    }
+
+    /// Lemma. `path_mappings` after `recursive_remove` is subset of before.
+    pub proof fn lemma_path_mappings_after_removal_is_subset(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.config.arch, self.level),
+        ensures
+            forall|path2: PTTreePath, frame2: Frame| #[trigger]
+                self.recursive_remove(path).path_mappings().contains_pair(path2, frame2)
+                    ==> self.path_mappings().contains_pair(path2, frame2),
+        decreases path.len(),
+    {
+        let new = self.recursive_remove(path);
+        assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
+            new.path_mappings().contains_pair(
+                path2,
+                frame2,
+            ) implies self.path_mappings().contains_pair(path2, frame2) by {
+            let (idx, remain) = path.step();
+            let (idx2, remain2) = path2.step();
+            let entry = self.entries[idx as int];
+            assert(self.entries.contains(entry));
+            // Postcondition satisfied obviously if `path.len() == 1`
+            if path.len() > 1 {
+                if idx == idx2 {
+                    // `path` and `path2` share same step
+                    match entry {
+                        NodeEntry::Node(node) => {
+                            assert(node.recursive_remove(remain).path_mappings().contains_pair(
+                                remain2,
+                                frame2,
+                            ));
+                            // Recursively prove `node.recursive_remove(remain)`
+                            node.lemma_path_mappings_after_removal_is_subset(remain);
+                            assert(node.path_mappings().contains_pair(remain2, frame2));
+                        },
+                        _ => assert(new == self),
+                    }
+                } else {
+                    // `path` and `path2` do not share any prefix
+                    match entry {
+                        NodeEntry::Node(node) => assert(new == self.update(
+                            idx,
+                            NodeEntry::Node(node.recursive_remove(remain)),
+                        )),
+                        _ => assert(new == self),
+                    }
+                    // `self.entries` only updates at `idx`
+                    assert(self.entries[idx2 as int] == new.entries[idx2 as int]);
+                }
+            }
+        }
+    }
+
+    /// Lemma. `recursive_remove` does not affect other mappings.
+    pub proof fn lemma_remove_not_affect_other_mappings(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.config.arch, self.level),
+        ensures
+            forall|path2: PTTreePath, frame2: Frame| #[trigger]
+                self.path_mappings().contains_pair(path2, frame2) ==> path2 == path
+                    || self.recursive_remove(path).path_mappings().contains_pair(path2, frame2),
+        decreases path.len(),
+    {
+        let new = self.recursive_remove(path);
+        self.lemma_remove_preserves_invariants(path);
+
+        assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
+            self.path_mappings().contains_pair(path2, frame2) implies path2 == path
+            || new.path_mappings().contains_pair(path2, frame2) by {
+            let (idx, remain) = path.step();
+            let (idx2, remain2) = path2.step();
+
+            let entry = self.entries[idx as int];
+            assert(self.entries.contains(entry));
+            let new_entry = new.entries[idx as int];
+            assert(new.entries.contains(new_entry));
+            let entry2 = self.entries[idx2 as int];
+            assert(self.entries.contains(entry2));
+            let new_entry2 = new.entries[idx2 as int];
+            assert(new.entries.contains(new_entry2));
+
+            if path.len() <= 1 {
+                if idx == idx2 {
+                    match entry {
+                        NodeEntry::Frame(_) => {
+                            assert(new.recursive_visit(path2) == seq![NodeEntry::Empty]);
+                            assert(path2.len() == 1);
+                            assert(path.0 == path2.0);
+                        },
+                        _ => assert(new == self),
+                    }
+                } else {
+                    // `path2` points to an unchanged entry
+                    assert(new.path_mappings().contains_pair(path2, frame2));
+                }
+            } else {
+                if idx == idx2 {
+                    // `path` and `path2` share same step
+                    match (entry, new_entry) {
+                        (NodeEntry::Node(node), NodeEntry::Node(new_node)) => {
+                            // `node` becomes `new_node` after `recursive_remove`
+                            assert(new_node == node.recursive_remove(remain));
+                            assert(node.path_mappings().contains_pair(remain2, frame2));
+                            // Recursive prove that `new_node` has one less mapping than `node`
+                            node.lemma_remove_not_affect_other_mappings(remain);
+                            assert(remain == remain2 || new_node.path_mappings().contains_pair(
+                                remain2,
+                                frame2,
+                            ));
+                            if remain == remain2 {
+                                path.lemma_eq_step(path2);
+                            } else {
+                                assert(new.path_mappings().contains_pair(path2, frame2));
+                            }
+                        },
+                        (NodeEntry::Node(node), NodeEntry::Frame(_))
+                        | (NodeEntry::Node(node), NodeEntry::Empty) => {
+                            assert(new_entry == NodeEntry::Node(node.recursive_remove(remain)));
+                            assert(false);  // unreachable
+                        },
+                        (NodeEntry::Frame(_), _) | (NodeEntry::Empty, _) => assert(new == self),
+                    }
+                } else {
+                    // `path` and `path2` do not share any prefix
+                    match entry {
+                        NodeEntry::Node(node) => assert(new == self.update(
+                            idx,
+                            NodeEntry::Node(node.recursive_remove(remain)),
+                        )),
+                        _ => assert(new == self),
+                    }
+                    // `self.entries` only updates at `idx`
+                    assert(entry2 == new_entry2);
+                    assert(new.path_mappings().contains_pair(path2, frame2));
+                }
+            }
+        }
+    }
+
+    /// Lemma. `recursive_remove` removes a mapping from `path_mappings`.
+    pub proof fn lemma_remove_removes_path_mapping(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.config.arch, self.level),
+        ensures
+            self.recursive_remove(path).path_mappings() == self.path_mappings().remove(path),
+    {
+        let new = self.recursive_remove(path);
+        self.lemma_remove_preserves_invariants(path);
+
+        // `new.path_mappings()` does not contain the mapping `(path, frame)`
+        self.lemma_path_mappings_after_removal_not_contain_mapping(path);
+        // `new.path_mappings()` is a subset of `self.path_mappings()`
+        self.lemma_path_mappings_after_removal_is_subset(path);
+        // Other mappings are preserved
+        self.lemma_remove_not_affect_other_mappings(path);
+
+        // `new.path_mappings()` is a subset of `self.path_mappings().remove(path)`
+        assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
+            new.path_mappings().contains_pair(path2, frame2) implies self.path_mappings().remove(
+            path,
+        ).contains_pair(path2, frame2) by {
+            assert(path2 != path);
+        }
+        // `self.path_mappings().remove(path)` is a subset of `new.path_mappings()`
+        assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
+            self.path_mappings().remove(path).contains_pair(
+                path2,
+                frame2,
+            ) implies new.path_mappings().contains_pair(path2, frame2) by {
+            assert(path2 != path);
+            assert(self.path_mappings().contains_pair(path2, frame2));
+        }
+        lemma_map_eq_pair(self.path_mappings().remove(path), new.path_mappings());
     }
 }
 

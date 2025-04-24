@@ -410,8 +410,8 @@ proof fn ll_write_refines_hl_write(
                     lemma_sum_align_word_size(frame2.base.0, frame2.size.as_nat());
                     assert(frame2.base.offset(frame2.size.as_nat()).aligned(WORD_SIZE));
                     lemma_paddr_neq_implies_pidx_neq(
-                        paddr2, 
-                        frame2.base.offset(frame2.size.as_nat())
+                        paddr2,
+                        frame2.base.offset(frame2.size.as_nat()),
                     );
                     assert(pidx2.0 < frame2.base.offset(frame2.size.as_nat()).idx().0);
                     // Only `interpret_mem()[vidx]` and `mem[pidx]` are updated.
