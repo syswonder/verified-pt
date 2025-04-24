@@ -415,7 +415,14 @@ impl PTTreePath {
         ensures
             path.to_vaddr(arch) == vaddr,
     {
-        // TODO
+        let parts: Seq<nat> = Seq::new(
+            path.len(),
+            |i: int| path.0[i] * arch.frame_size(i as nat).as_nat(),
+        );
+        assert(forall|i|
+            0 <= i < path.len() ==> parts[i] == arch.pte_index_of_va(vaddr, i as nat)
+                * arch.frame_size(i as nat).as_nat());
+        // TODO consider add a lemma to `PTArch`
         assume(false);
     }
 }
