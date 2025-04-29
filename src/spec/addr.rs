@@ -134,6 +134,11 @@ impl VAddrExec {
     pub open spec fn view(self) -> VAddr {
         VAddr(self.0 as nat)
     }
+
+    /// If addr is aligned to `size` bytes.
+    pub open spec fn aligned(self, size: usize) -> bool {
+        self.0 % size == 0
+    }
 }
 
 } // verus!

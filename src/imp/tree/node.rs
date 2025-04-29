@@ -472,6 +472,17 @@ impl PTTreeNode {
         }
     }
 
+    /// Lemma. If `path` is valid, then `real_path(path)` is also valid.
+    pub proof fn lemma_real_path_valid(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.config.arch, self.level),
+        ensures
+            self.real_path(path).valid(self.config.arch, self.level),
+    {
+        self.lemma_visit_length_bounds(path);
+    }
+
     /// Lemma. The entry sequence visited by `path` and `real_path(path)` are the same.
     pub proof fn lemma_real_path_visits_same_entry(self, path: PTTreePath)
         requires
@@ -649,7 +660,7 @@ impl PTTreeNode {
     }
 
     /// Lemma. `path_mappings` has at most one path `path` such that `path.to_vaddr() == vbase`.
-    pub proof fn lemma_at_most_one_path_for_vbase_in_path_mappings(self, vbase: VAddr)
+    pub proof fn lemma_path_mappings_has_at_most_one_path_for_vbase(self, vbase: VAddr)
         requires
             self.invariants(),
             self.level == 0,

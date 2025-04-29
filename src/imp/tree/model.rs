@@ -117,15 +117,18 @@ impl PTTreeModel {
         recommends
             self.invariants(),
     {
-        // Check if already mapped
-        if let Ok((_, frame)) = self.query(vbase) {
-            // `path` is the right path to the target entry
-            let path = PTTreePath::from_vaddr(
-                vbase,
-                self.arch(),
-                self.arch().level_of_frame_size(frame.size),
-            );
-            Ok(Self::new(self.root.recursive_remove(path)))
+        let path = PTTreePath::from_vaddr(
+            vbase,
+            self.arch(),
+            (self.arch().level_count() - 1) as nat,
+        );
+        let visited = self.root.recursive_visit(path);
+        if let NodeEntry::Frame(frame) = visited.last() {
+            if vbase.aligned(frame.size.as_nat()) {
+                Ok(Self::new(self.root.recursive_remove(self.root.real_path(path))))
+            } else {
+                Err(())
+            }
         } else {
             Err(())
         }
@@ -166,7 +169,7 @@ impl PTTreeModel {
             ) implies self.mappings().contains_pair(path.to_vaddr(self.arch()), frame) by {
             let vbase = path.to_vaddr(self.arch());
             assert(self.mappings().contains_key(vbase));
-            self.root.lemma_at_most_one_path_for_vbase_in_path_mappings(vbase);
+            self.root.lemma_path_mappings_has_at_most_one_path_for_vbase(vbase);
             assert(path == choose|path| #[trigger]
                 self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch())
                     == vbase);
@@ -310,7 +313,7 @@ impl PTTreeModel {
                 assert(self.mappings().contains_pair(vbase2, frame2));
                 assert(self.mappings().insert(vbase, frame).contains_pair(vbase2, frame2));
             } else {
-                new.root.lemma_at_most_one_path_for_vbase_in_path_mappings(vbase);
+                new.root.lemma_path_mappings_has_at_most_one_path_for_vbase(vbase);
                 // Only exists one path for `vbase` in path mappings, so `frame2 == frame`
                 assert(frame2 == frame);
             }
@@ -357,6 +360,9 @@ impl PTTreeModel {
         ensures
             self.unmap(vbase).unwrap().mappings() === self.mappings().remove(vbase),
     {
+        let new = self.unmap(vbase).unwrap();
+        self.unmap_preserves_invariants(vbase);
+        self.lemma_query_succeeds(vbase);
         // TODO
         assume(false);
     }
@@ -487,7 +493,6 @@ impl PTTreeModel {
         ensures
             self.unmap(vbase).unwrap().invariants(),
     {
-        // `path` is the path used to query `vbase`
         let path = PTTreePath::from_vaddr(
             vbase,
             self.arch(),
@@ -498,36 +503,8 @@ impl PTTreeModel {
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
-        let visited = self.root.recursive_visit(path);
-        // `unmpa` succeeds implies `visited.last()` is a frame.
-        assert(visited.last() is Frame);
-        let frame = visited.last()->Frame_0;
-
-        // The last visited entry satisfies invariants
-        self.root.lemma_visited_entries_satisfy_invariants(path);
-        assert(PTTreeNode::is_entry_valid(
-            visited.last(),
-            (visited.len() - 1) as nat,
-            self.root.config,
-        ));
-        // Prove `self.arch().level_of_frame_size(frame.size)` will return a valid level
-        self.root.lemma_visit_length_bounds(path);
-        assert(visited.len() - 1 < self.arch().level_count());
-        assert(self.arch().is_valid_frame_size(frame.size));
-
-        // `path2` is the right path to the target entry
-        let path2 = PTTreePath::from_vaddr(
-            vbase,
-            self.arch(),
-            self.arch().level_of_frame_size(frame.size),
-        );
-        // Prove `path2` is valid
-        PTTreePath::lemma_from_vaddr_yields_valid_path(
-            vbase,
-            self.arch(),
-            self.arch().level_of_frame_size(frame.size),
-        );
-        self.root.lemma_remove_preserves_invariants(path2);
+        self.root.lemma_real_path_valid(path);
+        self.root.lemma_remove_preserves_invariants(self.root.real_path(path));
     }
 
     /// Theorem. `map` refines `PageTableState::map`.
@@ -570,19 +547,38 @@ impl PTTreeModel {
                 PageTableState::unmap(self@, self@, vbase, Err(()))
             },
     {
-        if let Ok((_, frame)) = self.query(vbase) {
-            self.lemma_query_succeeds(vbase);
-            // TODO
-            assume(self.mappings().contains_key(vbase));
-            self.lemma_unmap_removes_mapping(vbase);
-        } else {
-            self.lemma_query_fails(vbase);
-            if self.mappings().contains_key(vbase) {
-                // Proof by contradiction
-                assert(self.mappings().contains_pair(vbase, self.mappings()[vbase]));
-                assert(vbase.within(vbase, self.mappings()[vbase].size.as_nat()));
+        let path = PTTreePath::from_vaddr(
+            vbase,
+            self.arch(),
+            (self.arch().level_count() - 1) as nat,
+        );
+        let visited = self.root.recursive_visit(path);
+        self.root.lemma_visited_entries_satisfy_invariants(path);
+        if let NodeEntry::Frame(frame) = visited.last() {
+            if vbase.aligned(frame.size.as_nat()) {
+                // TODO
+                assume(self.mappings().contains_key(vbase));
+                self.lemma_unmap_removes_mapping(vbase);
+            } else {
+                assert(self.query(vbase) is Ok);
+                self.lemma_query_succeeds(vbase);
+                let (vbase2, frame2) = self.query(vbase).unwrap();
+                if self.mappings().contains_key(vbase) {
+                    if vbase2 != vbase {
+                        self.lemma_mappings_nonoverlap_in_vmem();
+                        assert(VAddr::overlap(vbase, self.mappings()[vbase].size.as_nat(), vbase2, frame2.size.as_nat()));
+                        assert(false);
+                    } else {
+                        assert(frame2 == frame);
+                        self.lemma_mappings_valid();
+                        assert(vbase.aligned(frame.size.as_nat()));
+                        assert(false);
+                    }
+                }
             }
-            assert(!self.mappings().contains_key(vbase));
+        } else {
+            // TODO
+            assume(!self.mappings().contains_key(vbase));
         }
     }
 
