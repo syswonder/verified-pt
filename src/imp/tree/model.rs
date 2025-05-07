@@ -566,7 +566,12 @@ impl PTTreeModel {
                 if self.mappings().contains_key(vbase) {
                     if vbase2 != vbase {
                         self.lemma_mappings_nonoverlap_in_vmem();
-                        assert(VAddr::overlap(vbase, self.mappings()[vbase].size.as_nat(), vbase2, frame2.size.as_nat()));
+                        assert(VAddr::overlap(
+                            vbase,
+                            self.mappings()[vbase].size.as_nat(),
+                            vbase2,
+                            frame2.size.as_nat(),
+                        ));
                         assert(false);
                     } else {
                         assert(frame2 == frame);

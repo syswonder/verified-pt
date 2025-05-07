@@ -7,8 +7,8 @@ verus! {
 
 /// Represents a single level in a hierarchical page table structure.
 pub struct PTArchLevel {
-    /// log2 of the number of entries at this level.
-    pub entry_count_log2: nat,
+    /// The number of entries at this level.
+    pub entry_count: nat,
     /// Frame size indicated by a block/page descriptor at this level.
     pub frame_size: FrameSize,
 }
@@ -31,7 +31,7 @@ impl PTArch {
         recommends
             level < self.level_count(),
     {
-        (1 << self.0[level as int].entry_count_log2) as nat
+        self.0[level as int].entry_count
     }
 
     /// The frame size associated with a block/page descriptor at a given level.
@@ -75,15 +75,6 @@ impl PTArch {
             level < self.level_count(),
     {
         vaddr.0 / self.frame_size(level).as_nat() % self.entry_count(level)
-    }
-
-    /// Calculates the virtual page base address that contains a given virtual address at the specified level.
-    pub open spec fn vbase_of_va(self, vaddr: VAddr, level: nat) -> VAddr
-        recommends
-            self.valid(),
-            level < self.level_count(),
-    {
-        VAddr((vaddr.0 - vaddr.0 % self.frame_size(level).as_nat()) as nat)
     }
 
     /// Check if the page table architecture is valid.
@@ -162,22 +153,21 @@ impl PTArch {
 /// | 3     | 20:12         | 512       | Page         | 4K         |
 ///
 /// *If effective value of TCR_ELx.DS is 0, level 0 allows Table descriptor only.
-pub spec const VMSAV8_S1_4K_ARCH: PTArch = PTArch(
+pub spec const VMSAV8_4K_ARCH: PTArch = PTArch(
     seq![
-        PTArchLevel { entry_count_log2: 9, frame_size: FrameSize::Size512G },
-        PTArchLevel { entry_count_log2: 9, frame_size: FrameSize::Size1G },
-        PTArchLevel { entry_count_log2: 9, frame_size: FrameSize::Size2M },
-        PTArchLevel { entry_count_log2: 9, frame_size: FrameSize::Size4K },
+        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size512G },
+        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size1G },
+        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size2M },
+        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size4K },
     ],
 );
 
-/// Prove `VMSAV8_S1_ARCH` satisfies its invariants.
-pub broadcast proof fn vmsav8_s1_4k_arch_invariants()
+/// `VMSAV8_4K_ARCH` is a valid architecture.
+pub proof fn lemma_vmsav8_4k_arch_valid()
     by (nonlinear_arith)
     ensures
-        #[trigger] VMSAV8_S1_4K_ARCH.valid(),
+        VMSAV8_4K_ARCH.valid(),
 {
-    assume(1 << 9 == 512);
 }
 
 } // verus!

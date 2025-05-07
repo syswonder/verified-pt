@@ -40,19 +40,6 @@ impl FrameSize {
         }
     }
 
-    /// Calculate the bit length of the frame size.
-    pub open spec fn bit_len(self) -> nat {
-        match self {
-            FrameSize::Size4K => 12,
-            FrameSize::Size16K => 14,
-            FrameSize::Size2M => 21,
-            FrameSize::Size32M => 23,
-            FrameSize::Size1G => 30,
-            FrameSize::Size64G => 36,
-            FrameSize::Size512G => 39,
-        }
-    }
-
     /// Convert to usize.
     pub open spec fn as_usize(self) -> usize {
         self.as_u64() as usize
@@ -66,7 +53,7 @@ impl FrameSize {
 
 /// Frame attributes. Defination consistent with `hvisor::memory::MemFlags`.
 #[derive(PartialEq, Eq)]
-pub struct FrameAttr {
+pub struct MemAttr {
     /// Whether the memory is readable.
     pub readable: bool,
     /// Whether the memory is writable.
@@ -75,6 +62,8 @@ pub struct FrameAttr {
     pub executable: bool,
     /// Whether the memory is user accessible.
     pub user_accessible: bool,
+    /// Whether the memory is used for device mapping.
+    pub device: bool,
 }
 
 /// Represents a physical memory frame (Page or Block).
@@ -84,7 +73,7 @@ pub struct Frame {
     /// The size of the frame in bytes.
     pub size: FrameSize,
     /// The attributes of the frame.
-    pub attr: FrameAttr,
+    pub attr: MemAttr,
 }
 
 /// (EXEC-MODE) represents a physical memory frame (Page or Block).
@@ -94,7 +83,7 @@ pub struct FrameExec {
     /// The size of the frame in bytes.
     pub size: FrameSize,
     /// The attributes of the frame.
-    pub attr: FrameAttr,
+    pub attr: MemAttr,
 }
 
 impl FrameExec {
