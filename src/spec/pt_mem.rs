@@ -10,9 +10,8 @@ use vstd::{pervasive::unreached, prelude::*};
 
 use super::{
     addr::{PAddr, PAddrExec, VAddr},
-    arch::PTArch,
-    frame::{Frame, FrameAttr, FrameSize},
-    nat_to_u64,
+    arch::{lemma_vmsav8_4k_arch_valid, PTArch, VMSAV8_4K_ARCH},
+    frame::{Frame, FrameSize},
 };
 
 verus! {
@@ -36,172 +35,76 @@ pub struct PageTableMem {
 }
 
 impl PageTableMem {
-    /// Root page table.
-    pub open spec fn root(self) -> Table {
-        self.tables[0]
+    /// Root page table address.
+    pub open spec fn root(self) -> PAddr {
+        self.tables[0].base
+    }
+
+    /// If the table with the given base address exists.
+    pub open spec fn contains_table(self, base: PAddr) -> bool {
+        exists|table: Table| #[trigger] self.tables.contains(table) && table.base == base
     }
 
     /// Get the table with the given base address.
     pub open spec fn table(self, base: PAddr) -> Table
         recommends
-            exists|table| #[trigger] self.tables.contains(table) && table.base == base,
+            self.contains_table(base),
     {
         choose|table: Table| #[trigger] self.tables.contains(table) && table.base == base
     }
 
     /// View a table as a sequence of entries.
-    pub open spec fn table_view(self, table: Table) -> Seq<u64>
+    pub open spec fn table_view(self, base: PAddr) -> Seq<u64>
         recommends
-            self.tables.contains(table),
+            self.contains_table(base),
     ;
 
+    /// If accessing the given table at the given index is allowed.
+    pub open spec fn accessible(self, base: PAddr, index: nat) -> bool {
+        self.contains_table(base) && index < self.arch.entry_count(self.table(base).level)
+    }
+
+    /// If the table is a leaf table.
+    pub open spec fn is_leaf(self, base: PAddr) -> bool {
+        self.contains_table(base) && self.table(base).level == self.arch.level_count() - 1
+    }
+
     /// Read the entry at the given index in the given table.
-    pub open spec fn read(self, table: Table, index: nat) -> u64
+    pub open spec fn read(self, base: PAddr, index: nat) -> u64
         recommends
-            self.tables.contains(table),
-            index < self.arch.entry_count(table.level),
+            self.accessible(base, index),
     {
-        self.table_view(table)[index as int]
+        self.table_view(base)[index as int]
     }
 
     /// Interpret as `(vbase, frame)` mappings.
     ///
     /// This function extracts all mappings that valid hardware page table walks can reach.
-    /// Hardware behavior is specified by the `walk` function.
-    pub open spec fn interpret(self) -> Map<VAddr, Frame> {
-        let max_vaddr: nat = 0x8000_0000;
-        Map::new(
-            |addr: VAddr|
-                addr.0 < max_vaddr && exists|frame: Frame| #[trigger]
-                    self.walk(nat_to_u64(addr.0), frame),
-            |addr: VAddr| choose|frame: Frame| #[trigger] self.walk(nat_to_u64(addr.0), frame),
-        )
-    }
-
-    /// Hardware behavior of a 4-level page table walk process.
-    ///
-    /// This function simulates the MMU's page table walk process and checks if the given
-    /// virtual address `addr` maps to the specified `frame` with the correct flags.
-    ///
-    /// Given a `PageTableMem` `pt_mem`, the predicate is true for those `addr` and `frame` where the
-    /// MMU's page table walk arrives at an entry mapping the frame `frame`, and the `pte.flags`
-    /// must reflect the properties along the translation path.
-    pub open spec fn walk(self, addr: u64, frame: Frame) -> bool {
-        match self.walk_level(addr, self.arch.level_count(), self.root(), true, false, false) {
-            Some(reached) => {
-                &&& reached.base == frame.base
-                &&& reached.size == frame.size
-                &&& reached.attr == frame.attr
-            },
-            None => false,
-        }
-    }
-
-    /// Recursive helper for page table walk.
-    ///
-    /// TODO: this function yet only supports 48-bit VA and 4-level page tables.
-    /// The implementation should correspond to the `arch` field.
-    pub closed spec fn walk_level(
-        self,
-        addr: u64,
-        level: nat,
-        table: Table,
-        user_ok: bool,
-        uxn_accum: bool,
-        pxn_accum: bool,
-    ) -> Option<Frame>
-        decreases level,
-    {
-        if level == 0 {
-            None
-        } else {
-            let level_shift = 3 + level * 9;
-            let index = (addr >> level_shift) & 0x1FF;
-            let pte = S1PTEntry(self.read(table, index as nat))@;
-            match pte {
-                GhostS1PTEntry::Table(desc) => {
-                    let new_user_ok = user_ok && desc.ap_user;
-                    let new_uxn = uxn_accum || desc.uxn;
-                    let new_pxn = pxn_accum || desc.pxn;
-                    let next_table = self.table(PAddr((desc.addr << 12) as nat));
-                    self.walk_level(
-                        addr,
-                        (level - 1) as nat,
-                        next_table,
-                        new_user_ok,
-                        new_uxn,
-                        new_pxn,
-                    )
-                },
-                GhostS1PTEntry::Page(page_desc) => {
-                    if level > 3 && page_desc.non_block {
-                        // Block must be at level 1-3, page only at level 1
-                        None
-                    } else {
-                        Some(
-                            Self::compute_frame(
-                                page_desc,
-                                level,
-                                addr,
-                                user_ok,
-                                uxn_accum,
-                                pxn_accum,
-                            ),
-                        )
-                    }
-                },
-                GhostS1PTEntry::Empty => None,
-            }
-        }
-    }
-
-    /// Compute physical address and flags for the reached frame.
-    spec fn compute_frame(
-        entry: GhostS1PageDescriptor,
-        level: nat,
-        addr: u64,
-        user_ok: bool,
-        uxn_accum: bool,
-        pxn_accum: bool,
-    ) -> Frame {
-        let size = if level == 3 {
-            FrameSize::Size1G
-        } else if level == 2 {
-            FrameSize::Size2M
-        } else {
-            FrameSize::Size4K
-        };
-        let offset_mask = (size.as_u64() - 1) as u64;
-        let base = PAddr(((entry.addr << 12) | (addr & offset_mask)) as nat);
-        let attr = FrameAttr {
-            readable: true,
-            writable: entry.ap_rw,
-            // NOTE: VMSA-v8 differentiates between user-executable and kernel-executable
-            // We don't have this distinction yet, so we just use the user-executable bit
-            executable: !(uxn_accum || entry.xn),
-            user_accessible: user_ok && entry.ap_user,
-        };
-        Frame { base, size, attr }
-    }
+    /// Hardware behavior is not specified yet.
+    pub open spec fn interpret(self) -> Map<VAddr, Frame>;
 
     /// Invariants.
     pub open spec fn invariants(self) -> bool {
         &&& self.arch.valid()
         // Root table is always present.
         &&& self.tables.len() > 0
-        // Table size is valid.
+        // Table level is valid.
         &&& forall|table: Table| #[trigger]
-            self.tables.contains(table) ==> table.size.as_nat() == self.arch.table_size(
-                table.level,
+            self.tables.contains(table) ==> table.level
+                < self.arch.level_count()
+        // Table size is valid.
+        &&& forall|i|
+            0 <= i < self.tables.len() ==> #[trigger] self.tables[i].size.as_nat()
+                == self.arch.table_size(
+                self.tables[i].level,
             )
         // All tables should not overlap.
-        &&& forall|table1: Table, table2: Table| #[trigger]
-            self.tables.contains(table1) && #[trigger] self.tables.contains(table2)
-                ==> !PAddr::overlap(
-                table1.base,
-                table1.size.as_nat(),
-                table2.base,
-                table2.size.as_nat(),
+        &&& forall|i, j|
+            0 <= i < self.tables.len() && 0 <= j < self.tables.len() ==> i == j || !PAddr::overlap(
+                self.tables[i].base,
+                self.tables[i].size.as_nat(),
+                self.tables[j].base,
+                self.tables[j].size.as_nat(),
             )
     }
 
@@ -209,33 +112,120 @@ impl PageTableMem {
     pub open spec fn init(self) -> bool {
         &&& self.arch.valid()
         &&& self.tables.len() == 1
-        &&& self.root().size.as_nat() == self.arch.table_size(0)
+        &&& self.tables[0].size.as_nat() == self.arch.table_size(0)
     }
 
     /// Alloc a new table.
-    pub open spec fn alloc_table(s1: Self, s2: Self, level: nat, res: Table) -> bool {
+    pub open spec fn alloc_table(s1: Self, s2: Self, level: nat, table: Table) -> bool {
         &&& s2.arch == s1.arch
         // `s1` doesn't have the table
-        &&& !s1.tables.contains(res)
-        // update `tables`
-        &&& s2.tables == s1.tables.push(res)
-        // check size
-        &&& res.size.as_nat() == s1.arch.table_size(
+        &&& !s1.tables.contains(table)
+        // new table has valid level
+        &&& table.level == level
+        &&& 0 < level < s1.arch.level_count()
+        // new table has valid size
+        &&& table.size.as_nat() == s1.arch.table_size(
             level,
         )
         // new table is aligned
-        &&& res.base.aligned(res.size.as_nat())
+        &&& table.base.aligned(table.size.as_nat())
         // new table is empty
-        &&& s2.table_view(res) == Seq::<u64>::empty()
+        &&& s2.table_view(table.base)
+            == seq![0u64; s1.arch.entry_count(level)]
+        // new table doesn't overlap with existing tables
+        &&& forall|i|
+            #![auto]
+            0 <= i < s1.tables.len() ==> !PAddr::overlap(
+                s1.tables[i].base,
+                s1.tables[i].size.as_nat(),
+                table.base,
+                table.size.as_nat(),
+            )
+            // `tables` is updated
+        &&& s2.tables == s1.tables.push(table)
     }
 
-    /// Dealloc a table.
-    pub open spec fn dealloc_table(s1: Self, s2: Self, table: Table) -> bool {
+    /// Write the entry at the given index in the given table.
+    pub open spec fn write(s1: Self, s2: Self, base: PAddr, index: nat, entry: u64) -> bool {
         &&& s2.arch == s1.arch
-        // `s1` has the table
-        &&& s1.tables.contains(table)
-        // update `tables`
-        &&& s2.tables == s1.tables.remove_value(table)
+        // Tables are the same
+        &&& s2.tables == s1.tables
+        // The entry is accessible
+        &&& s1.accessible(base, index)
+        // The entry is updated
+        &&& s2.table_view(base) == s1.table_view(base).update(index as int, entry)
+    }
+
+    /// Lemma. Always contains a root table.
+    pub proof fn lemma_contains_root(self)
+        requires
+            self.invariants(),
+        ensures
+            self.contains_table(self.root()),
+    {
+        assert(self.tables.contains(self.tables[0]));
+    }
+
+    /// Lemma. Different tables have different base addresses.
+    pub proof fn lemma_table_base_unique(self)
+        requires
+            self.invariants(),
+        ensures
+            forall|i, j|
+                #![auto]
+                0 <= i < self.tables.len() && 0 <= j < self.tables.len() ==> i == j
+                    || self.tables[i].base != self.tables[j].base,
+    {
+        assert forall|i, j|
+            #![auto]
+            0 <= i < self.tables.len() && 0 <= j < self.tables.len() implies i == j
+            || self.tables[i].base != self.tables[j].base by {
+            if i != j && self.tables[i].base == self.tables[j].base {
+                assert(PAddr::overlap(
+                    self.tables[i].base,
+                    self.tables[i].size.as_nat(),
+                    self.tables[j].base,
+                    self.tables[j].size.as_nat(),
+                ));
+            }
+        }
+    }
+
+    /// Lemma. `alloc_table` preserves invariants.
+    pub proof fn lemma_alloc_table_preserves_invariants(
+        s1: Self,
+        s2: Self,
+        level: nat,
+        table: Table,
+    )
+        requires
+            s1.invariants(),
+            Self::alloc_table(s1, s2, level, table),
+        ensures
+            s2.invariants(),
+    {
+        assert forall|table2: Table| #[trigger] s2.tables.contains(table2) implies table2.level
+            < s2.arch.level_count() by {
+            if table2 != table {
+                assert(s1.tables.contains(table2));
+            }
+        }
+    }
+
+    /// Lemma. `write` preserves invariants.
+    pub proof fn lemma_write_preserves_invariants(
+        s1: Self,
+        s2: Self,
+        base: PAddr,
+        index: nat,
+        entry: u64,
+    )
+        requires
+            s1.invariants(),
+            Self::write(s1, s2, base, index, entry),
+        ensures
+            s2.invariants(),
+    {
     }
 }
 
@@ -276,6 +266,26 @@ impl PageTableMemExec {
         }
     }
 
+    /// Physical address of the root page table.
+    pub fn root(&self) -> PAddrExec
+        requires
+            self.tables.len() > 0,
+    {
+        self.tables[0].base
+    }
+
+    /// An empty page table memory that only contains root table.
+    pub fn new_vmsav8_4k(root: PAddrExec) -> (res: Self)
+        ensures
+            res@.init(),
+    {
+        let root_table = TableExec { base: root, size: FrameSize::Size4K, level: Ghost(0) };
+        proof {
+            lemma_vmsav8_4k_arch_valid();
+        }
+        Self { tables: vec![root_table], arch: Ghost(VMSAV8_4K_ARCH) }
+    }
+
     /// Alloc a new table and returns the table descriptor.
     ///
     /// Assumption: To satisfy the post-condition we need to assume the correctness of
@@ -291,257 +301,32 @@ impl PageTableMemExec {
         unreached()
     }
 
-    /// Dealloc a table.
-    ///
-    /// Assumption: To satisfy the post-condition we need to assume the correctness of
-    /// the memory allocator, which may be verified in the future work.
-    #[verifier::external_body]
-    pub fn dealloc_table(&mut self, table: TableExec)
-        requires
-            old(self)@.invariants(),
-        ensures
-            self@.invariants(),
-            PageTableMem::dealloc_table(old(self)@, self@, table@),
-    {
-        unreached()
-    }
-
     /// Get the value at the given index in the given table.
     ///
-    /// Assumption: Raw memory access is assumed to be valid.
+    /// Assumption: Raw memory access is assumed to be correct.
     #[verifier::external_body]
     pub fn read(&self, base: PAddrExec, index: usize) -> (res: u64)
         requires
-            exists|table: Table| #[trigger] self@.tables.contains(table) && table.base == base@,
-            ({
-                let table = choose|table: Table| #[trigger]
-                    self@.tables.contains(table) && table.base == base@;
-                index < self@.table_view(table).len()
-            }),
+            self@.invariants(),
+            self@.accessible(base@, index as nat),
         ensures
-            ({
-                let table = choose|table: Table| #[trigger]
-                    self@.tables.contains(table) && table.base == base@;
-                self@.table_view(table)[index as int] == res
-            }),
+            self@.read(base@, index as nat) == res,
     {
         unsafe { (base.0 as *const u64).offset(index as isize).read_volatile() }
     }
 
     /// Write the value to the given index in the given table.
     ///
-    /// Assumption: Raw memory access is assumed to be valid.
+    /// Assumption: Raw memory access is assumed to be correct.
     #[verifier::external_body]
-    pub fn write(&self, base: PAddrExec, index: usize, value: u64)
+    pub fn write(&mut self, base: PAddrExec, index: usize, value: u64)
         requires
-            exists|table: Table| #[trigger] self@.tables.contains(table) && table.base == base@,
-            ({
-                let table = choose|table: Table| #[trigger]
-                    self@.tables.contains(table) && table.base == base@;
-                index < self@.table_view(table).len()
-            }),
+            old(self)@.invariants(),
+            old(self)@.accessible(base@, index as nat),
         ensures
-            ({
-                let table = choose|table: Table| #[trigger]
-                    self@.tables.contains(table) && table.base == base@;
-                self@.table_view(table)[index as int] == value
-            }),
+            PageTableMem::write(old(self)@, self@, base@, index as nat, value),
     {
         unsafe { (base.0 as *mut u64).offset(index as isize).write_volatile(value) }
-    }
-}
-
-/// Abstract stage 1 VMSAv8-64 Table descriptor.
-pub ghost struct GhostS1TableDescriptor {
-    /// Physical address of the table
-    pub addr: u64,
-    /// Accessed flag (AF) - indicates if table has been accessed
-    pub accessed: bool,
-    /// Non-secure bit - security state attribution
-    pub ns: bool,
-    /// Access permissions for next level (APTable):
-    /// false = Privileged access only, true = User accessible
-    pub ap_user: bool,
-    /// Execute permission for next level:
-    /// Privileged Execute Never (PXN)
-    pub pxn: bool,
-    /// Execute permission for next level:
-    /// User Execute Never (UXN)
-    pub uxn: bool,
-}
-
-/// Abstract stage 1 VMSAv8-64 Page & Block descriptor.
-pub ghost struct GhostS1PageDescriptor {
-    /// Physical address of the page or block
-    pub addr: u64,
-    /// Block or page flag (true = Page, false = Block)
-    pub non_block: bool,
-    /// Accessed flag (AF)
-    pub accessed: bool,
-    /// Hardware managed dirty flag (DBM)
-    pub dirty: bool,
-    /// Access permissions:
-    /// AP[2:1] encoded (false = ReadOnly, true = ReadWrite)
-    pub ap_rw: bool,
-    /// Access permissions:
-    /// AP[0] encoded (false = Kernel only, true = User accessible)
-    pub ap_user: bool,
-    /// Memory attributes index (AttrIndx)
-    pub attr_indx: u8,
-    /// Execute Never (XN)
-    pub xn: bool,
-    /// Contiguous bit hint
-    pub contiguous: bool,
-    /// Non-secure bit
-    pub ns: bool,
-}
-
-/// Abstract page table entry.
-pub ghost enum GhostS1PTEntry {
-    /// Points to next level page table
-    Table(GhostS1TableDescriptor),
-    /// Maps physical page/block with attributes
-    Page(GhostS1PageDescriptor),
-    /// Invalid/empty entry
-    Empty,
-}
-
-/// Concrete stage-1 page table entry, wrapping a 64-bit value.
-pub struct S1PTEntry(pub u64);
-
-impl S1PTEntry {
-    /// Maps the concrete page table entry to its abstract representation.
-    ///
-    /// # Returns
-    /// - `GhostPTEntry::Table` if the entry is a valid table descriptor.
-    /// - `GhostPTEntry::Page` if the entry is a valid page/block descriptor.
-    /// - `GhostPTEntry::Empty` if the entry is invalid or empty.
-    pub open spec fn view(self) -> GhostS1PTEntry {
-        let value = self.0;
-        if value & 0x1 == 0 {
-            GhostS1PTEntry::Empty
-        } else {
-            if value & 0x2 != 0 {
-                let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
-                let accessed = (value & (1u64 << 10)) != 0;
-                let ns = (value & (1u64 << 5)) != 0;
-                let ap_user = (value & (1u64 << 6)) != 0;
-                let pxn = (value & (1u64 << 59)) != 0;
-                let uxn = (value & (1u64 << 60)) != 0;
-                GhostS1PTEntry::Table(
-                    GhostS1TableDescriptor { addr, accessed, ns, ap_user, pxn, uxn },
-                )
-            } else {
-                let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
-                let non_block = (value & (1u64 << 1)) != 0;
-                let accessed = (value & (1u64 << 10)) != 0;
-                let dirty = (value & (1u64 << 55)) != 0;
-                let ap_rw = (value & (1u64 << 7)) != 0;
-                let ap_user = (value & (1u64 << 6)) != 0;
-                let attr_indx = ((value >> 2) & 0x7) as u8;
-                let xn = (value & (1u64 << 54)) != 0;
-                let contiguous = (value & (1u64 << 52)) != 0;
-                let ns = (value & (1u64 << 5)) != 0;
-                GhostS1PTEntry::Page(
-                    GhostS1PageDescriptor {
-                        addr,
-                        non_block,
-                        accessed,
-                        dirty,
-                        ap_rw,
-                        ap_user,
-                        attr_indx,
-                        xn,
-                        contiguous,
-                        ns,
-                    },
-                )
-            }
-        }
-    }
-}
-
-/// Abstract stage 2 VMSAv8-64 Table descriptor.
-pub ghost struct GhostS2TableDescriptor {
-    /// Next-level table address
-    pub addr: u64,
-    /// Stage 2 Access Permissions (S2AP) for next level: 2 bits
-    pub s2ap: u8,
-    /// Shareability (SH) attributes: 2 bits
-    pub sh: u8,
-    /// Accessed flag (AF)
-    pub af: bool,
-    /// Non-secure bit
-    pub ns: bool,
-}
-
-/// Abstract stage 2 VMSAv8-64 Page & Block descriptor.
-pub ghost struct GhostS2PageDescriptor {
-    /// Physical address of the page or block
-    pub addr: u64,
-    /// Page/Block type (true = Page, false = Block)
-    pub is_page: bool,
-    /// Stage 2 Access Permissions (S2AP): 2 bits
-    pub s2ap: u8,
-    /// Shareability (SH) attributes: 2 bits
-    pub sh: u8,
-    /// Accessed flag (AF)
-    pub af: bool,
-    /// Memory attributes index (AttrIndx)
-    pub attr_indx: u8,
-    /// Non-secure bit
-    pub ns: bool,
-}
-
-/// Abstract stage 2 page table entry.
-pub ghost enum GhostS2PTEntry {
-    /// Points to next level page table
-    Table(GhostS2TableDescriptor),
-    /// Maps physical page/block with attributes
-    Page(GhostS2PageDescriptor),
-    /// Invalid/empty entry
-    Empty,
-}
-
-/// Concrete page table entry.
-pub struct S2PTEntry(pub u64);
-
-impl S2PTEntry {
-    /// Maps the concrete page table entry to its abstract representation.
-    pub open spec fn view(self) -> GhostS2PTEntry {
-        let value = self.0;
-        if value & 0x1 == 0 {
-            GhostS2PTEntry::Empty
-        } else if (value & 0x3) == 0x3 {
-            // Table descriptor (S2AP[1:0], SH[1:0], AF, NS)
-            let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
-            let s2ap = ((value >> 6) & 0x3) as u8;
-            let sh = ((value >> 8) & 0x3) as u8;
-            let af = (value & (1 << 10) as u64) != 0;
-            let ns = (value & (1 << 5) as u64) != 0;
-            GhostS2PTEntry::Table(GhostS2TableDescriptor { addr, s2ap, sh, af, ns })
-        } else if (value & 0x3) == 0x1 {
-            // Block/Page descriptor (S2AP[1:0], SH[1:0], AF, AttrIndx, NS)
-            let addr = (value & 0x0000_FFFF_FFFF_F000) >> 12;
-            let s2ap = ((value >> 6) & 0x3) as u8;
-            let sh = ((value >> 8) & 0x3) as u8;
-            let af = (value & (1 << 10) as u64) != 0;
-            let attr_indx = ((value >> 2) & 0x7) as u8;
-            let ns = (value & (1 << 5) as u64) != 0;
-            GhostS2PTEntry::Page(
-                GhostS2PageDescriptor {
-                    addr,
-                    is_page: false,  // 0x1 indicates Block
-                    s2ap,
-                    sh,
-                    af,
-                    attr_indx,
-                    ns,
-                },
-            )
-        } else {
-            GhostS2PTEntry::Empty
-        }
     }
 }
 
