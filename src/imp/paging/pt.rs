@@ -4,11 +4,15 @@ use vstd::prelude::*;
 
 use super::{addr::pte_index, pte::GenericPTE};
 use crate::{
-    imp::tree::PTTreeModel,
+    imp::tree::{
+        model::PTTreeModel,
+        node::{NodeEntry, PTConfig, PTTreeNode},
+        path::PTTreePath,
+    },
     spec::{
         addr::{PAddr, PAddrExec, VAddr, VAddrExec},
         arch::{PTArch, VMSAV8_4K_ARCH},
-        frame::{FrameExec, FrameSize},
+        frame::{Frame, FrameExec, FrameSize},
         pt_mem::PageTableMemExec,
     },
 };
@@ -24,6 +28,10 @@ pub struct PageTable<PTE: GenericPTE> {
     pub pt_mem: PageTableMemExec,
     /// Phantom data.
     pub _phantom: PhantomData<PTE>,
+    /// Physical memory lower bound.
+    pub pmem_lb: PAddrExec,
+    /// Physical memory upper bound.
+    pub pmem_ub: PAddrExec,
 }
 
 impl<PTE> PageTable<PTE> where PTE: GenericPTE {
@@ -41,19 +49,98 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         // Each table descriptor that can be accessed must point to a valid table
         &&& forall|base: PAddr, idx: nat|
             self.pt_mem@.accessible(base, idx) ==> {
-                let table = self.pt_mem@.table(base);
-                let pte = PTE::spec_from_u64(self.pt_mem@.read(base, idx));
+                let pt_mem = self.pt_mem@;
+                let table = pt_mem.table(base);
+                let pte = PTE::spec_from_u64(pt_mem.read(base, idx));
                 // If `base` is not a leaf table, `pte` is valid and points to a table...
                 // then `pt_mem` contains the table, and the table level is one level higher than `base`
                 ({
-                    &&& !self.pt_mem@.is_leaf(base)
+                    &&& table.level != self.arch().level_count()
                     &&& pte.spec_valid()
                     &&& !pte.spec_huge()
                 }) ==> {
-                    &&& self.pt_mem@.contains_table(pte.spec_addr())
-                    &&& self.pt_mem@.table(pte.spec_addr()).level == self.pt_mem@.table(base).level + 1
+                    &&& pt_mem.contains_table(pte.spec_addr())
+                    &&& pt_mem.table(pte.spec_addr()).level == pt_mem.table(base).level + 1
                 }
             }
+    }
+
+    /// View as a page table tree model.
+    pub open spec fn view(self) -> PTTreeModel
+        recommends
+            self.invariants(),
+    {
+        PTTreeModel { root: self.build_node(self.pt_mem@.root(), 0) }
+    }
+
+    /// Build a `PTTreeNode` for a sub-table
+    pub open spec fn build_node(self, base: PAddr, level: nat) -> PTTreeNode
+        recommends
+            self.invariants(),
+            self.pt_mem@.contains_table(base),
+            level == self.pt_mem@.table(base).level,
+            level < self.arch().level_count(),
+        decreases self.arch().level_count() - level,
+    {
+        let arch = self.arch();
+        let pt_mem = self.pt_mem.view();
+        let table = pt_mem.table(base);
+        // Construct entries for the node
+        let entries = if level >= arch.level_count() - 1 {
+            // Leaf table
+            Seq::new(
+                arch.entry_count(level),
+                |i|
+                    {
+                        let pte = PTE::spec_from_u64(pt_mem.read(base, i as nat));
+                        if pte.spec_valid() {
+                            // Page descriptor
+                            NodeEntry::Frame(
+                                Frame {
+                                    base: pte.spec_addr(),
+                                    size: arch.frame_size(level),
+                                    attr: pte.spec_attr(),
+                                },
+                            )
+                        } else {
+                            // Invalid entry
+                            NodeEntry::Empty
+                        }
+                    },
+            )
+        } else {
+            // Intermediate table
+            Seq::new(
+                arch.entry_count(level),
+                |i|
+                    {
+                        let pte = PTE::spec_from_u64(pt_mem.read(base, i as nat));
+                        if pte.spec_valid() {
+                            if pte.spec_huge() {
+                                // Block descriptor
+                                NodeEntry::Frame(
+                                    Frame {
+                                        base: pte.spec_addr(),
+                                        size: arch.frame_size(level),
+                                        attr: pte.spec_attr(),
+                                    },
+                                )
+                            } else {
+                                // Table descriptor, recursively build node
+                                NodeEntry::Node(self.build_node(pte.spec_addr(), level + 1))
+                            }
+                        } else {
+                            // Invalid entry
+                            NodeEntry::Empty
+                        }
+                    },
+            )
+        };
+        PTTreeNode {
+            config: PTConfig { arch, pmem_lb: self.pmem_lb@, pmem_ub: self.pmem_ub@ },
+            level,
+            entries,
+        }
     }
 
     /// Get a page table entry and its level with virtual address, terminate if reach an invalid
@@ -122,8 +209,8 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         if !p0e.valid() || p0e.huge() {
             return (p0e, 0);
         }
-
         // Invariants ensures the following access are valid
+
         let p1e = PTE::from_u64(self.pt_mem.read(p0e.addr(), pte_index(vaddr, 1)));
         if !p1e.valid() || p1e.huge() {
             return (p1e, 1);
@@ -135,7 +222,6 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let p3e = PTE::from_u64(self.pt_mem.read(p2e.addr(), pte_index(vaddr, 3)));
         (p3e, 3)
     }
-
     // fn new(pt_mem: PageTableMemExec) -> Self {
     //     Self { pt_mem }
     // }

@@ -69,11 +69,6 @@ impl PageTableMem {
         self.contains_table(base) && index < self.arch.entry_count(self.table(base).level)
     }
 
-    /// If the table is a leaf table.
-    pub open spec fn is_leaf(self, base: PAddr) -> bool {
-        self.contains_table(base) && self.table(base).level == self.arch.level_count() - 1
-    }
-
     /// Read the entry at the given index in the given table.
     pub open spec fn read(self, base: PAddr, index: nat) -> u64
         recommends
