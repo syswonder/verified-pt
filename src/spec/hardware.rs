@@ -1,6 +1,6 @@
 //! Hardware specification.
 //!
-//！This module defines the abstract hardware state and its transition behaviors during memory
+//！This module defines the abstract hardware state and the hardware behavior during memory
 //！operations. The hardware state includes:
 //！
 //！- **Physical memory**
@@ -14,7 +14,7 @@
 //！in memory translations. This specification underpins the entire verification process.
 use vstd::prelude::*;
 
-use super::{
+use crate::common::{
     addr::{PIdx, VAddr, WORD_SIZE},
     frame::Frame,
     pt_mem::PageTableMem,

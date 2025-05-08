@@ -3,12 +3,12 @@ use vstd::prelude::*;
 
 use super::path::PTTreePath;
 use crate::{
-    imp::lemmas::lemma_map_eq_pair,
-    spec::{
+    common::{
         addr::{PAddr, VAddr},
         arch::PTArch,
         frame::Frame,
     },
+    imp::lemmas::lemma_map_eq_pair,
 };
 
 verus! {

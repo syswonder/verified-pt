@@ -6,13 +6,13 @@ use super::{
     path::PTTreePath,
 };
 use crate::{
-    imp::lemmas::lemma_map_eq_pair,
-    spec::{
+    common::{
         addr::{PAddr, VAddr},
         arch::PTArch,
         frame::Frame,
-        pt_spec::{PTConstants, PageTableState},
     },
+    imp::lemmas::lemma_map_eq_pair,
+    spec::pt_spec::{PTConstants, PageTableState},
 };
 
 verus! {

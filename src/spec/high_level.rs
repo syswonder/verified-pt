@@ -12,7 +12,7 @@
 //! by the proof that the low-level state machine refines this specification.
 use vstd::prelude::*;
 
-use super::{
+use crate::common::{
     addr::{PAddr, PIdx, VAddr, VIdx, WORD_SIZE},
     arch::PTArch,
     frame::Frame,

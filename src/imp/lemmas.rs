@@ -1,7 +1,7 @@
 //! Basic lemmas used by the proof.
 use vstd::prelude::*;
 
-use crate::spec::{
+use crate::common::{
     addr::{PAddr, VAddr, WORD_SIZE},
     frame::{Frame, FrameSize},
 };

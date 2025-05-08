@@ -1,4 +1,4 @@
-use crate::spec::{
+use crate::common::{
     addr::{PAddr, PAddrExec},
     frame::MemAttr,
 };

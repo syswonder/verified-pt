@@ -7,7 +7,7 @@
 //! This module is not trusted (not a proof base).
 use vstd::prelude::*;
 
-use super::{
+use crate::common::{
     addr::{PAddr, VAddr, VAddrExec, WORD_SIZE},
     arch::PTArch,
     frame::{Frame, FrameExec},

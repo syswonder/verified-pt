@@ -1,5 +1,5 @@
 //! Helpers for calculating addresses and indices.
-use crate::spec::{addr::VAddrExec, arch::VMSAV8_4K_ARCH};
+use crate::common::{addr::VAddrExec, arch::VMSAV8_4K_ARCH};
 use vstd::prelude::*;
 
 verus! {

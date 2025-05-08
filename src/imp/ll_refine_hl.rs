@@ -2,12 +2,11 @@
 use vstd::prelude::*;
 
 use super::lemmas::*;
-use crate::spec::{
+use crate::common::{
     addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     frame::Frame,
-    high_level::HighLevelState,
-    low_level::LowLevelState,
 };
+use crate::spec::{high_level::HighLevelState, low_level::LowLevelState};
 
 verus! {
 

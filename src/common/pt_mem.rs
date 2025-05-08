@@ -2,7 +2,7 @@
 //!
 //! Page table memory is a memory region that stores page tables, allocated by the memory allocator.
 //! Hardware access page table memory and performs page table walks to translate VA to PA.
-//! To obtain some properties of page table memory, the correctness of the moemory allocator and raw
+//! To obtain some properties of page table memory, the correctness of the memory allocator and raw
 //! memory access is assumed.
 //!
 //! Page table memory is designed to be architecture independent, but yet only supports VMSAv8-64.

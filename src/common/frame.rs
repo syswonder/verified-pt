@@ -1,4 +1,4 @@
-//! Memory related structs and functions.
+//! Physical frame defination.
 use vstd::prelude::*;
 
 use super::addr::{PAddr, PAddrExec};

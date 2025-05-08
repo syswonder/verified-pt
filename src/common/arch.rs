@@ -1,4 +1,8 @@
 //! Page table architecture specifications.
+//! 
+//! Page table architecture specifies the hierarchical structure of a page table, including the 
+//! number of query levels, the number of entries at each level, and the frame size associated
+//! with a block/page descriptor.
 use vstd::prelude::*;
 
 use super::{addr::VAddr, frame::FrameSize};
@@ -89,16 +93,6 @@ impl PTArch {
         &&& forall|level: nat|
             1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()
                 == self.frame_size(level).as_nat() * self.entry_count(level)
-    }
-
-    /// Lemma. PTE index is less than entry count.
-    pub proof fn lemma_pte_index_less_than_entry_count(self, vaddr: VAddr, level: nat)
-        requires
-            self.valid(),
-            level < self.level_count(),
-        ensures
-            self.pte_index(vaddr, level) < self.entry_count(level),
-    {
     }
 
     /// Lemma (helper). a > 0, b > 1 implies a * b > a.
