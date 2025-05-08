@@ -40,6 +40,11 @@ impl PageTableMem {
         self.tables[0].base
     }
 
+    /// Root page table.
+    pub open spec fn root_table(self) -> Table {
+        self.tables[0]
+    }
+
     /// If the table with the given base address exists.
     pub open spec fn contains_table(self, base: PAddr) -> bool {
         exists|table: Table| #[trigger] self.tables.contains(table) && table.base == base
@@ -88,6 +93,8 @@ impl PageTableMem {
         &&& self.arch.valid()
         // Root table is always present.
         &&& self.tables.len() > 0
+        // Root table level is 0
+        &&& self.tables[0].level == 0
         // Table level is valid.
         &&& forall|table: Table| #[trigger]
             self.tables.contains(table) ==> table.level
@@ -164,6 +171,19 @@ impl PageTableMem {
             self.contains_table(self.root()),
     {
         assert(self.tables.contains(self.tables[0]));
+    }
+
+    /// Lemma. If table exists, and the index used to access table is acquired by `pte_index`,
+    /// then the entry is accessible.
+    pub proof fn lemma_accessible(self, base: PAddr, vaddr: VAddr, level: nat)
+        requires
+            self.invariants(),
+            self.contains_table(base),
+            self.table(base).level == level,
+            level < self.arch.level_count(),
+        ensures
+            self.accessible(base, self.arch.pte_index(vaddr, level)),
+    {
     }
 
     /// Lemma. Different tables have different base addresses.
@@ -267,9 +287,11 @@ impl PageTableMemExec {
     }
 
     /// Physical address of the root page table.
-    pub fn root(&self) -> PAddrExec
+    pub fn root(&self) -> (res: PAddrExec)
         requires
             self.tables.len() > 0,
+        ensures
+            res@ == self@.root(),
     {
         self.tables[0].base
     }

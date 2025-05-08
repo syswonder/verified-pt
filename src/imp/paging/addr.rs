@@ -11,7 +11,7 @@ pub fn pte_index(vaddr: VAddrExec, level: usize) -> (res: usize)
     requires
         0 <= level <= 3,
     ensures
-        VMSAV8_4K_ARCH.pte_index_of_va(vaddr@, level as nat) == res as nat,
+        VMSAV8_4K_ARCH.pte_index(vaddr@, level as nat) == res as nat,
 {
     // Use division instead of bit shifts to avoid verus failure
     if level == 0 {

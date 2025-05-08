@@ -69,7 +69,7 @@ impl PTArch {
     }
 
     /// Calculates the page table entry index for a virtual address at the specified level.
-    pub open spec fn pte_index_of_va(self, vaddr: VAddr, level: nat) -> nat
+    pub open spec fn pte_index(self, vaddr: VAddr, level: nat) -> nat
         recommends
             self.valid(),
             level < self.level_count(),
@@ -89,6 +89,16 @@ impl PTArch {
         &&& forall|level: nat|
             1 <= level < self.level_count() ==> self.frame_size((level - 1) as nat).as_nat()
                 == self.frame_size(level).as_nat() * self.entry_count(level)
+    }
+
+    /// Lemma. PTE index is less than entry count.
+    pub proof fn lemma_pte_index_less_than_entry_count(self, vaddr: VAddr, level: nat)
+        requires
+            self.valid(),
+            level < self.level_count(),
+        ensures
+            self.pte_index(vaddr, level) < self.entry_count(level),
+    {
     }
 
     /// Lemma (helper). a > 0, b > 1 implies a * b > a.

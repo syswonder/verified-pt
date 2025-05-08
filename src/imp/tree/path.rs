@@ -71,7 +71,7 @@ impl PTTreePath {
             arch.valid(),
             level < arch.level_count(),
     {
-        Self(Seq::new(level + 1, |i: int| arch.pte_index_of_va(vaddr, i as nat)))
+        Self(Seq::new(level + 1, |i: int| arch.pte_index(vaddr, i as nat)))
     }
 
     /// Calculate the virtual address corresponding to the path from root.
@@ -181,11 +181,7 @@ impl PTTreePath {
         let path = Self::from_vaddr(vaddr, arch, level);
         assert forall|i: int| 0 <= i < path.len() implies path.0[i] < arch.entry_count(
             i as nat,
-        ) by {
-            // TODO: Verus cannot imply (a % b) < b
-            // See: https://verus-lang.github.io/verus/guide/nonlinear.html
-            assume(arch.pte_index_of_va(vaddr, i as nat) < arch.entry_count(i as nat))
-        }
+        ) by { assert(arch.pte_index(vaddr, i as nat) < arch.entry_count(i as nat)) }
     }
 
     /// Lemma. The address computed by `to_vaddr` is aligned to the frame size of the last level.
@@ -420,8 +416,9 @@ impl PTTreePath {
             |i: int| path.0[i] * arch.frame_size(i as nat).as_nat(),
         );
         assert(forall|i|
-            0 <= i < path.len() ==> parts[i] == arch.pte_index_of_va(vaddr, i as nat)
-                * arch.frame_size(i as nat).as_nat());
+            0 <= i < path.len() ==> parts[i] == arch.pte_index(vaddr, i as nat) * arch.frame_size(
+                i as nat,
+            ).as_nat());
         // TODO consider add a lemma to `PTArch`
         assume(false);
     }
