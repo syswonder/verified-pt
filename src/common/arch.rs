@@ -1,6 +1,6 @@
 //! Page table architecture specifications.
-//! 
-//! Page table architecture specifies the hierarchical structure of a page table, including the 
+//!
+//! Page table architecture specifies the hierarchical structure of a page table, including the
 //! number of query levels, the number of entries at each level, and the frame size associated
 //! with a block/page descriptor.
 use vstd::prelude::*;

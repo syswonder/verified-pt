@@ -2,13 +2,12 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::{addr::pte_index, pte::GenericPTE};
+use super::{addr::pte_index, pt_mem::PageTableMemExec, pte::GenericPTE};
 use crate::{
     common::{
         addr::{PAddr, PAddrExec, VAddr, VAddrExec},
         arch::{PTArch, VMSAV8_4K_ARCH},
         frame::{Frame, FrameSize},
-        pt_mem::PageTableMemExec,
     },
     imp::tree::{
         model::PTTreeModel,

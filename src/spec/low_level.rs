@@ -10,7 +10,7 @@
 use vstd::prelude::*;
 
 use super::{
-    hardware::{HardwareState, PhysMem, TLB},
+    hardware::{HardwareState, PageTableMem, PhysMem, TLB},
     high_level::{HighLevelConstants, HighLevelState},
     pt_spec::{PTConstants, PageTableState},
 };
@@ -18,7 +18,6 @@ use crate::common::{
     addr::{PAddr, VAddr, VIdx},
     arch::PTArch,
     frame::Frame,
-    pt_mem::PageTableMem,
 };
 
 verus! {
@@ -144,6 +143,12 @@ impl LowLevelState {
 
 /// State Invariants.
 impl LowLevelState {
+    /// Page table memory is valid.
+    pub open spec fn pt_mem_valid(self) -> bool {
+        &&& self.pt.arch == self.constants.arch
+        &&& self.pt.invariants()
+    }
+
     /// All frames are within the physical memory bounds.
     pub open spec fn frames_within_pmem(self) -> bool {
         forall|vbase: VAddr, frame: Frame| #[trigger]
@@ -197,6 +202,7 @@ impl LowLevelState {
     /// OS state invariants.
     pub open spec fn invariants(self) -> bool {
         &&& self.constants.arch.valid()
+        &&& self.pt_mem_valid()
         &&& self.frames_within_pmem()
         &&& self.mappings_aligned()
         &&& self.mappings_nonoverlap_in_vmem()
