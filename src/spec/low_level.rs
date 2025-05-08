@@ -25,13 +25,13 @@ verus! {
 
 /// Low-level Memory State, which includes
 ///
-/// - Common memory: Memory used by the OS and applications.
-/// - Page table: Stage 1 page table.
-/// - TLB: Translation Lookaside Buffer.
+/// - Common memory: memory used by the OS and applications.
+/// - Page table memory: memory region that stores page tables.
+/// - TLB: translation Lookaside Buffer.
 pub struct LowLevelState {
     /// Physical memory.
     pub mem: PhysMem,
-    /// Page table.
+    /// Page table memory.
     pub pt: PageTableMem,
     /// Translation Lookaside Buffer.
     pub tlb: TLB,
