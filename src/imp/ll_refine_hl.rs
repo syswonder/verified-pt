@@ -5,6 +5,7 @@ use super::lemmas::*;
 use crate::common::{
     addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     frame::Frame,
+    PagingResult, MemoryResult,
 };
 use crate::spec::{high_level::HighLevelState, low_level::LowLevelState};
 
@@ -278,7 +279,7 @@ proof fn ll_read_preserves_invariants(
     s1: LowLevelState,
     s2: LowLevelState,
     vaddr: VAddr,
-    res: Result<u64, ()>,
+    res: MemoryResult<u64>,
 )
     requires
         s1.invariants(),
@@ -294,7 +295,7 @@ proof fn ll_read_refines_hl_read(
     s1: LowLevelState,
     s2: LowLevelState,
     vaddr: VAddr,
-    res: Result<u64, ()>,
+    res: MemoryResult<u64>,
 )
     requires
         s1.invariants(),
@@ -320,7 +321,7 @@ proof fn ll_read_refines_hl_read(
             assert(s1.interpret_mem()[vaddr.idx()] === s1.mem.read(pidx));
             assert(res is Ok);
         } else {
-            assert(res is Err);
+            assert(res is PageFault);
         }
     } else {
         if s1.hw_state().tlb_has_mapping_for(vaddr) {
@@ -328,7 +329,7 @@ proof fn ll_read_refines_hl_read(
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
         assert(!s1.has_mapping_for(vaddr));
-        assert(res is Err);
+        assert(res is PageFault);
     }
 }
 
@@ -338,7 +339,7 @@ proof fn ll_write_preserves_invariants(
     s2: LowLevelState,
     vaddr: VAddr,
     value: u64,
-    res: Result<(), ()>,
+    res: MemoryResult<()>,
 )
     requires
         s1.invariants(),
@@ -355,7 +356,7 @@ proof fn ll_write_refines_hl_write(
     s2: LowLevelState,
     vaddr: VAddr,
     value: u64,
-    res: Result<(), ()>,
+    res: MemoryResult<()>,
 )
     by (nonlinear_arith)
     requires
@@ -426,7 +427,7 @@ proof fn ll_write_refines_hl_write(
             assert(res is Ok);
         } else {
             assert(s2.interpret_mem() === s1.interpret_mem());
-            assert(res is Err);
+            assert(res is PageFault);
         }
     } else {
         if s1.hw_state().tlb_has_mapping_for(vaddr) {
@@ -434,7 +435,7 @@ proof fn ll_write_refines_hl_write(
             lemma_mapping_in_both_tlb_and_pt(s1, vaddr);
         }
         assert(!s1.has_mapping_for(vaddr));
-        assert(res is Err);
+        assert(res is PageFault);
     }
 }
 
@@ -444,7 +445,7 @@ proof fn ll_map_preserves_invariants(
     s2: LowLevelState,
     vbase: VAddr,
     frame: Frame,
-    res: Result<(), ()>,
+    res: PagingResult,
 )
     requires
         s1.invariants(),
@@ -502,7 +503,7 @@ proof fn ll_map_refines_hl_map(
     s2: LowLevelState,
     vbase: VAddr,
     frame: Frame,
-    res: Result<(), ()>,
+    res: PagingResult,
 )
     requires
         s1.invariants(),
@@ -523,7 +524,7 @@ proof fn ll_unmap_preserves_invariants(
     s1: LowLevelState,
     s2: LowLevelState,
     vbase: VAddr,
-    res: Result<(), ()>,
+    res: PagingResult,
 )
     requires
         s1.invariants(),
@@ -556,7 +557,7 @@ proof fn ll_unmap_refines_hl_unmap(
     s1: LowLevelState,
     s2: LowLevelState,
     vbase: VAddr,
-    res: Result<(), ()>,
+    res: PagingResult,
 )
     requires
         s1.invariants(),
@@ -577,7 +578,7 @@ proof fn ll_query_preserves_invariants(
     s1: LowLevelState,
     s2: LowLevelState,
     vaddr: VAddr,
-    res: Result<(VAddr, Frame), ()>,
+    res: PagingResult<(VAddr, Frame)>,
 )
     requires
         s1.invariants(),
@@ -593,7 +594,7 @@ proof fn ll_query_refines_hl_query(
     s1: LowLevelState,
     s2: LowLevelState,
     vaddr: VAddr,
-    res: Result<(VAddr, Frame), ()>,
+    res: PagingResult<(VAddr, Frame)>,
 )
     requires
         s1.invariants(),

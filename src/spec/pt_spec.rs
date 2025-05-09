@@ -10,7 +10,7 @@ use vstd::prelude::*;
 use crate::common::{
     addr::{PAddr, VAddr, VAddrExec, WORD_SIZE},
     arch::PTArch,
-    frame::{Frame, FrameExec},
+    frame::{Frame, FrameExec}, PagingResult,
 };
 
 verus! {
@@ -71,7 +71,7 @@ impl PageTableState {
         s2: Self,
         vbase: VAddr,
         frame: Frame,
-        res: Result<(), ()>,
+        res: PagingResult,
     ) -> bool {
         &&& s1.constants == s2.constants
         // Precondition
@@ -97,7 +97,7 @@ impl PageTableState {
     }
 
     /// State transition - unmap a virtual address.
-    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: Result<(), ()>) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: PagingResult) -> bool {
         &&& s1.constants == s2.constants
         // Precondition
         &&& s1.unmap_pre(vbase)
@@ -126,7 +126,7 @@ impl PageTableState {
         s1: Self,
         s2: Self,
         vaddr: VAddr,
-        res: Result<(VAddr, Frame), ()>,
+        res: PagingResult<(VAddr, Frame)>,
     ) -> bool {
         &&& s1.constants == s2.constants
         // Precondition
@@ -216,7 +216,7 @@ pub trait PageTableInterface where Self: Sized {
     /// Map a virtual address to a physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn map(&mut self, vbase: VAddrExec, frame: FrameExec) -> (res: Result<(), ()>)
+    fn map(&mut self, vbase: VAddrExec, frame: FrameExec) -> (res: PagingResult)
         requires
             old(self).invariants(),
             old(self)@.map_pre(vbase@, frame@),
@@ -228,7 +228,7 @@ pub trait PageTableInterface where Self: Sized {
     /// Unmap a virtual address.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn unmap(&mut self, vbase: VAddrExec) -> (res: Result<(), ()>)
+    fn unmap(&mut self, vbase: VAddrExec) -> (res: PagingResult)
         requires
             old(self).invariants(),
             old(self)@.unmap_pre(vbase@),
@@ -240,7 +240,7 @@ pub trait PageTableInterface where Self: Sized {
     /// Query a virtual address, return the mapped physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn query(&mut self, vaddr: VAddrExec) -> (res: Result<(VAddrExec, FrameExec), ()>)
+    fn query(&mut self, vaddr: VAddrExec) -> (res: PagingResult<(VAddrExec, FrameExec)>)
         requires
             old(self).invariants(),
             old(self)@.query_pre(vaddr@),

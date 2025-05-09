@@ -16,6 +16,8 @@ use crate::common::{
     addr::{PAddr, PIdx, VAddr, VIdx, WORD_SIZE},
     arch::PTArch,
     frame::Frame,
+    PagingResult,
+    MemoryResult,
 };
 
 verus! {
@@ -56,7 +58,7 @@ impl HighLevelState {
     }
 
     /// State transition - Read.
-    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: Result<u64, ()>) -> bool {
+    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: MemoryResult<u64>) -> bool {
         &&& s1.constants === s2.constants
         // vaddr should align to 8 bytes
         &&& vaddr.aligned(
@@ -73,12 +75,12 @@ impl HighLevelState {
                 && frame.attr.user_accessible {
                 &&& res is Ok
                 // The value should be the value in the memory at `vidx`
-                &&& res.unwrap() === s1.mem[vaddr.idx()]
+                &&& res->Ok_0 === s1.mem[vaddr.idx()]
             } else {
-                res is Err
+                res is PageFault
             }
         } else {
-            res is Err
+            res is PageFault
         }
     }
 
@@ -88,7 +90,7 @@ impl HighLevelState {
         s2: Self,
         vaddr: VAddr,
         value: u64,
-        res: Result<(), ()>,
+        res: MemoryResult<()>,
     ) -> bool {
         &&& s1.constants === s2.constants
         // vaddr should align to 8 bytes
@@ -105,12 +107,12 @@ impl HighLevelState {
                 // Memory should be updated at `vidx` with `value`
                 &&& s2.mem === s1.mem.insert(vaddr.idx(), value)
             } else {
-                &&& res is Err
+                &&& res is PageFault
                 // Memory should not be updated
                 &&& s1.mem === s2.mem
             }
         } else {
-            &&& res is Err
+            &&& res is PageFault
             // Memory should not be updated
             &&& s1.mem === s2.mem
         }
@@ -122,7 +124,7 @@ impl HighLevelState {
         s2: Self,
         vbase: VAddr,
         frame: Frame,
-        res: Result<(), ()>,
+        res: PagingResult,
     ) -> bool {
         &&& s1.constants
             === s2.constants
@@ -161,7 +163,7 @@ impl HighLevelState {
     }
 
     /// State transtion - Unmap a virtual address.
-    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: Result<(), ()>) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: PagingResult) -> bool {
         &&& s1.constants
             === s2.constants
         // Base vaddr should align to leaf frame size
@@ -189,7 +191,7 @@ impl HighLevelState {
         s1: Self,
         s2: Self,
         vaddr: VAddr,
-        res: Result<(VAddr, Frame), ()>,
+        res: PagingResult<(VAddr, Frame)>,
     ) -> bool {
         &&& s1.constants
             === s2.constants

@@ -18,6 +18,7 @@ use crate::common::{
     addr::{PAddr, VAddr, VIdx},
     arch::PTArch,
     frame::Frame,
+    PagingResult, MemoryResult,
 };
 
 verus! {
@@ -55,7 +56,7 @@ impl LowLevelState {
     }
 
     /// State transition - Memory read.
-    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: Result<u64, ()>) -> bool {
+    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: MemoryResult<u64>) -> bool {
         &&& s1.constants === s2.constants
         &&& HardwareState::read(s1.hw_state(), s2.hw_state(), vaddr, res)
     }
@@ -66,7 +67,7 @@ impl LowLevelState {
         s2: Self,
         vaddr: VAddr,
         value: u64,
-        res: Result<(), ()>,
+        res: MemoryResult<()>,
     ) -> bool {
         &&& s1.constants === s2.constants
         &&& HardwareState::write(s1.hw_state(), s2.hw_state(), vaddr, value, res)
@@ -86,7 +87,7 @@ impl LowLevelState {
         s2: Self,
         vbase: VAddr,
         frame: Frame,
-        res: Result<(), ()>,
+        res: PagingResult,
     ) -> bool {
         &&& s1.constants === s2.constants
         // Page table spec satisfied
@@ -102,7 +103,7 @@ impl LowLevelState {
     }
 
     /// State transition - Unmap a frame.
-    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: Result<(), ()>) -> bool {
+    pub open spec fn unmap(s1: Self, s2: Self, vbase: VAddr, res: PagingResult) -> bool {
         &&& s1.constants === s2.constants
         // Page table spec satisfied
         &&& PageTableState::unmap(
@@ -143,12 +144,6 @@ impl LowLevelState {
 
 /// State Invariants.
 impl LowLevelState {
-    /// Page table memory is valid.
-    pub open spec fn pt_mem_valid(self) -> bool {
-        &&& self.pt.arch == self.constants.arch
-        &&& self.pt.invariants()
-    }
-
     /// All frames are within the physical memory bounds.
     pub open spec fn frames_within_pmem(self) -> bool {
         forall|vbase: VAddr, frame: Frame| #[trigger]
@@ -202,7 +197,6 @@ impl LowLevelState {
     /// OS state invariants.
     pub open spec fn invariants(self) -> bool {
         &&& self.constants.arch.valid()
-        &&& self.pt_mem_valid()
         &&& self.frames_within_pmem()
         &&& self.mappings_aligned()
         &&& self.mappings_nonoverlap_in_vmem()

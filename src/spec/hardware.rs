@@ -18,6 +18,7 @@ use crate::common::{
     addr::{PAddr, PIdx, VAddr, WORD_SIZE},
     arch::PTArch,
     frame::{Frame, FrameSize},
+    MemoryResult,
 };
 
 verus! {
@@ -79,6 +80,9 @@ pub struct Table {
 }
 
 /// Abstract model of page table memory, a memory region that stores page tables.
+/// 
+/// Hardware reads page table memory to perform page table walk, but cannot write to it.
+/// Page table memory is modified by page table functions.
 pub struct PageTableMem {
     /// All tables in the hierarchical page table, the first table is the root.
     pub tables: Seq<Table>,
@@ -408,7 +412,7 @@ impl HardwareState {
     }
 
     /// Hardware state transition - memory read.
-    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: Result<u64, ()>) -> bool {
+    pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: MemoryResult<u64>) -> bool {
         &&& vaddr.aligned(
             WORD_SIZE,
         )
@@ -423,9 +427,9 @@ impl HardwareState {
             // Check frame attributes
             &&& if s1.mem.contains(pidx) && frame.attr.readable && frame.attr.user_accessible {
                 &&& res is Ok
-                &&& res.unwrap() === s1.mem.read(pidx)
+                &&& res->Ok_0 === s1.mem.read(pidx)
             } else {
-                &&& res is Err
+                &&& res is PageFault
             }
             &&& s1.tlb === s2.tlb
         } else if s1.pt_has_mapping_for(vaddr) {
@@ -435,15 +439,15 @@ impl HardwareState {
             // Check frame attributes
             &&& if s1.mem.contains(pidx) && frame.attr.readable && frame.attr.user_accessible {
                 &&& res is Ok
-                &&& res.unwrap() === s1.mem.read(pidx)
+                &&& res->Ok_0 === s1.mem.read(pidx)
             } else {
-                &&& res is Err
+                &&& res is PageFault
             }
             // TLB should be updated
             &&& s2.tlb === s1.tlb.update(base, frame)
         } else {
             // 3. TLB miss, page table miss
-            &&& res is Err
+            &&& res is PageFault
             &&& s2.tlb === s1.tlb
         }
     }
@@ -454,7 +458,7 @@ impl HardwareState {
         s2: Self,
         vaddr: VAddr,
         value: u64,
-        res: Result<(), ()>,
+        res: MemoryResult<()>,
     ) -> bool {
         &&& vaddr.aligned(WORD_SIZE)
         // Page table should not be updated
@@ -469,7 +473,7 @@ impl HardwareState {
                 &&& res is Ok
                 &&& s2.mem === s1.mem.write(pidx, value)
             } else {
-                &&& res is Err
+                &&& res is PageFault
                 &&& s2.mem === s1.mem
             }
             &&& s1.tlb === s2.tlb
@@ -482,14 +486,14 @@ impl HardwareState {
                 &&& res is Ok
                 &&& s2.mem === s1.mem.write(pidx, value)
             } else {
-                &&& res is Err
+                &&& res is PageFault
                 &&& s2.mem === s1.mem
             }
             // TLB should be updated
             &&& s2.tlb === s1.tlb.update(base, frame)
         } else {
             // 3. TLB miss, page table miss
-            &&& res is Err
+            &&& res is PageFault
             &&& s2.mem === s1.mem
             &&& s2.tlb === s1.tlb
         }
