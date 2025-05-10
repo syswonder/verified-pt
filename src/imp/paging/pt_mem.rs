@@ -1,19 +1,16 @@
 //! Page table memory implementation.
-//! 
+//!
 //! Page table memory is a memory region that stores page tables, allocated by the memory allocator.
 //! Hardware access page table memory and performs page table walks to translate VA to PA.
 //! To satisfies the specification defined in `spec::hardware`, the correctness of the memory allocator
 //! and raw memory access is assumed.
-//! 
+//!
 //! Page table memory is designed to be architecture independent, but yet only supports VMSAv8-64.
 use vstd::{pervasive::unreached, prelude::*};
 
+use super::arch::{lemma_vmsav8_4k_arch_valid, VMSAV8_4K_ARCH};
 use crate::{
-    common::{
-        addr::PAddrExec,
-        arch::{lemma_vmsav8_4k_arch_valid, PTArch, VMSAV8_4K_ARCH},
-        frame::FrameSize,
-    },
+    common::{addr::PAddrExec, arch::PTArch, frame::FrameSize},
     spec::hardware::{PageTableMem, Table},
 };
 

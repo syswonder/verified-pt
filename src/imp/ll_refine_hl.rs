@@ -5,7 +5,7 @@ use super::lemmas::*;
 use crate::common::{
     addr::{PAddr, VAddr, VIdx, WORD_SIZE},
     frame::Frame,
-    PagingResult, MemoryResult,
+    MemoryResult, PagingResult,
 };
 use crate::spec::{high_level::HighLevelState, low_level::LowLevelState};
 

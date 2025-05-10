@@ -80,7 +80,7 @@ pub struct Table {
 }
 
 /// Abstract model of page table memory, a memory region that stores page tables.
-/// 
+///
 /// Hardware reads page table memory to perform page table walk, but cannot write to it.
 /// Page table memory is modified by page table functions.
 pub struct PageTableMem {

@@ -5,7 +5,10 @@
 //! with a block/page descriptor.
 use vstd::prelude::*;
 
-use super::{addr::VAddr, frame::FrameSize};
+use super::{
+    addr::{VAddr, VAddrExec},
+    frame::FrameSize,
+};
 
 verus! {
 
@@ -147,31 +150,53 @@ impl PTArch {
     }
 }
 
-/// For VMSAv8-64 using 4K granule. The architecture is specified as follows:
+/// Provides architecture-specific helpers for page table operations.
 ///
-/// | Level | Index into PT | Entry Num |  Entry Type  | Frame Size |
-/// |-------|---------------|-----------|--------------|------------|
-/// | 0     | 47:39         | 512       | Table        | 512G       |
-/// | 1     | 38:30         | 512       | Table/Block  | 1G         |
-/// | 2     | 29:21         | 512       | Table/Block  | 2M         |
-/// | 3     | 20:12         | 512       | Page         | 4K         |
-///
-/// *If effective value of TCR_ELx.DS is 0, level 0 allows Table descriptor only.
-pub spec const VMSAV8_4K_ARCH: PTArch = PTArch(
-    seq![
-        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size512G },
-        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size1G },
-        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size2M },
-        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size4K },
-    ],
-);
+/// This trait defines the utility functions for computing frame sizes, entry indices,
+/// and aligned virtual addresses.
+pub trait PTArchHelpers: Sized {
+    /// Target page table architecture.
+    spec fn arch() -> PTArch;
 
-/// `VMSAV8_4K_ARCH` is a valid architecture.
-pub proof fn lemma_vmsav8_4k_arch_valid()
-    by (nonlinear_arith)
-    ensures
-        VMSAV8_4K_ARCH.valid(),
-{
+    /// Returns the frame (page or block) size at the given level.
+    fn frame_size(level: usize) -> (res: FrameSize)
+        requires
+            Self::arch().valid(),
+            level < Self::arch().level_count(),
+        ensures
+            res == Self::arch().frame_size(level as nat),
+    ;
+
+    /// Computes the page table entry index for `vaddr` at the specified level.
+    fn pte_index(vaddr: VAddrExec, level: usize) -> (res: usize)
+        requires
+            Self::arch().valid(),
+            level < Self::arch().level_count(),
+        ensures
+            res as nat == Self::arch().pte_index(vaddr@, level as nat),
+    ;
+
+    /// Aligns the virtual address `vaddr` to the base of its page at `level`.
+    ///
+    /// The default implementation rounds `vaddr` down to the nearest multiple
+    /// of the frame size at `level`.
+    fn vbase(vaddr: VAddrExec, level: usize) -> (res: VAddrExec)
+        requires
+            Self::arch().valid(),
+            level < Self::arch().level_count(),
+        ensures
+            res@.aligned(Self::arch().frame_size(level as nat).as_nat()),
+    {
+        let fsize = Self::frame_size(level).as_usize();
+        proof {
+            assert(fsize > 0);
+            // TODO: arithmetic theorem
+            // Ensure subtraction yields an aligned address
+            assume(vaddr.0 % fsize < vaddr.0);
+            assume((vaddr.0 - vaddr.0 % fsize) % fsize as int == 0);
+        }
+        VAddrExec(vaddr.0 - vaddr.0 % fsize)
+    }
 }
 
 } // verus!

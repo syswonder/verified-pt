@@ -10,7 +10,8 @@ use vstd::prelude::*;
 use crate::common::{
     addr::{PAddr, VAddr, VAddrExec, WORD_SIZE},
     arch::PTArch,
-    frame::{Frame, FrameExec}, PagingResult,
+    frame::{Frame, FrameExec},
+    PagingResult,
 };
 
 verus! {
@@ -174,7 +175,6 @@ impl PageTableState {
                 )
             }
     }
-
 
     /// If there exists a mapping for `vaddr`.
     pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {

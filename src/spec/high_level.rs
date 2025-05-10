@@ -16,8 +16,7 @@ use crate::common::{
     addr::{PAddr, PIdx, VAddr, VIdx, WORD_SIZE},
     arch::PTArch,
     frame::Frame,
-    PagingResult,
-    MemoryResult,
+    MemoryResult, PagingResult,
 };
 
 verus! {
