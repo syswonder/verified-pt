@@ -134,20 +134,13 @@ impl PageTableState {
         // Page table should not be updated
         &&& s1.mappings === s2.mappings
         // Check result
-        &&& match res {
-            Ok((base, frame)) => {
-                // Page table must contain the mapping
-                &&& s1.mappings.contains_pair(base, frame)
-                &&& vaddr.within(base, frame.size.as_nat())
-            },
-            Err(_) => {
-                // Page table should not contain any mapping for vaddr
-                !exists|base, frame|
-                    {
-                        &&& #[trigger] s1.mappings.contains_pair(base, frame)
-                        &&& vaddr.within(base, frame.size.as_nat())
-                    }
-            },
+        &&& if s1.has_mapping_for(vaddr) {
+            // Query succeeds
+            &&& res is Ok
+            &&& res.unwrap() == s1.mapping_for(vaddr)
+        } else {
+            // Query fails
+            &&& res is Err
         }
     }
 }
@@ -179,6 +172,28 @@ impl PageTableState {
                     vbase,
                     frame.size.as_nat(),
                 )
+            }
+    }
+
+
+    /// If there exists a mapping for `vaddr`.
+    pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
+        exists|vbase: VAddr, frame: Frame|
+            {
+                &&& #[trigger] self.mappings.contains_pair(vbase, frame)
+                &&& vaddr.within(vbase, frame.size.as_nat())
+            }
+    }
+
+    /// Get the mapping for `vaddr`.
+    pub open spec fn mapping_for(self, vaddr: VAddr) -> (VAddr, Frame)
+        recommends
+            self.has_mapping_for(vaddr),
+    {
+        choose|vbase: VAddr, frame: Frame|
+            {
+                &&& #[trigger] self.mappings.contains_pair(vbase, frame)
+                &&& vaddr.within(vbase, frame.size.as_nat())
             }
     }
 }

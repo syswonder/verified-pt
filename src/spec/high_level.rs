@@ -198,17 +198,13 @@ impl HighLevelState {
         // Memory and mappings should not be updated
         &&& s1.mem === s2.mem
         &&& s1.mappings === s2.mappings
-        // Check result
-        &&& match res {
-            Ok((base, frame)) => {
-                // Must contain the mapping
-                &&& s1.mappings.contains_pair(base, frame)
-                &&& vaddr.within(base, frame.size.as_nat())
-            },
-            Err(_) => {
-                // Should not contain any mapping for vaddr
-                !s1.has_mapping_for(vaddr)
-            },
+        &&& if s1.has_mapping_for(vaddr) {
+            // Query succeeds
+            &&& res is Ok
+            &&& res.unwrap() == s1.mapping_for(vaddr)
+        } else {
+            // Query fails
+            &&& res is Err
         }
     }
 

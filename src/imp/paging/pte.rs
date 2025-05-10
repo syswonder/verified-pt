@@ -6,18 +6,6 @@ use vstd::prelude::*;
 
 verus! {
 
-/// A ghost page table entry type.
-pub ghost struct GhostPTE {
-    /// The physical address mapped by this entry.
-    pub addr: PAddrExec,
-    /// The attributes of this entry.
-    pub attr: MemAttr,
-    /// Whether this entry maps to a huge frame.
-    pub huge: bool,
-    /// Whether this entry is valid.
-    pub valid: bool,
-}
-
 /// Generic interface for a page table entry.
 ///
 /// Use preconditions and postconditions to specify the behavior of the methods.

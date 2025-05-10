@@ -604,6 +604,7 @@ proof fn ll_query_refines_hl_query(
 {
     lemma_pt_interpret_equals_all_mappings(s1);
     ll_query_preserves_invariants(s1, s2, vaddr, res);
+    assert(s1.pt_state().mappings == s1@.mappings);
     lemma_pt_interpret_equals_all_mappings(s2);
 
     // Post condition satisfied because interpret_pt_mem equals all_mappings (lemma).
