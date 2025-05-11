@@ -186,6 +186,7 @@ impl PageTableMem {
         &&& self.arch.valid()
         &&& self.tables.len() == 1
         &&& self.tables[0].size.as_nat() == self.arch.table_size(0)
+        &&& self.table_view(self.root()) == seq![0u64; self.arch.entry_count(0)]
     }
 
     /// Alloc a new table.
@@ -235,8 +236,10 @@ impl PageTableMem {
             self.invariants(),
         ensures
             self.contains_table(self.root()),
+            self.table(self.root()) == self.tables[0],
     {
         assert(self.tables.contains(self.tables[0]));
+        self.lemma_table_base_unique();
     }
 
     /// Lemma. If table exists, and the index used to access table is acquired by `pte_index`,

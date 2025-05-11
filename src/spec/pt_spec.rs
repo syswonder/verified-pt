@@ -217,15 +217,14 @@ pub trait PageTableInterface where Self: Sized {
     /// Invariants that must be implied at initial state and preseved after each operation.
     spec fn invariants(self) -> bool;
 
-    /// The assumptions we made about the hardware and the remaining system implies
-    /// `self@.init()` at the system initialization.
+    /// Construct a new page table.
     ///
-    /// Implementation must prove that the invariants are satisfied at this initial state.
-    proof fn init_implies_invariants(self)
-        requires
-            self@.init(),
+    /// The assumptions we made about the hardware and the remaining system requires
+    /// `PageTableState::init()` at the system initialization.
+    fn new() -> (res: Self)
         ensures
-            self.invariants(),
+            res@.init(),
+            res.invariants(),
     ;
 
     /// Map a virtual address to a physical frame.

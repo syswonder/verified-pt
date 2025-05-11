@@ -84,6 +84,15 @@ impl PTArch {
         vaddr.0 / self.frame_size(level).as_nat() % self.entry_count(level)
     }
 
+    /// Aligns the virtual address `vaddr` to the base of its page at `level`.
+    pub open spec fn vbase(self, vaddr: VAddr, level: nat) -> VAddr
+        recommends
+            self.valid(),
+            level < self.level_count(),
+    {
+        VAddr(vaddr.0 / self.frame_size(level).as_nat() * self.frame_size(level).as_nat())
+    }
+
     /// Check if the page table architecture is valid.
     pub open spec fn valid(self) -> bool {
         // At least one level.
@@ -185,17 +194,11 @@ pub trait PTArchHelpers: Sized {
             Self::arch().valid(),
             level < Self::arch().level_count(),
         ensures
-            res@.aligned(Self::arch().frame_size(level as nat).as_nat()),
+            res.0 as nat == Self::arch().vbase(vaddr@, level as nat).0,
     {
         let fsize = Self::frame_size(level).as_usize();
-        proof {
-            assert(fsize > 0);
-            // TODO: arithmetic theorem
-            // Ensure subtraction yields an aligned address
-            assume(vaddr.0 % fsize < vaddr.0);
-            assume((vaddr.0 - vaddr.0 % fsize) % fsize as int == 0);
-        }
-        VAddrExec(vaddr.0 - vaddr.0 % fsize)
+        assert(fsize > 0);
+        VAddrExec(vaddr.0 / fsize * fsize)
     }
 }
 

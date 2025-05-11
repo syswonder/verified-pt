@@ -66,13 +66,17 @@ impl PageTableMemExec {
     /// Create an empty page table memory that only contains root table.
     pub fn new_vmsav8_4k(root: PAddrExec) -> (res: Self)
         ensures
+            res@.arch == VMSAV8_4K_ARCH,
             res@.init(),
     {
         let root_table = TableExec { base: root, size: FrameSize::Size4K, level: Ghost(0) };
+        let res = Self { tables: vec![root_table], arch: Ghost(VMSAV8_4K_ARCH) };
         proof {
             lemma_vmsav8_4k_arch_valid();
+            // Assume init value of page table memory
+            assume(res@.table_view(res@.root()) == seq![0u64; res@.arch.entry_count(0)]);
         }
-        Self { tables: vec![root_table], arch: Ghost(VMSAV8_4K_ARCH) }
+        res
     }
 
     /// Alloc a new table and returns the table descriptor.
