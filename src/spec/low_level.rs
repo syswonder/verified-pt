@@ -10,10 +10,10 @@
 use vstd::prelude::*;
 
 use super::{
-    memory::{PageTableMem, PhysMem, TLB},
     hardware::HardwareState,
     high_level::{HighLevelConstants, HighLevelState},
-    pt_spec::{PTConstants, PageTableState},
+    memory::{PageTableMem, PhysMem, TLB},
+    page_table::{PTConstants, PageTableState},
 };
 use crate::common::{
     addr::{PAddr, VAddr, VIdx},

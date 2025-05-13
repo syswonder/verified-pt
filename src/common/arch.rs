@@ -12,6 +12,9 @@ use super::{
 
 verus! {
 
+/// Page table entry size.
+pub spec const PTE_SIZE: nat = 8;
+
 /// Represents a single level in a hierarchical page table structure.
 pub struct PTArchLevel {
     /// The number of entries at this level.
@@ -19,9 +22,6 @@ pub struct PTArchLevel {
     /// Frame size indicated by a block/page descriptor at this level.
     pub frame_size: FrameSize,
 }
-
-/// Page table entry size.
-pub spec const PTE_SIZE: nat = 8;
 
 /// Complete description of a page table architecture, consisting of multiple
 /// hierarchical levels from root (lowest level) to leaf (highest level).
@@ -156,6 +156,30 @@ impl PTArch {
         } else if level2 > level {
             self.lemma_frame_size_monotonic(level, level2);
         }
+    }
+}
+
+/// Represents a single level in a hierarchical page table structure.
+pub struct PTArchLevelExec {
+    /// The number of entries at this level.
+    pub entry_count: usize,
+    /// Frame size indicated by a block/page descriptor at this level.
+    pub frame_size: FrameSize,
+}
+
+impl PTArchLevelExec {
+    pub open spec fn view(self) -> PTArchLevel {
+        PTArchLevel { entry_count: self.entry_count as nat, frame_size: self.frame_size }
+    }
+}
+
+/// Complete description of a page table architecture, consisting of multiple
+/// hierarchical levels from root (lowest level) to leaf (highest level).
+pub struct PTArchExec(pub Vec<PTArchLevelExec>);
+
+impl PTArchExec {
+    pub open spec fn view(self) -> PTArch {
+        PTArch(Seq::new(self.0.len() as nat, |i| self.0[i].view()))
     }
 }
 

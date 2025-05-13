@@ -2,7 +2,7 @@
 use vstd::prelude::*;
 
 use super::{
-    node::{NodeEntry, PTConfig, PTTreeNode},
+    node::{NodeEntry, PTTreeNode},
     path::PTTreePath,
 };
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
         PagingResult,
     },
     imp::lemmas::lemma_map_eq_pair,
-    spec::pt_spec::{PTConstants, PageTableState},
+    spec::page_table::{PTConstants, PageTableState},
 };
 
 verus! {
@@ -31,7 +31,7 @@ impl PTTreeModel {
     }
 
     /// Create an empty page table tree.
-    pub open spec fn empty(config: PTConfig) -> Self {
+    pub open spec fn empty(config: PTConstants) -> Self {
         Self::new(PTTreeNode::new(config, 0))
     }
 
@@ -43,17 +43,17 @@ impl PTTreeModel {
 
     /// Get page table architecture.
     pub open spec fn arch(self) -> PTArch {
-        self.root.config.arch
+        self.root.constants.arch
     }
 
     /// Get physical memory lower bound.
     pub open spec fn pmem_lb(self) -> PAddr {
-        self.root.config.pmem_lb
+        self.root.constants.pmem_lb
     }
 
     /// Get physical memory upper bound.
     pub open spec fn pmem_ub(self) -> PAddr {
-        self.root.config.pmem_ub
+        self.root.constants.pmem_ub
     }
 
     /// Interpret the tree as `(vbase, frame)` mappings.
@@ -149,7 +149,9 @@ impl PTTreeModel {
         );
         let visited = self.root.recursive_visit(path);
         match visited.last() {
-            NodeEntry::Frame(frame) => Ok((self.arch().vbase(vaddr, (visited.len() - 1) as nat), frame)),
+            NodeEntry::Frame(frame) => Ok(
+                (self.arch().vbase(vaddr, (visited.len() - 1) as nat), frame),
+            ),
             _ => Err(()),
         }
     }
@@ -403,7 +405,10 @@ impl PTTreeModel {
         self.lemma_mappings_consistent_with_path_mappings();
         assert(self.mappings().contains_pair(vbase, frame));
         // TODO
-        assume(real_path.to_vaddr(self.arch()) == self.arch().vbase(vaddr, (real_path.len() - 1) as nat));
+        assume(real_path.to_vaddr(self.arch()) == self.arch().vbase(
+            vaddr,
+            (real_path.len() - 1) as nat,
+        ));
         assume(vaddr.within(vbase, frame.size.as_nat()));
 
         // Prove there is only one mapped region that contains `vaddr`.
@@ -507,17 +512,6 @@ impl PTTreeModel {
         );
         self.root.lemma_real_path_valid(path);
         self.root.lemma_remove_preserves_invariants(self.root.real_path(path));
-    }
-
-    /// Theorem. `PageTableState::init()` implies invariants.
-    pub proof fn init_implies_invariants(self)
-        requires
-            self@.init()
-        ensures
-            self.invariants(),
-    {
-        assert(self.mappings().is_empty());
-        assume(self.root.path_mappings().is_empty());
     }
 
     /// Theorem. `map` refines `PageTableState::map`.

@@ -7,6 +7,7 @@
 //! - Low-level. Acts as a bridge between the implementation and the high-level specification.
 pub mod hardware;
 pub mod high_level;
+pub mod interface;
 pub mod low_level;
 pub mod memory;
-pub mod pt_spec;
+pub mod page_table;

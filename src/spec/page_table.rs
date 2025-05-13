@@ -8,9 +8,9 @@
 use vstd::prelude::*;
 
 use crate::common::{
-    addr::{PAddr, VAddr, VAddrExec, WORD_SIZE},
+    addr::{PAddr, VAddr, WORD_SIZE},
     arch::PTArch,
-    frame::{Frame, FrameExec},
+    frame::Frame,
     PagingResult,
 };
 
@@ -148,6 +148,11 @@ impl PageTableState {
 
 /// Helper functions.
 impl PageTableState {
+    /// Construct a page table state.
+    pub open spec fn new(mappings: Map<VAddr, Frame>, constants: PTConstants) -> Self {
+        Self { mappings, constants }
+    }
+
     /// If `frame` overlaps with existing physical memory.
     pub open spec fn overlaps_pmem(self, frame: Frame) -> bool {
         exists|frame2: Frame|
@@ -196,80 +201,6 @@ impl PageTableState {
                 &&& vaddr.within(vbase, frame.size.as_nat())
             }
     }
-}
-
-/// Page table must implement the `PageTableInterface` and satisfy the specification.
-///
-/// - `invariants` specifies the invariants that must be preserved after each operation.
-/// - `view` abstracts the concrete page table as a `PageTableState`.
-/// - `map` specifies the pre and post conditions for the `map` operation.
-/// - `unmap` specifies the pre and post conditions for the `unmap` operation.
-/// - `query` specifies the pre and post conditions for the `query` operation.
-///
-/// If a concrete implementation refines this specification (i.e. `impl PageTableInterface`),
-/// along with the assumptions we make about the hardware and the remaining system, we can
-/// conclude that the whole system refines the low-level specification, thus refines the
-/// high-level specification.
-pub trait PageTableInterface where Self: Sized {
-    /// Get abstract page table state.
-    spec fn view(self) -> PageTableState;
-
-    /// Invariants that must be implied at initial state and preseved after each operation.
-    spec fn invariants(self) -> bool;
-
-    /// Construct a new page table.
-    ///
-    /// The assumptions we made about the hardware and the remaining system requires
-    /// `PageTableState::init()` at the system initialization.
-    fn new() -> (res: Self)
-        ensures
-            res@.init(),
-            res.invariants(),
-    ;
-
-    /// Map a virtual address to a physical frame.
-    ///
-    /// Implementation must ensure the postconditions are satisfied.
-    fn map(&mut self, vbase: VAddrExec, frame: FrameExec) -> (res: PagingResult)
-        requires
-            old(self).invariants(),
-            old(self)@.map_pre(vbase@, frame@),
-        ensures
-            self.invariants(),
-            PageTableState::map(old(self)@, self@, vbase@, frame@, res),
-    ;
-
-    /// Unmap a virtual address.
-    ///
-    /// Implementation must ensure the postconditions are satisfied.
-    fn unmap(&mut self, vbase: VAddrExec) -> (res: PagingResult)
-        requires
-            old(self).invariants(),
-            old(self)@.unmap_pre(vbase@),
-        ensures
-            self.invariants(),
-            PageTableState::unmap(old(self)@, self@, vbase@, res),
-    ;
-
-    /// Query a virtual address, return the mapped physical frame.
-    ///
-    /// Implementation must ensure the postconditions are satisfied.
-    fn query(&mut self, vaddr: VAddrExec) -> (res: PagingResult<(VAddrExec, FrameExec)>)
-        requires
-            old(self).invariants(),
-            old(self)@.query_pre(vaddr@),
-        ensures
-            self.invariants(),
-            PageTableState::query(
-                old(self)@,
-                self@,
-                vaddr@,
-                match res {
-                    Ok((vaddr, frame)) => Ok((vaddr@, frame@)),
-                    Err(()) => Err(()),
-                },
-            ),
-    ;
 }
 
 } // verus!

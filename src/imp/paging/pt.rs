@@ -4,7 +4,6 @@ use vstd::prelude::*;
 
 use super::{
     arch::{VMSAv8_4kHelpers, VMSAV8_4K_ARCH},
-    pt_mem::PageTableMemExec,
     pte::GenericPTE,
 };
 use crate::{
@@ -16,9 +15,10 @@ use crate::{
     },
     imp::tree::{
         model::PTTreeModel,
-        node::{NodeEntry, PTConfig, PTTreeNode},
+        node::{NodeEntry, PTTreeNode},
         path::PTTreePath,
     },
+    spec::{interface::PTConstantsExec, page_table::PageTableState, memory::PageTableMemExec},
 };
 
 verus! {
@@ -30,12 +30,10 @@ verus! {
 pub struct PageTable<PTE: GenericPTE> {
     /// Page table memory, arch is `VMSAV8_4K_ARCH`
     pub pt_mem: PageTableMemExec,
+    /// Page table config constants.
+    pub constants: PTConstantsExec,
     /// Phantom data.
     pub _phantom: PhantomData<PTE>,
-    /// Physical memory lower bound.
-    pub pmem_lb: PAddrExec,
-    /// Physical memory upper bound.
-    pub pmem_ub: PAddrExec,
 }
 
 impl<PTE> PageTable<PTE> where PTE: GenericPTE {
@@ -48,6 +46,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     pub open spec fn invariants(self) -> bool {
         // Target architecture
         &&& self.arch() == VMSAV8_4K_ARCH
+        &&& self.constants.arch@ == VMSAV8_4K_ARCH
         // Page table memory invariants
         &&& self.pt_mem@.invariants()
         // Each table descriptor that can be accessed must satisfy
@@ -144,7 +143,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             )
         };
         PTTreeNode {
-            config: PTConfig { arch, pmem_lb: self.pmem_lb@, pmem_ub: self.pmem_ub@ },
+            constants: self.constants@,
             level,
             entries,
         }
@@ -230,23 +229,17 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     }
 
     /// Construct a new page table.
-    pub fn new(pt_mem: PageTableMemExec, pmem_lb: PAddrExec, pmem_ub: PAddrExec) -> (res: Self)
+    pub fn new(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> (res: Self)
         requires
-            pt_mem@.init(),
             pt_mem@.arch == VMSAV8_4K_ARCH,
         ensures
             res.invariants(),
-            res@.mappings() == Map::<VAddr, Frame>::empty(),
+            res.pt_mem == pt_mem,
+            res.constants == constants,
     {
-        let pt = Self {
-            pt_mem,
-            _phantom: PhantomData,
-            pmem_lb,
-            pmem_ub,
-        };
+        let pt = Self { pt_mem, constants, _phantom: PhantomData };
         proof {
             assume(pt.invariants());
-            assume(pt@.mappings() == Map::<VAddr, Frame>::empty());
         }
         pt
     }
@@ -313,14 +306,16 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.lemma_recursive_get_pte_consistent_with_recursive_visit(vaddr@);
             // exec `query` consistent with model `query`
             if pte.spec_valid() {
-                assert(self@.query(vaddr@) == PagingResult::Ok((
-                    self.arch().vbase(vaddr@, level as nat),
-                    Frame {
-                        base: pte.spec_addr(),
-                        size: self.arch().frame_size(level as nat),
-                        attr: pte.spec_attr(),
-                    }
-                )));
+                assert(self@.query(vaddr@) == PagingResult::Ok(
+                    (
+                        self.arch().vbase(vaddr@, level as nat),
+                        Frame {
+                            base: pte.spec_addr(),
+                            size: self.arch().frame_size(level as nat),
+                            attr: pte.spec_attr(),
+                        },
+                    ),
+                ));
             } else {
                 assert(self@.query(vaddr@) == PagingResult::<(VAddr, Frame)>::Err(()));
             }
@@ -336,7 +331,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     },
                 ),
             )
-        } else { 
+        } else {
             Err(())
         }
     }
@@ -348,15 +343,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             old(self).arch().is_valid_frame_size(frame.size),
             vbase@.aligned(frame.size.as_nat()),
             frame.base@.aligned(frame.size.as_nat()),
-            frame.base.0 >= old(self).pmem_lb.0,
-            frame.base.0 + frame.size.as_nat() <= old(self).pmem_ub.0,
+            frame.base.0 >= old(self).constants.pmem_lb.0,
+            frame.base.0 + frame.size.as_nat() <= old(self).constants.pmem_ub.0,
         ensures
             self.invariants(),
             old(self)@.map(vbase@, frame@) == match res {
                 Ok(()) => Ok(self@),
                 Err(()) => Err(()),
             },
-            res is Err ==> old(self) == self
+            res is Err ==> old(self) == self,
     {
         // TODO
         assume(false);
@@ -373,13 +368,13 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 Ok(()) => Ok(self@),
                 Err(()) => Err(()),
             },
-            res is Err ==> old(self) == self
+            res is Err ==> old(self) == self,
     {
         // TODO
         assume(false);
         Err(())
     }
-    
+
     /// Lemma. `sepc_recursive_get_pte` is consistent with `spec_get_pte`.
     pub proof fn lemma_recursive_get_pte_consistent_with_get_pte(self, vaddr: VAddr)
         requires
@@ -406,8 +401,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         (self.arch().level_count() - 1) as nat,
                     ),
                 );
-                visited.len() == level + 1
-                && visited.last() == if pte.spec_valid() {
+                visited.len() == level + 1 && visited.last() == if pte.spec_valid() {
                     NodeEntry::Frame(
                         Frame {
                             base: pte.spec_addr(),
@@ -425,7 +419,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let entry = node.recursive_visit(
             PTTreePath::from_vaddr(vaddr, self.arch(), (self.arch().level_count() - 1) as nat),
         ).last();
-        
+
         self.pt_mem@.lemma_contains_root();
         self.lemma_build_node_implies_invariants(self.pt_mem@.root(), 0);
         assert(node.invariants());
@@ -435,14 +429,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
 
     /// Theorem. Page table walk behavior defined by `PageTable::view()` and `PageTableMem::interpret()`
     /// must be consistent.
-    /// 
+    ///
     /// This theroem is needed because we must ensure the hardware and the OS interpret the page table
     /// in the same way.
-    pub proof fn page_table_walk_consistent(self)
+    pub proof fn lemma_view_consistent_with_interpret(self)
         requires
             self.invariants(),
         ensures
-            self@.mappings() == self.pt_mem@.interpret()
+            self.view().view() == PageTableState::new(self.pt_mem@.interpret(), self.constants@)
     {
         // TODO
         assume(false);

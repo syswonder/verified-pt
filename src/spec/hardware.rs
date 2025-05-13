@@ -14,12 +14,12 @@
 //！in memory translations. This specification underpins the entire verification process.
 use vstd::prelude::*;
 
+use super::memory::{PageTableMem, PhysMem, TLB};
 use crate::common::{
     addr::{VAddr, WORD_SIZE},
     frame::Frame,
     MemoryResult,
 };
-use super::memory::{PhysMem, PageTableMem, TLB};
 
 verus! {
 
