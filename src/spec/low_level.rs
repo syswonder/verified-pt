@@ -10,7 +10,8 @@
 use vstd::prelude::*;
 
 use super::{
-    hardware::{HardwareState, PageTableMem, PhysMem, TLB},
+    memory::{PageTableMem, PhysMem, TLB},
+    hardware::HardwareState,
     high_level::{HighLevelConstants, HighLevelState},
     pt_spec::{PTConstants, PageTableState},
 };

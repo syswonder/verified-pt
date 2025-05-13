@@ -11,7 +11,7 @@ use vstd::{pervasive::unreached, prelude::*};
 use super::arch::{lemma_vmsav8_4k_arch_valid, VMSAV8_4K_ARCH};
 use crate::{
     common::{addr::PAddrExec, arch::PTArch, frame::FrameSize},
-    spec::hardware::{PageTableMem, Table},
+    spec::memory::{PageTableMem, Table},
 };
 
 verus! {
