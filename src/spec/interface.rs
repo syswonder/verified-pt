@@ -36,7 +36,6 @@ impl PTConstantsExec {
 /// Concrete implementation must implement `PageTableInterface` to satisfy the specification.
 ///
 /// - `invariants` specifies the invariants that must be preserved after each operation.
-/// - `view` abstracts the concrete page table as a `PageTableState`.
 /// - `map` specifies the pre and post conditions for the `map` operation.
 /// - `unmap` specifies the pre and post conditions for the `unmap` operation.
 /// - `query` specifies the pre and post conditions for the `query` operation.
@@ -48,6 +47,15 @@ impl PTConstantsExec {
 pub trait PageTableInterface where Self: Sized {
     /// Invariants that must be implied at initial state and preseved after each operation.
     spec fn invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> bool;
+
+    /// Prove invariants are satified at the initial state.
+    proof fn init_implies_invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec)
+        requires
+            pt_mem@.init(),
+            pt_mem@.arch == constants@.arch,
+        ensures
+            Self::invariants(pt_mem, constants),
+    ;
 
     /// Map a virtual address to a physical frame.
     ///

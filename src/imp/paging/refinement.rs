@@ -1,12 +1,11 @@
 //! Implementation refinement proof.
 use std::marker::PhantomData;
-
 use vstd::prelude::*;
 
-use super::{pt::PageTable, pte::GenericPTE};
+use super::{arch::VMSAV8_4K_ARCH, pt::PageTable, pte::GenericPTE};
 use crate::{
     common::{
-        addr::{PAddrExec, VAddrExec},
+        addr::{PAddr, VAddrExec},
         frame::FrameExec,
         PagingResult,
     },
@@ -18,29 +17,34 @@ use crate::{
 
 verus! {
 
-/// Physical mempry lower bound.
-pub const PMEM_LB: PAddrExec = PAddrExec(0x1000_0000);
-
-/// Physical memory upper bound.
-pub const PMEM_UB: PAddrExec = PAddrExec(0x2000_0000);
-
-/// Root page table address.
-pub const ROOT_TABLE_ADDR: PAddrExec = PAddrExec(0x2000_0000);
-
 /// A wrapper for `PageTable` that implements `PageTableInterface`.
 ///
 /// Implementing `PageTableInterface` ensures the page table implementation satisfies the
-/// interface specifications, along with the assumptions we made about the hardware and the
+/// interface specifications, along with the assumptions made about the hardware and the
 /// remaining system, we can complete the proof of the paging system.
 pub struct PageTableImpl<PTE: GenericPTE>(PhantomData<PTE>);
 
 impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
     open spec fn invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> bool {
-        PageTable::<PTE> {
-            pt_mem,
-            constants,
-            _phantom: PhantomData,
-        }.invariants()
+        PageTable::<PTE> { pt_mem, constants, _phantom: PhantomData }.invariants()
+    }
+
+    proof fn init_implies_invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) {
+        assume(pt_mem.arch@ == VMSAV8_4K_ARCH);
+        pt_mem.view().lemma_init_implies_invariants();
+        let pt = PageTable::<PTE> { pt_mem, constants, _phantom: PhantomData };
+        assert forall|base: PAddr, idx: nat| pt.pt_mem@.accessible(base, idx) implies {
+            let pt_mem = pt.pt_mem@;
+            let table = pt_mem.table(base);
+            let pte = PTE::spec_from_u64(pt_mem.read(base, idx));
+            !pte.spec_valid()
+        } by {
+            assert(base == pt_mem@.root());
+            assert(pt_mem@.table_view(base) == seq![0u64; pt_mem@.arch.entry_count(0)]);
+            assert(pt_mem@.read(base, idx) == 0);
+            // TODO: Add specification for `GenericPTE` to eliminate this assumption.
+            assume(PTE::spec_from_u64(0).spec_valid() == false);
+        }
     }
 
     fn map(

@@ -3,7 +3,7 @@ use vstd::prelude::*;
 
 use crate::common::{
     addr::{PAddr, PAddrExec, PIdx, VAddr},
-    arch::PTArch,
+    arch::{PTArch, PTArchExec},
     frame::{Frame, FrameSize},
 };
 
@@ -247,6 +247,7 @@ impl PageTableMem {
     pub open spec fn init(self) -> bool {
         &&& self.arch.valid()
         &&& self.tables.len() == 1
+        &&& self.tables[0].level == 0
         &&& self.tables[0].size.as_nat() == self.arch.table_size(0)
         &&& self.table_view(self.root()) == seq![0u64; self.arch.entry_count(0)]
     }
@@ -342,6 +343,15 @@ impl PageTableMem {
         }
     }
 
+    /// Lemma. `init` implies invariants.
+    pub proof fn lemma_init_implies_invariants(self)
+        requires
+            self.init(),
+        ensures
+            self.invariants(),
+    {
+    }
+
     /// Lemma. `alloc_table` preserves invariants.
     pub proof fn lemma_alloc_table_preserves_invariants(
         s1: Self,
@@ -405,7 +415,7 @@ pub struct PageTableMemExec {
     /// All tables in the hierarchical page table, the first table is the root.
     pub tables: Vec<TableExec>,
     /// Page table architecture.
-    pub arch: Ghost<PTArch>,
+    pub arch: PTArchExec,
 }
 
 impl PageTableMemExec {

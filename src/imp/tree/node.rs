@@ -3,12 +3,9 @@ use vstd::prelude::*;
 
 use super::path::PTTreePath;
 use crate::{
-    common::{
-        addr::VAddr,
-        frame::Frame,
-    },
-    spec::page_table::PTConstants,
+    common::{addr::VAddr, frame::Frame},
     imp::lemmas::lemma_map_eq_pair,
+    spec::page_table::PTConstants,
 };
 
 verus! {
@@ -83,7 +80,11 @@ impl PTTreeNode {
             level < config.arch.level_count(),
             config.arch.valid(),
     {
-        Self { constants: config, level, entries: seq![NodeEntry::Empty; config.arch.entry_count(level)] }
+        Self {
+            constants: config,
+            level,
+            entries: seq![NodeEntry::Empty; config.arch.entry_count(level)],
+        }
     }
 
     /// Update an entry in the node at the specified index.

@@ -18,12 +18,16 @@ use crate::{
         node::{NodeEntry, PTTreeNode},
         path::PTTreePath,
     },
-    spec::{interface::PTConstantsExec, page_table::PageTableState, memory::PageTableMemExec},
+    spec::{interface::PTConstantsExec, memory::PageTableMemExec, page_table::PageTableState},
 };
 
 verus! {
 
-/// Executable 4-level page table implementation.
+/// Executable page table implementation.
+///
+/// `PageTable` wraps a `PageTableMemExec` and a `PTConstantsExec` to provide a convenient interface for
+/// manipulating the page table. Refinement proof is provided by implementing trait `PageTableInterface`
+/// to ensure `PageTableMemExec` is manipulated correctly.
 ///
 /// Only support VMSAv8-64 page table using 4K granule yet, but can be extended to other
 /// architectures in future works.
@@ -39,14 +43,15 @@ pub struct PageTable<PTE: GenericPTE> {
 impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     /// Page table architecture.
     pub open spec fn arch(self) -> PTArch {
-        self.pt_mem@.arch
+        self.constants.arch@
     }
 
     /// Invariants that ensure the page table is well-formed.
     pub open spec fn invariants(self) -> bool {
         // Target architecture
         &&& self.arch() == VMSAV8_4K_ARCH
-        &&& self.constants.arch@ == VMSAV8_4K_ARCH
+        &&& self.pt_mem@.arch
+            == self.arch()
         // Page table memory invariants
         &&& self.pt_mem@.invariants()
         // Each table descriptor that can be accessed must satisfy
@@ -142,11 +147,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     },
             )
         };
-        PTTreeNode {
-            constants: self.constants@,
-            level,
-            entries,
-        }
+        PTTreeNode { constants: self.constants@, level, entries }
     }
 
     /// Lemma. The node returned by `build_node` satisfies the invariants.
@@ -427,7 +428,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         assume(false);
     }
 
-    /// Theorem. Page table walk behavior defined by `PageTable::view()` and `PageTableMem::interpret()`
+    /// Lemma. Page table walk behavior defined by `PageTable::view()` and `PageTableMem::interpret()`
     /// must be consistent.
     ///
     /// This theroem is needed because we must ensure the hardware and the OS interpret the page table
@@ -436,7 +437,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         requires
             self.invariants(),
         ensures
-            self.view().view() == PageTableState::new(self.pt_mem@.interpret(), self.constants@)
+            self.view().view() == PageTableState::new(self.pt_mem@.interpret(), self.constants@),
     {
         // TODO
         assume(false);
