@@ -2,10 +2,11 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::{arch::VMSAV8_4K_ARCH, pt::PageTable, pte::GenericPTE};
+use super::{pt::PageTable, pte::GenericPTE};
 use crate::{
     common::{
         addr::{PAddr, VAddrExec},
+        arch::VMSAV8_4K_ARCH,
         frame::FrameExec,
         PagingResult,
     },

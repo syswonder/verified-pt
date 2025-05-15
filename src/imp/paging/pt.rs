@@ -2,14 +2,11 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::{
-    arch::{VMSAv8_4kHelpers, VMSAV8_4K_ARCH},
-    pte::GenericPTE,
-};
+use super::pte::GenericPTE;
 use crate::{
     common::{
-        addr::{PAddr, PAddrExec, VAddr, VAddrExec},
-        arch::{PTArch, PTArchHelpers},
+        addr::{PAddr, VAddr, VAddrExec},
+        arch::{PTArch, VMSAV8_4K_ARCH},
         frame::{Frame, FrameExec},
         PagingResult,
     },
@@ -264,27 +261,29 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             assert(self.pt_mem@.accessible(root, self.arch().pte_index(vaddr@, 0)));
         }
         let p0e = PTE::from_u64(
-            self.pt_mem.read(self.pt_mem.root(), VMSAv8_4kHelpers::pte_index(vaddr, 0)),
+            self.pt_mem.read(self.pt_mem.root(), self.constants.arch.pte_index(vaddr, 0)),
         );
         if !p0e.valid() || p0e.huge() {
             return (p0e, 0);
         }
+        proof {
+            self.pt_mem@.lemma_accessible(p0e.spec_addr(), vaddr@, 1);
+        }
         // Invariants ensures the following access are valid
-
         let p1e = PTE::from_u64(
-            self.pt_mem.read(p0e.addr(), VMSAv8_4kHelpers::pte_index(vaddr, 1)),
+            self.pt_mem.read(p0e.addr(), self.constants.arch.pte_index(vaddr, 1)),
         );
         if !p1e.valid() || p1e.huge() {
             return (p1e, 1);
         }
         let p2e = PTE::from_u64(
-            self.pt_mem.read(p1e.addr(), VMSAv8_4kHelpers::pte_index(vaddr, 2)),
+            self.pt_mem.read(p1e.addr(), self.constants.arch.pte_index(vaddr, 2)),
         );
         if !p2e.valid() || p2e.huge() {
             return (p2e, 2);
         }
         let p3e = PTE::from_u64(
-            self.pt_mem.read(p2e.addr(), VMSAv8_4kHelpers::pte_index(vaddr, 3)),
+            self.pt_mem.read(p2e.addr(), self.constants.arch.pte_index(vaddr, 3)),
         );
         (p3e, 3)
     }
@@ -324,10 +323,10 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         if pte.valid() {
             Ok(
                 (
-                    VMSAv8_4kHelpers::vbase(vaddr, level),
+                    self.constants.arch.vbase(vaddr, level),
                     FrameExec {
                         base: pte.addr(),
-                        size: VMSAv8_4kHelpers::frame_size(level),
+                        size: self.constants.arch.frame_size(level),
                         attr: pte.attr(),
                     },
                 ),

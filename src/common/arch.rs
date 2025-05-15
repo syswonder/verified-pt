@@ -159,7 +159,7 @@ impl PTArch {
     }
 }
 
-/// Represents a single level in a hierarchical page table structure.
+/// **EXEC MODE** Represents a single level in a hierarchical page table structure.
 pub struct PTArchLevelExec {
     /// The number of entries at this level.
     pub entry_count: usize,
@@ -168,62 +168,119 @@ pub struct PTArchLevelExec {
 }
 
 impl PTArchLevelExec {
+    /// View as `PTArchLevel`.
     pub open spec fn view(self) -> PTArchLevel {
         PTArchLevel { entry_count: self.entry_count as nat, frame_size: self.frame_size }
     }
 }
 
-/// Complete description of a page table architecture, consisting of multiple
-/// hierarchical levels from root (lowest level) to leaf (highest level).
+/// **EXEC MODE** Complete description of a page table architecture, consisting of
+/// multiple hierarchical levels from root (lowest level) to leaf (highest level).
+///
+/// Provides utilities to compute the page table entry index and the virtual address.
 pub struct PTArchExec(pub Vec<PTArchLevelExec>);
 
 impl PTArchExec {
+    /// View as `PTArch`.
     pub open spec fn view(self) -> PTArch {
         PTArch(Seq::new(self.0.len() as nat, |i| self.0[i].view()))
     }
-}
 
-/// Provides architecture-specific helpers for page table operations.
-///
-/// This trait defines the utility functions for computing frame sizes, entry indices,
-/// and aligned virtual addresses.
-pub trait PTArchHelpers: Sized {
-    /// Target page table architecture.
-    spec fn arch() -> PTArch;
-
-    /// Returns the frame (page or block) size at the given level.
-    fn frame_size(level: usize) -> (res: FrameSize)
-        requires
-            Self::arch().valid(),
-            level < Self::arch().level_count(),
+    /// The number of hierarchical levels in the page table.
+    pub fn level_count(&self) -> (res: usize)
         ensures
-            res == Self::arch().frame_size(level as nat),
-    ;
+            res == self@.level_count(),
+    {
+        self.0.len()
+    }
+
+    /// The frame (page or block) size at the given level.
+    pub fn frame_size(&self, level: usize) -> (res: FrameSize)
+        requires
+            level < self@.level_count(),
+        ensures
+            res == self@.frame_size(level as nat),
+    {
+        self.0[level].frame_size
+    }
+
+    /// The number of entries at the given level.
+    pub fn entry_count(&self, level: usize) -> (res: usize)
+        requires
+            level < self@.level_count(),
+        ensures
+            res == self@.entry_count(level as nat),
+    {
+        self.0[level].entry_count
+    }
 
     /// Computes the page table entry index for `vaddr` at the specified level.
-    fn pte_index(vaddr: VAddrExec, level: usize) -> (res: usize)
+    pub fn pte_index(&self, vaddr: VAddrExec, level: usize) -> (res: usize)
         requires
-            Self::arch().valid(),
-            level < Self::arch().level_count(),
+            self@.valid(),
+            level < self@.level_count(),
         ensures
-            res as nat == Self::arch().pte_index(vaddr@, level as nat),
-    ;
+            res == self@.pte_index(vaddr@, level as nat),
+            res < self@.entry_count(level as nat),
+    {
+        vaddr.0 / self.frame_size(level).as_usize() % self.entry_count(level)
+    }
 
     /// Aligns the virtual address `vaddr` to the base of its page at `level`.
     ///
     /// The default implementation rounds `vaddr` down to the nearest multiple
     /// of the frame size at `level`.
-    fn vbase(vaddr: VAddrExec, level: usize) -> (res: VAddrExec)
+    pub fn vbase(&self, vaddr: VAddrExec, level: usize) -> (res: VAddrExec)
         requires
-            Self::arch().valid(),
-            level < Self::arch().level_count(),
+            self@.valid(),
+            level < self@.level_count(),
         ensures
-            res.0 as nat == Self::arch().vbase(vaddr@, level as nat).0,
+            res.0 == self@.vbase(vaddr@, level as nat).0,
     {
-        let fsize = Self::frame_size(level).as_usize();
+        let fsize = self.frame_size(level).as_usize();
         assert(fsize > 0);
+        assert(vaddr.0 / fsize * fsize <= vaddr.0) by (nonlinear_arith);
         VAddrExec(vaddr.0 / fsize * fsize)
     }
+}
+
+/// For VMSAv8-64 using 4K granule. The architecture is specified as follows:
+///
+/// | Level | Index into PT | Entry Num |  Entry Type  | Frame Size |
+/// |-------|---------------|-----------|--------------|------------|
+/// | 0     | 47:39         | 512       | Table        | 512G       |
+/// | 1     | 38:30         | 512       | Table/Block  | 1G         |
+/// | 2     | 29:21         | 512       | Table/Block  | 2M         |
+/// | 3     | 20:12         | 512       | Page         | 4K         |
+///
+/// *If effective value of TCR_ELx.DS is 0, level 0 allows Table descriptor only.
+pub spec const VMSAV8_4K_ARCH: PTArch = PTArch(
+    seq![
+        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size512G },
+        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size1G },
+        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size2M },
+        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size4K },
+    ],
+);
+
+/// `VMSAV8_4K_ARCH` of execution mode.
+pub fn vmsav8_4k_arch_exec() -> PTArchExec {
+    PTArchExec(
+        vec![
+            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size512G },
+            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size1G },
+            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size2M },
+            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size4K },
+        ],
+    )
+}
+
+/// `VMSAV8_4K_ARCH` is a valid architecture.
+pub proof fn lemma_vmsav8_4k_arch_valid()
+    by (nonlinear_arith)
+    ensures
+        VMSAV8_4K_ARCH.valid(),
+{
 }
 
 } // verus!
