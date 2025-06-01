@@ -80,6 +80,12 @@ pub trait GenericPTE: Sized + Clone {
 
     /// Returns whether this entry maps to a huge frame (spec mode).
     spec fn spec_huge(self) -> bool;
+
+    /// If a page table entrt has value 0, it must be invalid.
+    proof fn pte_from_0_invalid()
+        ensures
+            Self::spec_from_u64(0).spec_valid() == false,
+    ;
 }
 
 } // verus!

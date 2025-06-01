@@ -127,7 +127,10 @@ impl VAddrExec {
     }
 
     /// If addr is aligned to `size` bytes.
-    pub open spec fn aligned(self, size: usize) -> bool {
+    pub fn aligned(self, size: usize) -> bool
+        requires
+            size > 0,
+    {
         self.0 % size == 0
     }
 }

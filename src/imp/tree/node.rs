@@ -118,7 +118,7 @@ impl PTTreeNode {
         }
     }
 
-    /// Inserts a frame at `path`, creating intermediate nodes if needed.
+    /// Inserts a frame at `path`, creates intermediate nodes if needed.
     ///
     /// Does nothing if target slot is non-empty.
     pub open spec fn recursive_insert(self, path: PTTreePath, frame: Frame) -> Self

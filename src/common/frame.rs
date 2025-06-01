@@ -9,7 +9,7 @@ verus! {
 ///
 /// - For 4KB granule, support: 4K, 2M, 1G, 512G.
 /// - For 16KB granule, support: 16K, 32M, 64G.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum FrameSize {
     /// 4 KiB
     Size4K,

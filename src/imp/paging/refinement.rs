@@ -57,14 +57,14 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
         let mut pt = PageTable::<PTE>::new(pt_mem, constants);
         proof {
             assert(pt.invariants());
-            pt.lemma_view_consistent_with_interpret();
+            pt.model_consistent_with_hardware();
             pt.lemma_view_implies_invariants();
             pt.view().map_refinement(vbase@, frame@);
         }
         let res = pt.map(vbase, frame);
         proof {
             assert(pt.invariants());
-            pt.lemma_view_consistent_with_interpret();
+            pt.model_consistent_with_hardware();
         }
         (res, pt.pt_mem)
     }
@@ -76,14 +76,14 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
         let mut pt = PageTable::<PTE>::new(pt_mem, constants);
         proof {
             assert(pt.invariants());
-            pt.lemma_view_consistent_with_interpret();
+            pt.model_consistent_with_hardware();
             pt.lemma_view_implies_invariants();
             pt.view().unmap_refinement(vbase@);
         }
         let res = pt.unmap(vbase);
         proof {
             assert(pt.invariants());
-            pt.lemma_view_consistent_with_interpret();
+            pt.model_consistent_with_hardware();
         }
         (res, pt.pt_mem)
     }
@@ -95,7 +95,7 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
         let mut pt = PageTable::<PTE>::new(pt_mem, constants);
         proof {
             assert(pt.invariants());
-            pt.lemma_view_consistent_with_interpret();
+            pt.model_consistent_with_hardware();
             pt.lemma_view_implies_invariants();
             pt.view().query_refinement(vaddr@);
         }

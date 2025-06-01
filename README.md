@@ -43,6 +43,7 @@ The verification follows a **refinement-based approach**, ensuring lower-level s
 ### High-Level State Machine
 
 The high-level state machine defines abstract memory system behavior, focusing on:
+
 1. **Memory Mappings**:
    - Virtual-to-physical address translations.
    - Consistency of mappings across operations.

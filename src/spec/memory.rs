@@ -293,31 +293,6 @@ impl PageTableMem {
         &&& s2.table_view(base) == s1.table_view(base).update(index as int, entry)
     }
 
-    /// Lemma. Always contains a root table.
-    pub proof fn lemma_contains_root(self)
-        requires
-            self.invariants(),
-        ensures
-            self.contains_table(self.root()),
-            self.table(self.root()) == self.tables[0],
-    {
-        assert(self.tables.contains(self.tables[0]));
-        self.lemma_table_base_unique();
-    }
-
-    /// Lemma. If table exists, and the index used to access table is acquired by `pte_index`,
-    /// then the entry is accessible.
-    pub proof fn lemma_accessible(self, base: PAddr, vaddr: VAddr, level: nat)
-        requires
-            self.invariants(),
-            self.contains_table(base),
-            self.table(base).level == level,
-            level < self.arch.level_count(),
-        ensures
-            self.accessible(base, self.arch.pte_index(vaddr, level)),
-    {
-    }
-
     /// Lemma. Different tables have different base addresses.
     pub proof fn lemma_table_base_unique(self)
         requires
@@ -343,17 +318,29 @@ impl PageTableMem {
         }
     }
 
-    /// Lemma. `init` implies invariants.
-    pub proof fn lemma_init_implies_invariants(self)
+    /// Lemma. Always contains a root table.
+    pub broadcast proof fn lemma_contains_root(self)
         requires
-            self.init(),
+            #[trigger] self.invariants(),
+        ensures
+            self.contains_table(self.root()),
+            self.table(self.root()) == self.tables[0],
+    {
+        assert(self.tables.contains(self.tables[0]));
+        self.lemma_table_base_unique();
+    }
+
+    /// Lemma. `init` implies invariants.
+    pub broadcast proof fn lemma_init_implies_invariants(self)
+        requires
+            #[trigger] self.init(),
         ensures
             self.invariants(),
     {
     }
 
     /// Lemma. `alloc_table` preserves invariants.
-    pub proof fn lemma_alloc_table_preserves_invariants(
+    pub broadcast proof fn lemma_alloc_table_preserves_invariants(
         s1: Self,
         s2: Self,
         level: nat,
@@ -361,7 +348,7 @@ impl PageTableMem {
     )
         requires
             s1.invariants(),
-            Self::alloc_table(s1, s2, level, table),
+            #[trigger] Self::alloc_table(s1, s2, level, table),
         ensures
             s2.invariants(),
     {
@@ -373,8 +360,38 @@ impl PageTableMem {
         }
     }
 
+    /// Lemma. `alloc_table` preserves accessibility.
+    pub broadcast proof fn lemma_alloc_table_preserves_accessibility(
+        s1: Self,
+        s2: Self,
+        level: nat,
+        new_table: Table,
+        base: PAddr,
+        index: nat,
+    )
+        requires
+            s1.invariants(),
+            #[trigger] Self::alloc_table(s1, s2, level, new_table),
+            #[trigger] s1.accessible(base, index),
+        ensures
+            s2.accessible(base, index),
+    {
+        // s2 contains table with base address `base`
+        assert(s1.contains_table(base));
+        assert forall|table: Table| s1.tables.contains(table) implies s2.tables.contains(table) by {
+            let idx = choose|i| 0 <= i < s1.tables.len() && s1.tables[i] == table;
+            assert(s2.tables[idx] == table);
+        }
+        assert(s2.contains_table(base));
+
+        // The table with base address `base` is the same as the table in `s1`
+        Self::lemma_alloc_table_preserves_invariants(s1, s2, level, new_table);
+        s2.lemma_table_base_unique();
+        assert(s1.table(base) == s2.table(base));
+    }
+
     /// Lemma. `write` preserves invariants.
-    pub proof fn lemma_write_preserves_invariants(
+    pub broadcast proof fn lemma_write_preserves_invariants(
         s1: Self,
         s2: Self,
         base: PAddr,
@@ -383,11 +400,20 @@ impl PageTableMem {
     )
         requires
             s1.invariants(),
-            Self::write(s1, s2, base, index, entry),
+            #[trigger] Self::write(s1, s2, base, index, entry),
         ensures
             s2.invariants(),
     {
     }
+}
+
+/// Page table memory lemmas.
+pub broadcast group group_pt_mem_lemmas {
+    PageTableMem::lemma_contains_root,
+    PageTableMem::lemma_init_implies_invariants,
+    PageTableMem::lemma_alloc_table_preserves_invariants,
+    PageTableMem::lemma_alloc_table_preserves_accessibility,
+    PageTableMem::lemma_write_preserves_invariants,
 }
 
 /// **EXEC-MODE** Describe a page table stored in physical memory.
@@ -442,11 +468,10 @@ impl PageTableMemExec {
     /// Assumption: To satisfy the post-condition we need to assume the correctness of
     /// the memory allocator, which may be verified in the future work.
     #[verifier::external_body]
-    pub fn alloc_table(&mut self, level: u64) -> (res: TableExec)
+    pub fn alloc_table(&mut self, level: usize) -> (res: TableExec)
         requires
             old(self)@.invariants(),
         ensures
-            self@.invariants(),
             PageTableMem::alloc_table(old(self)@, self@, level as nat, res@),
     {
         unreached()

@@ -242,6 +242,17 @@ impl PTArchExec {
         assert(vaddr.0 / fsize * fsize <= vaddr.0) by (nonlinear_arith);
         VAddrExec(vaddr.0 / fsize * fsize)
     }
+
+    /// Get the corresponding level of a frame size.
+    #[verifier::external_body]
+    pub fn level_of_frame_size(&self, size: FrameSize) -> (res: usize)
+        requires
+            self@.is_valid_frame_size(size),
+        ensures
+            res == self@.level_of_frame_size(size),
+    {
+        self.0.as_slice().iter().position(|l| l.frame_size.as_usize() == size.as_usize()).unwrap()
+    }
 }
 
 /// For VMSAv8-64 using 4K granule. The architecture is specified as follows:

@@ -263,7 +263,6 @@ proof fn ll_init_implies_pt_init(st: LowLevelState)
 /// Theorem. The low-level init state refines the high-level init state.
 proof fn ll_init_refines_hl_init(st: LowLevelState)
     requires
-        st.tlb_is_submap_of_pt(),
         st.init(),
     ensures
         st@.init(),
