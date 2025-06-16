@@ -6,7 +6,6 @@ use super::{pt::PageTable, pte::GenericPTE};
 use crate::{
     common::{
         addr::{PAddr, VAddrExec},
-        arch::VMSAV8_4K_ARCH,
         frame::FrameExec,
         PagingResult,
     },
@@ -31,7 +30,6 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
     }
 
     proof fn init_implies_invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) {
-        assume(pt_mem.arch@ == VMSAV8_4K_ARCH);
         pt_mem.view().lemma_init_implies_invariants();
         let pt = PageTable::<PTE> { pt_mem, constants, _phantom: PhantomData };
         assert forall|base: PAddr, idx: nat| pt.pt_mem@.accessible(base, idx) implies {

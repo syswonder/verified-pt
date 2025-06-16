@@ -294,9 +294,9 @@ impl PageTableMem {
     }
 
     /// Lemma. Different tables have different base addresses.
-    pub proof fn lemma_table_base_unique(self)
+    pub broadcast proof fn lemma_table_base_unique(self)
         requires
-            self.invariants(),
+            #[trigger] self.invariants(),
         ensures
             forall|i, j|
                 #![auto]
@@ -407,8 +407,9 @@ impl PageTableMem {
     }
 }
 
-/// Page table memory lemmas.
+/// Page table memory related lemmas.
 pub broadcast group group_pt_mem_lemmas {
+    PageTableMem::lemma_table_base_unique,
     PageTableMem::lemma_contains_root,
     PageTableMem::lemma_init_implies_invariants,
     PageTableMem::lemma_alloc_table_preserves_invariants,

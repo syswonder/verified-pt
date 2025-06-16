@@ -34,14 +34,13 @@ impl PTTreePath {
     }
 
     /// Check if path is valid.
-    pub open spec fn valid(self, arch: PTArch, start_level: nat) -> bool
+    pub open spec fn valid(self, arch: PTArch, start: nat) -> bool
         recommends
             arch.valid(),
     {
         &&& self.len() > 0
-        &&& self.len() + start_level <= arch.level_count()
-        &&& forall|i: int|
-            0 <= i < self.len() ==> self.0[i] < arch.entry_count(i as nat + start_level)
+        &&& self.len() + start <= arch.level_count()
+        &&& forall|i: int| 0 <= i < self.len() ==> self.0[i] < arch.entry_count(i as nat + start)
     }
 
     /// If `self` has a non-empty prefix `p`.
@@ -63,15 +62,23 @@ impl PTTreePath {
                 0 <= j < i ==> a.0[j] == b.0[j]
     }
 
-    /// Get a `Self` from a virtual address, used to query the page table from root.
-    ///
-    /// The last query level of the returned path is `level`, and the path length is `level + 1`.
-    pub open spec fn from_vaddr(vaddr: VAddr, arch: PTArch, level: nat) -> Self
+    /// Get a `PTTreePath` from a virtual address, used to query the page table from
+    /// a given start level.
+    pub open spec fn from_vaddr(vaddr: VAddr, arch: PTArch, start: nat, end: nat) -> Self
         recommends
             arch.valid(),
-            level < arch.level_count(),
+            start <= end < arch.level_count(),
     {
-        Self(Seq::new(level + 1, |i: int| arch.pte_index(vaddr, i as nat)))
+        Self(Seq::new((end - start) as nat + 1, |i: int| arch.pte_index(vaddr, i as nat + start)))
+    }
+
+    /// Get a `PTTreePath` from a virtual address, used to query the page table from root.
+    pub open spec fn from_vaddr_root(vaddr: VAddr, arch: PTArch, end: nat) -> Self
+        recommends
+            arch.valid(),
+            end < arch.level_count(),
+    {
+        Self::from_vaddr(vaddr, arch, 0, end)
     }
 
     /// Calculate the virtual address corresponding to the path from root.
@@ -110,13 +117,13 @@ impl PTTreePath {
     }
 
     /// Lemma. A prefix of a valid path is also valid.
-    pub proof fn lemma_prefix_valid(self, arch: PTArch, start_level: nat, pref: Self)
+    pub proof fn lemma_prefix_valid(self, arch: PTArch, start: nat, pref: Self)
         requires
             arch.valid(),
-            self.valid(arch, start_level),
+            self.valid(arch, start),
             self.has_prefix(pref),
         ensures
-            pref.valid(arch, start_level),
+            pref.valid(arch, start),
     {
     }
 
@@ -169,19 +176,55 @@ impl PTTreePath {
         }
     }
 
-    /// Lemma. `from_vaddr` produces a valid path rooted at level 0.
-    pub proof fn lemma_from_vaddr_yields_valid_path(vaddr: VAddr, arch: PTArch, level: nat)
+    /// Lemma. `from_vaddr` produces a valid path.
+    pub proof fn lemma_from_vaddr_yields_valid_path(
+        vaddr: VAddr,
+        arch: PTArch,
+        start: nat,
+        end: nat,
+    )
         by (nonlinear_arith)
         requires
-            level < arch.level_count(),
+            start <= end < arch.level_count(),
             arch.valid(),
         ensures
-            Self::from_vaddr(vaddr, arch, level).valid(arch, 0),
+            Self::from_vaddr(vaddr, arch, start, end).valid(arch, start),
     {
-        let path = Self::from_vaddr(vaddr, arch, level);
+        let path = Self::from_vaddr(vaddr, arch, start, end);
         assert forall|i: int| 0 <= i < path.len() implies path.0[i] < arch.entry_count(
-            i as nat,
-        ) by { assert(arch.pte_index(vaddr, i as nat) < arch.entry_count(i as nat)) }
+            i as nat + start,
+        ) by { assert(arch.pte_index(vaddr, i as nat + start) < arch.entry_count(i as nat + start))
+        }
+    }
+
+    /// Lemma. `from_vaddr_root` produces a valid path.
+    pub proof fn lemma_from_vaddr_root_yields_valid_path(vaddr: VAddr, arch: PTArch, end: nat)
+        requires
+            end < arch.level_count(),
+            arch.valid(),
+        ensures
+            Self::from_vaddr_root(vaddr, arch, end).valid(arch, 0),
+    {
+        Self::lemma_from_vaddr_yields_valid_path(vaddr, arch, 0, end);
+    }
+
+    /// Lemma. from_vaddr(vaddr, arch, start, end).step().1 == from_vaddr(vaddr, arch, start + 1, end)
+    pub proof fn lemma_from_vaddr_step(vaddr: VAddr, arch: PTArch, start: nat, end: nat)
+        requires
+            start < end < arch.level_count(),
+            arch.valid(),
+        ensures
+            Self::from_vaddr(vaddr, arch, start, end).step().1 == Self::from_vaddr(
+                vaddr,
+                arch,
+                start + 1,
+                end,
+            ),
+    {
+        let path = Self::from_vaddr(vaddr, arch, start, end);
+        let (idx, remain) = path.step();
+        let path2 = Self::from_vaddr(vaddr, arch, start + 1, end);
+        assert(remain.0 == path2.0);
     }
 
     /// Lemma. The address computed by `to_vaddr` is aligned to the frame size of the last level.
@@ -402,12 +445,16 @@ impl PTTreePath {
     }
 
     // Lemma. `to_vaddr` is the inverse of `from_vaddr`
-    pub proof fn lemma_to_vaddr_is_inverse_of_from_vaddr(arch: PTArch, vaddr: VAddr, path: Self)
+    pub proof fn lemma_to_vaddr_is_inverse_of_from_vaddr_root(
+        arch: PTArch,
+        vaddr: VAddr,
+        path: Self,
+    )
         requires
             arch.valid(),
             path.valid(arch, 0),
             vaddr.aligned(arch.frame_size((path.len() - 1) as nat).as_nat()),
-            path == Self::from_vaddr(vaddr, arch, (path.len() - 1) as nat),
+            path == Self::from_vaddr_root(vaddr, arch, (path.len() - 1) as nat),
         ensures
             path.to_vaddr(arch) == vaddr,
     {

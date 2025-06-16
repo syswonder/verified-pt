@@ -12,7 +12,7 @@ verus! {
 
 /// Represents a node in the page table tree, which can be either an intermediate node
 /// or a leaf node mapping to a physical frame.
-pub tracked struct PTTreeNode {
+pub struct PTTreeNode {
     /// Page table config constants.
     pub constants: PTConstants,
     /// The level of the node in the page table hierarchy.
@@ -23,7 +23,7 @@ pub tracked struct PTTreeNode {
 
 /// Represents an entry in the page table node, which can be a sub-node, a physical frame,
 /// or an empty entry.
-pub tracked enum NodeEntry {
+pub enum NodeEntry {
     /// A sub-node in the page table, representing an intermediate level of the page table hierarchy.
     Node(PTTreeNode),
     /// A physical frame mapped by the node, representing a leaf node in the page table tree.
@@ -962,7 +962,7 @@ impl PTTreeNode {
             frame,
         ).contains_pair(path2, frame2) by {
             if path2 == path {
-                assume(frame2 == frame);
+                assert(frame2 == frame);
             }
         }
         // `self.path_mappings().insert(path, frame)` is a subset of `new.path_mappings()`

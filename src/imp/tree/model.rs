@@ -97,7 +97,7 @@ impl PTTreeModel {
             frame.base.0 >= self.pmem_lb().0,
             frame.base.0 + frame.size.as_nat() <= self.pmem_ub().0,
     {
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
@@ -118,7 +118,7 @@ impl PTTreeModel {
         recommends
             self.invariants(),
     {
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
@@ -142,7 +142,7 @@ impl PTTreeModel {
         recommends
             self.invariants(),
     {
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vaddr,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
@@ -275,17 +275,17 @@ impl PTTreeModel {
         self.map_preserves_invariants(vbase, frame);
 
         // `path` is the path to the entry containing the mapping.
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        PTTreePath::lemma_from_vaddr_yields_valid_path(
+        PTTreePath::lemma_from_vaddr_root_yields_valid_path(
             vbase,
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr(self.arch(), vbase, path);
+        PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr_root(self.arch(), vbase, path);
         assert(path.to_vaddr(self.arch()) == vbase);
 
         // `path_mappings` is updated according to lemma.
@@ -387,7 +387,7 @@ impl PTTreeModel {
                     frame.size.as_nat(),
                 ),
     {
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vaddr,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
@@ -445,7 +445,7 @@ impl PTTreeModel {
                     vbase,
                     frame.size.as_nat(),
                 );
-            let path = PTTreePath::from_vaddr(
+            let path = PTTreePath::from_vaddr_root(
                 vaddr,
                 self.arch(),
                 (self.arch().level_count() - 1) as nat,
@@ -478,13 +478,13 @@ impl PTTreeModel {
         ensures
             self.map(vbase, frame).unwrap().invariants(),
     {
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
         // Prove `path` is valid
-        PTTreePath::lemma_from_vaddr_yields_valid_path(
+        PTTreePath::lemma_from_vaddr_root_yields_valid_path(
             vbase,
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
@@ -500,12 +500,12 @@ impl PTTreeModel {
         ensures
             self.unmap(vbase).unwrap().invariants(),
     {
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
-        PTTreePath::lemma_from_vaddr_yields_valid_path(
+        PTTreePath::lemma_from_vaddr_root_yields_valid_path(
             vbase,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
@@ -525,7 +525,7 @@ impl PTTreeModel {
                 Err(_) => PageTableState::map(self@, self@, vbase, frame, Err(())),
             },
     {
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
@@ -552,7 +552,7 @@ impl PTTreeModel {
                 Err(_) => PageTableState::unmap(self@, self@, vbase, Err(())),
             },
     {
-        let path = PTTreePath::from_vaddr(
+        let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             (self.arch().level_count() - 1) as nat,

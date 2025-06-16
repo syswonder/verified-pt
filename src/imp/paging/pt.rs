@@ -6,7 +6,7 @@ use super::pte::GenericPTE;
 use crate::{
     common::{
         addr::{PAddr, VAddr, VAddrExec},
-        arch::{PTArch, VMSAV8_4K_ARCH},
+        arch::PTArch,
         frame::{Frame, FrameExec, MemAttr},
         PagingResult,
     },
@@ -70,7 +70,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     /// Construct a new page table.
     pub fn new(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> (res: Self)
         requires
-            pt_mem@.arch == VMSAV8_4K_ARCH,
+            pt_mem@.arch == constants.arch@,
         ensures
             res.invariants(),
             res.pt_mem == pt_mem,
@@ -295,9 +295,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pt_mem.view().lemma_contains_root();
             self.lemma_build_node_implies_invariants(self.pt_mem@.root(), 0);
             let node = self.build_node(self.pt_mem@.root(), 0);
-            self.lemma_spec_walk_consistent_with_recursive_visit(vaddr@);
+            self.lemma_spec_walk_consistent_with_recursive_visit(self.pt_mem@.root(), 0, vaddr@);
             node.lemma_visit_length_bounds(
-                PTTreePath::from_vaddr(
+                PTTreePath::from_vaddr_root(
                     vaddr@,
                     self.spec_arch(),
                     (self.spec_arch().level_count() - 1) as nat,
@@ -353,15 +353,11 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             },
             res is Err ==> old(self) == self,
     {
-        // TODO
+        // TODO: add proof
         assume(false);
         let level = self.constants.arch.level_of_frame_size(frame.size);
         let huge = level < self.constants.arch.level_count() - 1;
-        self.insert(
-            vbase,
-            level,
-            PTE::new(frame.base, frame.attr, huge),
-        )
+        self.insert(vbase, level, PTE::new(frame.base, frame.attr, huge))
     }
 
     /// Remove the mapping for a given virtual base address.
@@ -376,7 +372,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             },
             res is Err ==> old(self) == self,
     {
-        // TODO
+        // TODO: add proof
         assume(false);
         self.remove(vbase)
     }
@@ -403,60 +399,30 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level < self.spec_arch().level_count(),
         decreases self.spec_arch().level_count() - level,
     {
-        let arch = self.spec_arch();
-        let pt_mem = self.pt_mem.view();
-        let table = pt_mem.table(base);
-        // Construct entries for the node
-        let entries = if level >= arch.level_count() - 1 {
-            // Leaf table
-            Seq::new(
-                arch.entry_count(level),
-                |i|
-                    {
-                        let pte = PTE::spec_from_u64(pt_mem.read(base, i as nat));
-                        if pte.spec_valid() {
-                            // Page descriptor
+        let entries = Seq::new(
+            self.spec_arch().entry_count(level),
+            |i|
+                {
+                    let pte = PTE::spec_from_u64(self.pt_mem@.read(base, i as nat));
+                    if pte.spec_valid() {
+                        if level >= self.spec_arch().level_count() - 1 || pte.spec_huge() {
+                            // Leaf table or block descriptor
                             NodeEntry::Frame(
                                 Frame {
                                     base: pte.spec_addr(),
-                                    size: arch.frame_size(level),
+                                    size: self.spec_arch().frame_size(level),
                                     attr: pte.spec_attr(),
                                 },
                             )
                         } else {
-                            // Invalid entry
-                            NodeEntry::Empty
+                            // Table descriptor, recursively build node
+                            NodeEntry::Node(self.build_node(pte.spec_addr(), level + 1))
                         }
-                    },
-            )
-        } else {
-            // Intermediate table
-            Seq::new(
-                arch.entry_count(level),
-                |i|
-                    {
-                        let pte = PTE::spec_from_u64(pt_mem.read(base, i as nat));
-                        if pte.spec_valid() {
-                            if pte.spec_huge() {
-                                // Block descriptor
-                                NodeEntry::Frame(
-                                    Frame {
-                                        base: pte.spec_addr(),
-                                        size: arch.frame_size(level),
-                                        attr: pte.spec_attr(),
-                                    },
-                                )
-                            } else {
-                                // Table descriptor, recursively build node
-                                NodeEntry::Node(self.build_node(pte.spec_addr(), level + 1))
-                            }
-                        } else {
-                            // Invalid entry
-                            NodeEntry::Empty
-                        }
-                    },
-            )
-        };
+                    } else {
+                        NodeEntry::Empty
+                    }
+                },
+        );
         PTTreeNode { constants: self.constants@, level, entries }
     }
 
@@ -470,9 +436,42 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level < self.spec_arch().level_count(),
         ensures
             self.build_node(base, level).invariants(),
+        decreases self.spec_arch().level_count() - level,
     {
-        // TODO
-        assume(false)
+        let node = self.build_node(base, level);
+        assert(node.constants.arch.valid());
+        assert(node.level < node.constants.arch.level_count());
+        // TODO: why can't Verus prove this?
+        assume(node.entries.len() == self.spec_arch().entry_count(level));
+
+        assert forall|i| 0 <= i < node.entries.len() implies {
+            &&& PTTreeNode::is_entry_valid(#[trigger] node.entries[i], node.level, node.constants)
+            &&& node.entries[i] is Node ==> node.entries[i]->Node_0.invariants()
+        } by {
+            match node.entries[i] {
+                NodeEntry::Frame(frame) => {
+                    // TODO: why can't Verus prove this?
+                    assume(frame.size == self.spec_arch().frame_size(level));
+                    // TODO: add more assumptions for GenericPTE
+                    assume(frame.base.aligned(frame.size.as_nat()));
+                    assume(frame.base.0 >= node.constants.pmem_lb.0);
+                    assume(frame.base.0 + frame.size.as_nat() <= node.constants.pmem_ub.0);
+                },
+                NodeEntry::Node(subnode) => {
+                    let pte = PTE::spec_from_u64(self.pt_mem@.read(base, i as nat));
+                    assert(self.pt_mem@.accessible(base, i as nat));
+                    // TODO: why Verus can't prove this?
+                    assume(pte.spec_valid());
+                    assume(!pte.spec_huge());
+                    assume(subnode == self.build_node(pte.spec_addr(), level + 1));
+                    // Invariants ensures this
+                    assert(self.pt_mem@.contains_table(pte.spec_addr()));
+                    assert(self.pt_mem@.table(pte.spec_addr()).level == level + 1);
+                    self.lemma_build_node_implies_invariants(pte.spec_addr(), level + 1);
+                },
+                NodeEntry::Empty => (),
+            }
+        }
     }
 
     /// Lemma. The tree model derived from the executable page table maintains the
@@ -489,25 +488,31 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
 
     /// Lemma. The specification-level walk yields results consistent with the node model
     /// traversal via `PTTreeNode::recursive_visit`.
-    pub proof fn lemma_spec_walk_consistent_with_recursive_visit(self, vaddr: VAddr)
+    proof fn lemma_spec_walk_consistent_with_recursive_visit(
+        self,
+        base: PAddr,
+        level: nat,
+        vaddr: VAddr,
+    )
         requires
             self.invariants(),
+            self.pt_mem@.contains_table(base),
+            level == self.pt_mem@.table(base).level,
         ensures
             ({
-                let (pte, level) = self.spec_walk(vaddr, self.pt_mem@.root(), 0);
-                let node = self.build_node(self.pt_mem@.root(), 0);
-                let visited = node.recursive_visit(
-                    PTTreePath::from_vaddr(
-                        vaddr,
-                        self.spec_arch(),
-                        (self.spec_arch().level_count() - 1) as nat,
-                    ),
-                );
-                visited.len() == level + 1 && visited.last() == if pte.spec_valid() {
+                let max_level = self.spec_arch().level_count() - 1;
+                let (pte, reached_level) = self.spec_walk(vaddr, base, level);
+                let node = self.build_node(base, level);
+                let path = PTTreePath::from_vaddr(vaddr, self.spec_arch(), level, max_level as nat);
+                let visited = node.recursive_visit(path);
+                // This last entry returned by `recursive_visit` is consistent with
+                // the page table entry returned by `spec_walk`.
+                visited.len() == reached_level - level + 1 && visited.last()
+                    == if pte.spec_valid() {
                     NodeEntry::Frame(
                         Frame {
                             base: pte.spec_addr(),
-                            size: self.spec_arch().frame_size(level),
+                            size: self.spec_arch().frame_size(reached_level),
                             attr: pte.spec_attr(),
                         },
                     )
@@ -515,34 +520,73 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     NodeEntry::Empty
                 }
             }),
+        decreases self.spec_arch().level_count() - level,
     {
-        let (pte, level) = self.spec_walk(vaddr, self.pt_mem@.root(), 0);
-        let node = self.build_node(self.pt_mem@.root(), 0);
-        let entry = node.recursive_visit(
-            PTTreePath::from_vaddr(
-                vaddr,
-                self.spec_arch(),
-                (self.spec_arch().level_count() - 1) as nat,
-            ),
-        ).last();
+        let arch = self.spec_arch();
+        let max_level = (arch.level_count() - 1) as nat;
+        let (pte, reached_level) = self.spec_walk(vaddr, base, level);
 
-        self.pt_mem@.lemma_contains_root();
-        self.lemma_build_node_implies_invariants(self.pt_mem@.root(), 0);
-        assert(node.invariants());
-        // TODO
-        assume(false);
+        let node = self.build_node(base, level);
+        self.lemma_build_node_implies_invariants(base, level);
+        let path = PTTreePath::from_vaddr(vaddr, arch, level, max_level);
+        PTTreePath::lemma_from_vaddr_yields_valid_path(vaddr, arch, level, max_level);
+        // Precondition of `recursive_visit`: node.invariants and path.valid
+        let visited = node.recursive_visit(path);
+
+        let (idx, remain) = path.step();
+        let entry = node.entries[idx as int];
+        if path.len() <= 1 {
+            // Leaf node
+            assert(visited == seq![entry]);
+        } else {
+            // Intermediate node
+            assert(self.pt_mem@.accessible(base, idx));
+            let pte2 = PTE::spec_from_u64(self.pt_mem@.read(base, idx));
+            match entry {
+                NodeEntry::Node(subnode) => {
+                    // `pte2` points to a subtable
+                    let subtable_base = pte2.spec_addr();
+                    // TODO: why can't Verus prove this?
+                    assume(pte2.spec_valid() && !pte2.spec_huge());
+                    assume(subnode == self.build_node(subtable_base, level + 1));
+                    // Recursive visit from the subtable
+                    self.lemma_spec_walk_consistent_with_recursive_visit(
+                        subtable_base,
+                        level + 1,
+                        vaddr,
+                    );
+                    assert((pte, reached_level) == self.spec_walk(vaddr, subtable_base, level + 1));
+                    assert(visited == seq![entry].add(subnode.recursive_visit(remain)));
+
+                    PTTreePath::lemma_from_vaddr_step(vaddr, arch, level, max_level);
+                    assert(remain == PTTreePath::from_vaddr(vaddr, arch, level + 1, max_level));
+                },
+                NodeEntry::Frame(frame) => {
+                    // `pte2` points to a frame
+                    // TODO: why can't Verus prove this?
+                    assume(pte2.spec_valid() && pte2.spec_huge());
+                    assume(frame.size == arch.frame_size(level));
+                    assume(frame.base == pte.spec_addr());
+                    assume(frame.attr == pte.spec_attr());
+                },
+                NodeEntry::Empty => {
+                    // `pte2` is invalid
+                    // TODO: why can't Verus prove this?
+                    assume(!pte2.spec_valid());
+                },
+            }
+        }
     }
 
-    /// Theorem. The interpreted view of the page table memory is consistent with the view derived
+    /// Axiom. The interpreted view of the page table memory is consistent with the view derived
     /// from the model tree, ensuring semantic agreement between hardware and software views.
+    #[verifier::external_body]
     pub proof fn model_consistent_with_hardware(self)
         requires
             self.invariants(),
         ensures
             self.view().view() == PageTableState::new(self.pt_mem@.interpret(), self.constants@),
     {
-        // TODO
-        assume(false);
     }
 }
 
