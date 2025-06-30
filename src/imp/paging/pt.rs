@@ -83,69 +83,84 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         pt
     }
 
-    /// Perform a recursive specification-level page table walk starting from a given base.
-    /// Terminate upon reaching an invalid or block entry.
-    pub open spec fn spec_walk(self, vaddr: VAddr, base: PAddr, level: nat) -> (PTE, nat)
-        recommends
-            self.invariants(),
-            level < self.spec_arch().level_count(),
-        decreases self.spec_arch().level_count() - level,
-    {
-        let pte = PTE::spec_from_u64(
-            self.pt_mem@.read(base, self.spec_arch().pte_index(vaddr, level)),
-        );
-        if level >= self.spec_arch().level_count() - 1 {
-            (pte, level)
-        } else {
-            if pte.spec_valid() && !pte.spec_huge() {
-                self.spec_walk(vaddr, pte.spec_addr(), level + 1)
-            } else {
-                (pte, level)
-            }
-        }
-    }
-
     /// Traverse the page table for the given virtual address and return the matching
     /// entry and level. Proven consistent with the specification-level walk.
     pub fn walk(&self, vaddr: VAddrExec) -> (res: (PTE, usize))
         requires
             self.invariants(),
         ensures
-            self.spec_walk(vaddr@, self.pt_mem@.root(), 0) == (res.0, res.1 as nat),
+            ({
+                let ptes = self.spec_walk(
+                    vaddr@,
+                    self.pt_mem@.root(),
+                    0,
+                    (self.spec_arch().level_count() - 1) as nat,
+                );
+                res.0 == ptes.last() && res.1 == ptes.len() - 1
+            }),
     {
         proof {
             assert(self.spec_arch().valid());
             assert(self.spec_arch().level_count() >= 1);
             self.pt_mem@.lemma_contains_root();
-            assume(false);
         }
-        let level_count = self.constants.arch.level_count();
+        let stop_level = self.constants.arch.level_count() - 1;
         let mut level = 0;
         let mut base = self.pt_mem.root();
         let mut idx = self.constants.arch.pte_index(vaddr, level);
         let mut val = self.pt_mem.read(base, idx);
         let mut pte = PTE::from_u64(val);
 
-        while level < level_count - 1
+        while level < stop_level
             invariant
                 self.invariants(),
                 self.pt_mem@.accessible(base@, idx as nat),
                 self.pt_mem@.table(base@).level == level as nat,
                 self.pt_mem@.read(base@, idx as nat) == val,
+                stop_level == self.spec_arch().level_count() - 1,
                 pte == PTE::spec_from_u64(val),
-                level < level_count,
+                level <= stop_level,
+                ({
+                    let ptes = self.spec_walk(vaddr@, self.pt_mem@.root(), 0, level as nat);
+                    pte == ptes.last() && level == ptes.len() - 1
+                }),
         {
             if !pte.valid() || pte.huge() {
+                proof {
+                    if level > 0 {
+                        let ptes1 = self.spec_walk(vaddr@, self.pt_mem@.root(), 0, level as nat);
+                        self.lemma_full_walk_stabilizes(
+                            vaddr@,
+                            self.pt_mem@.root(),
+                            0,
+                            level as nat,
+                            (self.spec_arch().level_count() - 1) as nat,
+                        );
+                    }
+                }
                 // Reach an invalid or huge page entry, terminate.
-                break ;
+                return (pte, level);
             }
             // Continue to the next level.
+
+            let ghost ptes1 = self.spec_walk(vaddr@, self.pt_mem@.root(), 0, level as nat);
+            let ghost ptes2 = self.spec_walk(vaddr@, self.pt_mem@.root(), 0, level as nat + 1);
+            proof {
+                assert(pte == ptes1.last());
+                self.lemma_extend_walk_by_one_level(vaddr@, self.pt_mem@.root(), 0, level as nat);
+                assert(pte.spec_valid() && !pte.spec_huge());
+                assert(ptes2 == ptes1.add(seq![ptes2.last()]));
+            }
 
             level += 1;
             base = pte.addr();
             idx = self.constants.arch.pte_index(vaddr, level);
             val = self.pt_mem.read(base, idx);
             pte = PTE::from_u64(val);
+
+            proof {
+                assert(ptes2.last() == pte);
+            }
         }
         (pte, level)
     }
@@ -486,6 +501,181 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         self.lemma_build_node_implies_invariants(self.pt_mem@.root(), 0);
     }
 
+    /// Perform a recursive specification-level page table walk starting from a given base.
+    ///
+    /// Terminate upon reaching an invalid or block entry, or reaching the specified stop level.
+    pub open spec fn spec_walk(self, vaddr: VAddr, base: PAddr, level: nat, stop_level: nat) -> Seq<
+        PTE,
+    >
+        recommends
+            self.invariants(),
+            level <= stop_level < self.spec_arch().level_count(),
+            self.pt_mem@.contains_table(base),
+            self.pt_mem@.table(base).level == level,
+        decreases stop_level - level,
+    {
+        let pte = PTE::spec_from_u64(
+            self.pt_mem@.read(base, self.spec_arch().pte_index(vaddr, level)),
+        );
+        if level < stop_level && pte.spec_valid() && !pte.spec_huge() {
+            seq![pte].add(self.spec_walk(vaddr, pte.spec_addr(), level + 1, stop_level))
+        } else {
+            seq![pte]
+        }
+    }
+
+    /// Lemma. PTE sequence returned by `spec_walk` has length between 1 and `stop_level - level + 1`.
+    proof fn lemma_walk_length_bounds(self, vaddr: VAddr, base: PAddr, level: nat, stop_level: nat)
+        requires
+            self.invariants(),
+            level <= stop_level < self.spec_arch().level_count(),
+            self.pt_mem@.contains_table(base),
+            self.pt_mem@.table(base).level == level,
+        ensures
+            1 <= self.spec_walk(vaddr, base, level, stop_level).len() <= stop_level - level + 1,
+        decreases stop_level - level,
+    {
+        assert(self.pt_mem@.accessible(base, self.spec_arch().pte_index(vaddr, level)));
+        let pte = PTE::spec_from_u64(
+            self.pt_mem@.read(base, self.spec_arch().pte_index(vaddr, level)),
+        );
+        if level < stop_level && pte.spec_valid() && !pte.spec_huge() {
+            self.lemma_walk_length_bounds(vaddr, pte.spec_addr(), level + 1, stop_level)
+        } else {
+            assert(self.spec_walk(vaddr, base, level, stop_level).len() == 1);
+        }
+    }
+
+    /// Lemma. `spec_walk` with `stop_level + 1` extends `spec_walk` with `stop_level`
+    /// by at most one valid and non-huge PTE.
+    ///
+    /// That is, if the last PTE from the shorter walk is valid and not a huge page,
+    /// then the walk continues one more level; otherwise, the result stays the same.
+    proof fn lemma_extend_walk_by_one_level(
+        self,
+        vaddr: VAddr,
+        base: PAddr,
+        level: nat,
+        stop_level: nat,
+    )
+        requires
+            self.invariants(),
+            level <= stop_level < self.spec_arch().level_count() - 1,
+            self.pt_mem@.contains_table(base),
+            self.pt_mem@.table(base).level == level,
+        ensures
+            ({
+                let ptes1 = self.spec_walk(vaddr, base, level, stop_level);
+                let ptes2 = self.spec_walk(vaddr, base, level, stop_level + 1);
+                // `ptes1` is either a prefix of `ptes2` or `ptes1` equals `ptes2` depending on
+                // the last entry in `ptes1`
+                ptes2 == if ptes1.last().spec_valid() && !ptes1.last().spec_huge() {
+                    ptes1.add(
+                        seq![
+                            PTE::spec_from_u64(
+                                self.pt_mem@.read(
+                                    ptes1.last().spec_addr(),
+                                    self.spec_arch().pte_index(vaddr, level + ptes1.len()),
+                                ),
+                            ),
+                        ],
+                    )
+                } else {
+                    ptes1
+                }
+            }),
+        decreases stop_level - level,
+    {
+        let ptes1 = self.spec_walk(vaddr, base, level, stop_level);
+        let ptes2 = self.spec_walk(vaddr, base, level, stop_level + 1);
+        self.lemma_walk_length_bounds(vaddr, base, level, stop_level);
+
+        assert(self.pt_mem@.accessible(base, self.spec_arch().pte_index(vaddr, level)));
+        // Page table entry at current level
+        let pte = PTE::spec_from_u64(
+            self.pt_mem@.read(base, self.spec_arch().pte_index(vaddr, level)),
+        );
+        if level == stop_level {
+            // Base case: reached the stop level
+            assert(ptes1 == seq![pte]);
+            if pte.spec_valid() && !pte.spec_huge() {
+                let ptes3 = self.spec_walk(vaddr, pte.spec_addr(), level + 1, stop_level + 1);
+                assert(ptes2 == seq![pte].add(ptes3));
+                assert(ptes3 == seq![
+                    PTE::spec_from_u64(
+                        self.pt_mem@.read(
+                            pte.spec_addr(),
+                            self.spec_arch().pte_index(vaddr, level + ptes1.len()),
+                        ),
+                    ),
+                ])
+            }
+        } else {
+            // Recursive case: walk down the page table
+            if pte.spec_valid() && !pte.spec_huge() {
+                // `ptes3` is a suffix of `ptes1`
+                let ptes3 = self.spec_walk(vaddr, pte.spec_addr(), level + 1, stop_level);
+                self.lemma_walk_length_bounds(vaddr, pte.spec_addr(), level + 1, stop_level);
+                assert(ptes1 == seq![pte].add(ptes3));
+                // `ptes4` is a suffix of `ptes2`
+                let ptes4 = self.spec_walk(vaddr, pte.spec_addr(), level + 1, stop_level + 1);
+                self.lemma_walk_length_bounds(vaddr, pte.spec_addr(), level + 1, stop_level + 1);
+                assert(ptes2 == seq![pte].add(ptes4));
+                // Recursive lemma shows the relationship between `ptes3` and `ptes4`
+                self.lemma_extend_walk_by_one_level(vaddr, pte.spec_addr(), level + 1, stop_level);
+                // Thus `ptes1` and `ptes2` have the same relationship
+                assert(ptes2 == if ptes1.last().spec_valid() && !ptes1.last().spec_huge() {
+                    ptes1.add(
+                        seq![
+                            PTE::spec_from_u64(
+                                self.pt_mem@.read(
+                                    ptes1.last().spec_addr(),
+                                    self.spec_arch().pte_index(vaddr, level + ptes1.len()),
+                                ),
+                            ),
+                        ],
+                    )
+                } else {
+                    ptes1
+                });
+            }
+        }
+    }
+
+    /// Lemma: Once `spec_walk` reaches a point where the last entry is invalid or huge,
+    /// the walk result does not change by increasing `stop_level` further.
+    proof fn lemma_full_walk_stabilizes(
+        self,
+        vaddr: VAddr,
+        base: PAddr,
+        level: nat,
+        stop_level: nat,
+        stop_level2: nat,
+    )
+        requires
+            self.invariants(),
+            level <= stop_level < stop_level2 < self.spec_arch().level_count(),
+            self.pt_mem@.contains_table(base),
+            self.pt_mem@.table(base).level == level,
+        ensures
+            ({
+                let ptes1 = self.spec_walk(vaddr, base, level, stop_level);
+                let ptes2 = self.spec_walk(vaddr, base, level, stop_level2);
+                (!ptes1.last().spec_valid() || ptes1.last().spec_huge()) ==> ptes1 == ptes2
+            }),
+        decreases stop_level2 - stop_level,
+    {
+        self.lemma_extend_walk_by_one_level(vaddr, base, level, stop_level);
+        if stop_level < stop_level2 - 1 {
+            let ptes1 = self.spec_walk(vaddr, base, level, stop_level);
+            let ptes2 = self.spec_walk(vaddr, base, level, stop_level + 1);
+            if !ptes1.last().spec_valid() || ptes1.last().spec_huge() {
+                assert(ptes1 == ptes2);
+                self.lemma_full_walk_stabilizes(vaddr, base, level, stop_level + 1, stop_level2)
+            }
+        }
+    }
+
     /// Lemma. The specification-level walk yields results consistent with the node model
     /// traversal via `PTTreeNode::recursive_visit`.
     proof fn lemma_spec_walk_consistent_with_recursive_visit(
@@ -500,19 +690,25 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level == self.pt_mem@.table(base).level,
         ensures
             ({
-                let max_level = self.spec_arch().level_count() - 1;
-                let (pte, reached_level) = self.spec_walk(vaddr, base, level);
+                let stop_level = (self.spec_arch().level_count() - 1) as nat;
+                let ptes = self.spec_walk(vaddr, base, level, stop_level);
+                let pte = ptes.last();
+
                 let node = self.build_node(base, level);
-                let path = PTTreePath::from_vaddr(vaddr, self.spec_arch(), level, max_level as nat);
+                let path = PTTreePath::from_vaddr(
+                    vaddr,
+                    self.spec_arch(),
+                    level,
+                    stop_level as nat,
+                );
                 let visited = node.recursive_visit(path);
                 // This last entry returned by `recursive_visit` is consistent with
                 // the page table entry returned by `spec_walk`.
-                visited.len() == reached_level - level + 1 && visited.last()
-                    == if pte.spec_valid() {
+                visited.len() == ptes.len() && visited.last() == if pte.spec_valid() {
                     NodeEntry::Frame(
                         Frame {
                             base: pte.spec_addr(),
-                            size: self.spec_arch().frame_size(reached_level),
+                            size: self.spec_arch().frame_size((level + ptes.len() - 1) as nat),
                             attr: pte.spec_attr(),
                         },
                     )
@@ -523,13 +719,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.spec_arch().level_count() - level,
     {
         let arch = self.spec_arch();
-        let max_level = (arch.level_count() - 1) as nat;
-        let (pte, reached_level) = self.spec_walk(vaddr, base, level);
+        let stop_level = (arch.level_count() - 1) as nat;
+        let ptes = self.spec_walk(vaddr, base, level, stop_level);
+        let pte = ptes.last();
 
         let node = self.build_node(base, level);
         self.lemma_build_node_implies_invariants(base, level);
-        let path = PTTreePath::from_vaddr(vaddr, arch, level, max_level);
-        PTTreePath::lemma_from_vaddr_yields_valid_path(vaddr, arch, level, max_level);
+        let path = PTTreePath::from_vaddr(vaddr, arch, level, stop_level);
+        PTTreePath::lemma_from_vaddr_yields_valid_path(vaddr, arch, level, stop_level);
         // Precondition of `recursive_visit`: node.invariants and path.valid
         let visited = node.recursive_visit(path);
 
@@ -555,11 +752,16 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         level + 1,
                         vaddr,
                     );
-                    assert((pte, reached_level) == self.spec_walk(vaddr, subtable_base, level + 1));
+                    assert(pte == self.spec_walk(
+                        vaddr,
+                        subtable_base,
+                        level + 1,
+                        stop_level,
+                    ).last());
                     assert(visited == seq![entry].add(subnode.recursive_visit(remain)));
 
-                    PTTreePath::lemma_from_vaddr_step(vaddr, arch, level, max_level);
-                    assert(remain == PTTreePath::from_vaddr(vaddr, arch, level + 1, max_level));
+                    PTTreePath::lemma_from_vaddr_step(vaddr, arch, level, stop_level);
+                    assert(remain == PTTreePath::from_vaddr(vaddr, arch, level + 1, stop_level));
                 },
                 NodeEntry::Frame(frame) => {
                     // `pte2` points to a frame
