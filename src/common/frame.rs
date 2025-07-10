@@ -73,6 +73,50 @@ pub struct MemAttr {
     pub device: bool,
 }
 
+impl MemAttr {
+    /// Constructor.
+    pub fn new(
+        readable: bool,
+        writable: bool,
+        executable: bool,
+        user_accessible: bool,
+        device: bool,
+    ) -> (res: Self)
+        ensures
+            res == Self::spec_new(readable, writable, executable, user_accessible, device),
+    {
+        Self { readable, writable, executable, user_accessible, device }
+    }
+
+    /// Spec-mode constructor.
+    pub open spec fn spec_new(
+        readable: bool,
+        writable: bool,
+        executable: bool,
+        user_accessible: bool,
+        device: bool,
+    ) -> Self {
+        Self { readable, writable, executable, user_accessible, device }
+    }
+
+    /// Default attributes for a frame.
+    ///
+    /// readable/writable/executable/user_accessible/non-device.
+    pub fn default() -> (res: Self)
+        ensures
+            res == Self::spec_default(),
+    {
+        Self::new(true, true, true, true, false)
+    }
+
+    /// Spec-mode default attributes for a frame.
+    ///
+    /// readable/writable/executable/user_accessible/non-device.
+    pub open spec fn spec_default() -> Self {
+        Self::spec_new(true, true, true, true, false)
+    }
+}
+
 /// Represents a physical memory frame (Page or Block).
 pub struct Frame {
     /// The base address of the frame.

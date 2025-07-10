@@ -16,13 +16,22 @@ pub trait GenericPTE: Sized + Clone {
             pte.spec_addr() == addr@,
             pte.spec_attr() == attr,
             pte.spec_huge() == huge,
+            pte.spec_valid(),
+            pte == Self::spec_new(addr@, attr, huge),
     ;
+
+    /// Construct from address and attributes (spec mode).
+    spec fn spec_new(addr: PAddr, attr: MemAttr, huge: bool) -> Self;
 
     /// Construct an empty entry.
     fn empty() -> (pte: Self)
         ensures
+            pte == Self::spec_empty(),
             pte.spec_valid() == false,
     ;
+
+    /// Construct an empty entry (spec mode).
+    spec fn spec_empty() -> Self;
 
     /// Parse from a u64 value.
     fn from_u64(val: u64) -> (pte: Self)

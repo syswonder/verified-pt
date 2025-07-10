@@ -127,9 +127,11 @@ impl VAddrExec {
     }
 
     /// If addr is aligned to `size` bytes.
-    pub fn aligned(self, size: usize) -> bool
+    pub fn aligned(self, size: usize) -> (res: bool)
         requires
             size > 0,
+        ensures
+            res == self@.aligned(size as nat),
     {
         self.0 % size == 0
     }
