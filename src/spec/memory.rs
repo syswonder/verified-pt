@@ -179,7 +179,7 @@ impl PageTableMem {
 
     /// Facts about table view.
     #[verifier::external_body]
-    pub broadcast proof fn lemma_table_view(self, base: PAddr)
+    pub broadcast proof fn table_view_facts(self, base: PAddr)
         requires
             self.invariants(),
         ensures
@@ -253,44 +253,72 @@ impl PageTableMem {
     }
 
     /// Alloc a new table.
-    pub open spec fn alloc_table(s1: Self, s2: Self, level: nat, table: Table) -> bool {
-        &&& s2.arch == s1.arch
-        // `s1` doesn't have the table
-        &&& !s1.tables.contains(table)
-        // new table has valid level
-        &&& table.level == level
-        &&& 0 < level < s1.arch.level_count()
-        // new table has valid size
-        &&& table.size.as_nat() == s1.arch.table_size(
-            level,
-        )
-        // new table is aligned
-        &&& table.base.aligned(table.size.as_nat())
-        // new table is empty
-        &&& s2.table_view(table.base)
-            == seq![0u64; s1.arch.entry_count(level)]
-        // new table doesn't overlap with existing tables
-        &&& forall|i|
-            #![auto]
-            0 <= i < s1.tables.len() ==> !PAddr::overlap(
-                s1.tables[i].base,
-                s1.tables[i].size.as_nat(),
-                table.base,
-                table.size.as_nat(),
-            )
-            // `tables` is updated
-        &&& s2.tables == s1.tables.push(table)
+    pub open spec fn alloc_table(self, level: nat) -> (Self, Table);
+
+    /// Facts that `alloc_table` should satisfy.
+    #[verifier::external_body]
+    pub broadcast proof fn alloc_table_facts(self, level: nat)
+        requires
+            self.invariants(),
+            level < self.arch.level_count(),
+        ensures
+            ({
+                let (s2, table) = #[trigger] self.alloc_table(level);
+                &&& s2.arch == self.arch
+                // `self` doesn't have the table
+                &&& !self.contains_table(
+                    table.base,
+                )
+                // new table has valid level
+                &&& table.level == level
+                // new table has valid size
+                &&& table.size.as_nat() == self.arch.table_size(
+                    level,
+                )
+                // new table is aligned
+                &&& table.base.aligned(
+                    table.size.as_nat(),
+                )
+                // new table is empty
+                &&& s2.table_view(table.base)
+                    == seq![0u64; self.arch.entry_count(level)]
+                // new table doesn't overlap with existing tables
+                &&& forall|i|
+                    #![auto]
+                    0 <= i < self.tables.len() ==> !PAddr::overlap(
+                        self.tables[i].base,
+                        self.tables[i].size.as_nat(),
+                        table.base,
+                        table.size.as_nat(),
+                    )
+                    // `tables` is updated
+                &&& s2.tables == self.tables.push(table)
+            }),
+    {
     }
 
-    /// Write the entry at the given index in the given table.
-    pub open spec fn write(s1: Self, s2: Self, base: PAddr, index: nat, entry: u64) -> bool {
-        &&& s2.arch == s1.arch
-        // Tables are the same
-        &&& s2.tables == s1.tables
-        // The entry is accessible
-        &&& s1.accessible(base, index)
-        // The entry is updated
-        &&& s2.table_view(base) == s1.table_view(base).update(index as int, entry)
+    /// Update the entry at the given index in the given table.
+    pub open spec fn write(self, base: PAddr, index: nat, entry: u64) -> Self;
+
+    /// Facts that `write` should satisfy.
+    #[verifier::external_body]
+    pub broadcast proof fn write_facts(self, base: PAddr, index: nat, entry: u64)
+        requires
+            self.invariants(),
+            self.accessible(base, index),
+        ensures
+            ({
+                let s2 = #[trigger] self.write(base, index, entry);
+                &&& s2.arch == self.arch
+                // Tables are the same
+                &&& s2.tables == self.tables
+                // The entry is updated
+                &&& s2.table_view(base) == self.table_view(base).update(index as int, entry)
+                // Other tables contents are the same
+                &&& forall|i| #![auto] 0 <= i < self.tables.len() && self.tables[i].base != base
+                    ==> s2.table_view(self.tables[i].base) == self.table_view(self.tables[i].base)
+            }),
+    {
     }
 
     /// Lemma. Different tables have different base addresses.
@@ -340,81 +368,123 @@ impl PageTableMem {
     }
 
     /// Lemma. `alloc_table` preserves invariants.
-    pub broadcast proof fn lemma_alloc_table_preserves_invariants(
-        s1: Self,
-        s2: Self,
-        level: nat,
-        table: Table,
-    )
+    pub broadcast proof fn lemma_alloc_table_preserves_invariants(self, level: nat)
         requires
-            s1.invariants(),
-            #[trigger] Self::alloc_table(s1, s2, level, table),
+            self.invariants(),
+            level < self.arch.level_count(),
         ensures
-            s2.invariants(),
+            #[trigger] self.alloc_table(level).0.invariants(),
     {
+        let (s2, table) = self.alloc_table(level);
+        self.alloc_table_facts(level);
         assert forall|table2: Table| #[trigger] s2.tables.contains(table2) implies table2.level
             < s2.arch.level_count() by {
             if table2 != table {
-                assert(s1.tables.contains(table2));
+                assert(self.tables.contains(table2));
             }
         }
     }
 
     /// Lemma. `alloc_table` preserves accessibility.
     pub broadcast proof fn lemma_alloc_table_preserves_accessibility(
-        s1: Self,
-        s2: Self,
+        self,
         level: nat,
-        new_table: Table,
         base: PAddr,
         index: nat,
     )
         requires
-            s1.invariants(),
-            #[trigger] Self::alloc_table(s1, s2, level, new_table),
-            #[trigger] s1.accessible(base, index),
+            self.invariants(),
+            level < self.arch.level_count(),
+            self.accessible(base, index),
         ensures
-            s2.accessible(base, index),
+            #[trigger] self.alloc_table(level).0.accessible(base, index),
     {
+        let (s2, new_table) = self.alloc_table(level);
+        self.alloc_table_facts(level);
         // s2 contains table with base address `base`
-        assert(s1.contains_table(base));
-        assert forall|table: Table| s1.tables.contains(table) implies s2.tables.contains(table) by {
-            let idx = choose|i| 0 <= i < s1.tables.len() && s1.tables[i] == table;
+        assert(self.contains_table(base));
+        assert forall|table: Table| self.tables.contains(table) implies s2.tables.contains(
+            table,
+        ) by {
+            let idx = choose|i| 0 <= i < self.tables.len() && self.tables[i] == table;
             assert(s2.tables[idx] == table);
         }
         assert(s2.contains_table(base));
 
         // The table with base address `base` is the same as the table in `s1`
-        Self::lemma_alloc_table_preserves_invariants(s1, s2, level, new_table);
+        self.lemma_alloc_table_preserves_invariants(level);
         s2.lemma_table_base_unique();
-        assert(s1.table(base) == s2.table(base));
+        assert(self.table(base) == s2.table(base));
+    }
+
+    /// Lemma. pt_mem after `alloc_table` contains the new table.
+    pub broadcast proof fn lemma_allocated_contains_new_table(
+        self,
+        level: nat,
+    )
+        requires
+            self.invariants(),
+            level < self.arch.level_count(),
+        ensures
+            ({
+                let (s2, table) = #[trigger] self.alloc_table(level);
+                s2.contains_table(table.base)
+            })
+    {
+        let (s2, table) = self.alloc_table(level);
+        self.alloc_table_facts(level);
+        assert(s2.tables == self.tables.push(table));
+        assert(s2.tables.last() == table);
+        assert(s2.tables.contains(table));
     }
 
     /// Lemma. `write` preserves invariants.
     pub broadcast proof fn lemma_write_preserves_invariants(
-        s1: Self,
-        s2: Self,
+        self,
         base: PAddr,
         index: nat,
         entry: u64,
     )
         requires
-            s1.invariants(),
-            #[trigger] Self::write(s1, s2, base, index, entry),
+            self.invariants(),
+            self.accessible(base, index),
         ensures
-            s2.invariants(),
+            #[trigger] self.write(base, index, entry).invariants(),
     {
+        self.write_facts(base, index, entry);
+    }
+
+    /// Lemma. read after `write`
+    pub broadcast proof fn lemma_read_after_write(
+        self,
+        base: PAddr,
+        index: nat,
+        entry: u64,
+    )
+        requires
+            self.invariants(),
+            self.accessible(base, index),
+        ensures
+            #[trigger] self.write(base, index, entry).read(base, index) == entry,
+    {
+        self.write_facts(base, index, entry);
+        self.table_view_facts(base);
     }
 }
 
-/// Page table memory related lemmas.
+/// Broadcast page table memory related lemmas.
 pub broadcast group group_pt_mem_lemmas {
+    PageTableMem::table_view_facts,
+    PageTableMem::alloc_table_facts,
+    PageTableMem::write_facts,
     PageTableMem::lemma_table_base_unique,
     PageTableMem::lemma_contains_root,
     PageTableMem::lemma_init_implies_invariants,
     PageTableMem::lemma_alloc_table_preserves_invariants,
+    PageTableMem::lemma_allocated_contains_new_table,
     PageTableMem::lemma_alloc_table_preserves_accessibility,
     PageTableMem::lemma_write_preserves_invariants,
+    PageTableMem::lemma_read_after_write,
 }
 
 /// **EXEC-MODE** Describe a page table stored in physical memory.
@@ -473,7 +543,7 @@ impl PageTableMemExec {
         requires
             old(self)@.invariants(),
         ensures
-            PageTableMem::alloc_table(old(self)@, self@, level as nat, res@),
+            (self@, res@) == old(self)@.alloc_table(level as nat),
     {
         unreached()
     }
@@ -501,7 +571,7 @@ impl PageTableMemExec {
             old(self)@.invariants(),
             old(self)@.accessible(base@, index as nat),
         ensures
-            PageTableMem::write(old(self)@, self@, base@, index as nat, value),
+            self@ == old(self)@.write(base@, index as nat, value),
     {
         unsafe { (base.0 as *mut u64).offset(index as isize).write_volatile(value) }
     }
