@@ -102,10 +102,9 @@ impl PTTreeModel {
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        // Check if already mapped
-        let visited = self.root.recursive_visit(path);
-        if visited.last() is Empty {
-            Ok(Self::new(self.root.recursive_insert(path, frame)))
+        let (node, res) = self.root.recursive_insert(path, frame);
+        if res is Ok {
+            Ok(Self::new(node))
         } else {
             Err(())
         }
@@ -123,13 +122,9 @@ impl PTTreeModel {
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
-        let visited = self.root.recursive_visit(path);
-        if let NodeEntry::Frame(frame) = visited.last() {
-            if vbase.aligned(frame.size.as_nat()) {
-                Ok(Self::new(self.root.recursive_remove(self.root.real_path(path))))
-            } else {
-                Err(())
-            }
+        let (node, res) = self.root.recursive_remove(path);
+        if res is Ok {
+            Ok(Self::new(node))
         } else {
             Err(())
         }

@@ -313,10 +313,16 @@ impl PageTableMem {
                 // Tables are the same
                 &&& s2.tables == self.tables
                 // The entry is updated
-                &&& s2.table_view(base) == self.table_view(base).update(index as int, entry)
+                &&& s2.table_view(base) == self.table_view(base).update(
+                    index as int,
+                    entry,
+                )
                 // Other tables contents are the same
-                &&& forall|i| #![auto] 0 <= i < self.tables.len() && self.tables[i].base != base
-                    ==> s2.table_view(self.tables[i].base) == self.table_view(self.tables[i].base)
+                &&& forall|i|
+                    #![auto]
+                    0 <= i < self.tables.len() && self.tables[i].base != base ==> s2.table_view(
+                        self.tables[i].base,
+                    ) == self.table_view(self.tables[i].base)
             }),
     {
     }
@@ -418,10 +424,7 @@ impl PageTableMem {
     }
 
     /// Lemma. pt_mem after `alloc_table` contains the new table.
-    pub broadcast proof fn lemma_allocated_contains_new_table(
-        self,
-        level: nat,
-    )
+    pub broadcast proof fn lemma_allocated_contains_new_table(self, level: nat)
         requires
             self.invariants(),
             level < self.arch.level_count(),
@@ -429,7 +432,7 @@ impl PageTableMem {
             ({
                 let (s2, table) = #[trigger] self.alloc_table(level);
                 s2.contains_table(table.base)
-            })
+            }),
     {
         let (s2, table) = self.alloc_table(level);
         self.alloc_table_facts(level);
@@ -455,12 +458,7 @@ impl PageTableMem {
     }
 
     /// Lemma. read after `write`
-    pub broadcast proof fn lemma_read_after_write(
-        self,
-        base: PAddr,
-        index: nat,
-        entry: u64,
-    )
+    pub broadcast proof fn lemma_read_after_write(self, base: PAddr, index: nat, entry: u64)
         requires
             self.invariants(),
             self.accessible(base, index),
@@ -574,7 +572,10 @@ impl PageTableMemExec {
             self@ == old(self)@.write(base@, index as nat, value),
     {
         unsafe { (base.0 as *mut u64).offset(index as isize).write_volatile(value) }
-    }
+    }  // /
+    // Lemma.
+    // pub broadcast proof fn lemma_exec_equal_implies_spec_equal(self, base: PAddrExec)
+
 }
 
 } // verus!
