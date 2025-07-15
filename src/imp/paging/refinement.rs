@@ -41,8 +41,7 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
             assert(base == pt_mem@.root());
             assert(pt_mem@.table_view(base) == seq![0u64; pt_mem@.arch.entry_count(0)]);
             assert(pt_mem@.read(base, idx) == 0);
-            // TODO: Add specification for `GenericPTE` to eliminate this assumption.
-            assume(PTE::spec_from_u64(0).spec_valid() == false);
+            PTE::pte_from_0_invalid();
         }
     }
 

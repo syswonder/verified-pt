@@ -27,7 +27,7 @@ verus! {
 // Use page table memory related lemmas.
 broadcast use crate::spec::memory::group_pt_mem_lemmas;
 
-/// Spec-mode `PageTable`
+/// Spec-mode page table implementation.
 pub struct PageTable<PTE: GenericPTE> {
     /// Page table memory.
     pub pt_mem: PageTableMem,
@@ -72,9 +72,62 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             }
     }
 
+    /// Recursively construct a `PTTreeNode` from a subtable.
+    pub open spec fn construct_node(self, base: PAddr, level: nat) -> PTTreeNode
+        recommends
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            level == self.pt_mem.table(base).level,
+            level < self.constants.arch.level_count(),
+        decreases self.constants.arch.level_count() - level,
+    {
+        let entries = Seq::new(
+            self.constants.arch.entry_count(level),
+            |i|
+                {
+                    let pte = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
+                    if pte.spec_valid() {
+                        if level >= self.constants.arch.level_count() - 1 || pte.spec_huge() {
+                            // Leaf table or block descriptor
+                            NodeEntry::Frame(
+                                Frame {
+                                    base: pte.spec_addr(),
+                                    size: self.constants.arch.frame_size(level),
+                                    attr: pte.spec_attr(),
+                                },
+                            )
+                        } else {
+                            // Table descriptor, recursively build node
+                            NodeEntry::Node(self.construct_node(pte.spec_addr(), level + 1))
+                        }
+                    } else {
+                        NodeEntry::Empty
+                    }
+                },
+        );
+        PTTreeNode { constants: self.constants, level, entries }
+    }
+
+    /// Abstract the page table implementation into a tree-model abstraction.
+    pub open spec fn view(self) -> PTTreeModel
+        recommends
+            self.invariants(),
+    {
+        PTTreeModel { root: self.construct_node(self.pt_mem.root(), 0) }
+    }
+
+    /// Check if `pte` points to a frame.
+    pub open spec fn pte_points_to_frame(self, pte: PTE, level: nat) -> bool {
+        pte.spec_valid() && if level == self.constants.arch.level_count() - 1 {
+            !pte.spec_huge()
+        } else {
+            pte.spec_huge()
+        }
+    }
+
     /// Perform a recursive specification-level page table walk starting from a given base.
     ///
-    /// Terminate upon reaching an invalid or block entry, or reaching the specified stop level.
+    /// Terminate upon reaching an invalid or block entry, or reaching the leaf level.
     pub open spec fn walk(self, vaddr: VAddr, base: PAddr, level: nat) -> (PTE, nat)
         recommends
             self.invariants(),
@@ -107,11 +160,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pt_mem.contains_table(base),
             self.pt_mem.table(base).level == level,
             level <= target_level < self.constants.arch.level_count(),
-            new_pte.spec_valid() && if target_level == self.constants.arch.level_count() - 1 {
-                !new_pte.spec_huge()
-            } else {
-                new_pte.spec_huge()
-            },
+            self.pte_points_to_frame(new_pte, target_level),
         decreases target_level - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
@@ -156,8 +205,6 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     }
 
     /// Perform a recursive specification-level page table removal starting from a given base.
-    ///
-    /// Terminate upon reaching an invalid or block entry, or reaching the specified stop level.
     pub open spec fn remove(self, vbase: VAddr, base: PAddr, level: nat) -> (Self, PagingResult)
         recommends
             self.invariants(),
@@ -205,63 +252,20 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         }
     }
 
-    /// Recursively construct a model node from a subtable starting at the given base and level.
-    pub open spec fn build_node(self, base: PAddr, level: nat) -> PTTreeNode
-        recommends
-            self.invariants(),
-            self.pt_mem.contains_table(base),
-            level == self.pt_mem.table(base).level,
-            level < self.constants.arch.level_count(),
-        decreases self.constants.arch.level_count() - level,
-    {
-        let entries = Seq::new(
-            self.constants.arch.entry_count(level),
-            |i|
-                {
-                    let pte = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
-                    if pte.spec_valid() {
-                        if level >= self.constants.arch.level_count() - 1 || pte.spec_huge() {
-                            // Leaf table or block descriptor
-                            NodeEntry::Frame(
-                                Frame {
-                                    base: pte.spec_addr(),
-                                    size: self.constants.arch.frame_size(level),
-                                    attr: pte.spec_attr(),
-                                },
-                            )
-                        } else {
-                            // Table descriptor, recursively build node
-                            NodeEntry::Node(self.build_node(pte.spec_addr(), level + 1))
-                        }
-                    } else {
-                        NodeEntry::Empty
-                    }
-                },
-        );
-        PTTreeNode { constants: self.constants, level, entries }
-    }
-
-    /// Convert the executable page table into a tree-model abstraction.
-    pub open spec fn view(self) -> PTTreeModel
-        recommends
-            self.invariants(),
-    {
-        PTTreeModel { root: self.build_node(self.pt_mem.root(), 0) }
-    }
 
     /// Lemma. Constructing a node from memory with a valid table results in a
     /// structurally invariant model node.
-    pub proof fn lemma_build_node_implies_invariants(self, base: PAddr, level: nat)
+    pub proof fn lemma_construct_node_implies_invariants(self, base: PAddr, level: nat)
         requires
             self.invariants(),
             self.pt_mem.contains_table(base),
             level == self.pt_mem.table(base).level,
             level < self.constants.arch.level_count(),
         ensures
-            self.build_node(base, level).invariants(),
+            self.construct_node(base, level).invariants(),
         decreases self.constants.arch.level_count() - level,
     {
-        let node = self.build_node(base, level);
+        let node = self.construct_node(base, level);
         assert(node.constants.arch.valid());
         assert(node.level < node.constants.arch.level_count());
         // TODO: why can't Verus prove this?
@@ -286,11 +290,11 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     // TODO: why Verus can't prove this?
                     assume(pte.spec_valid());
                     assume(!pte.spec_huge());
-                    assume(subnode == self.build_node(pte.spec_addr(), level + 1));
+                    assume(subnode == self.construct_node(pte.spec_addr(), level + 1));
                     // Invariants ensures this
                     assert(self.pt_mem.contains_table(pte.spec_addr()));
                     assert(self.pt_mem.table(pte.spec_addr()).level == level + 1);
-                    self.lemma_build_node_implies_invariants(pte.spec_addr(), level + 1);
+                    self.lemma_construct_node_implies_invariants(pte.spec_addr(), level + 1);
                 },
                 NodeEntry::Empty => (),
             }
@@ -298,7 +302,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     }
 
     /// Lemma. The tree model derived from the executable page table maintains the
-    /// required structural invariants.
+    /// required invariants.
     pub proof fn lemma_view_implies_invariants(self)
         requires
             self.invariants(),
@@ -306,7 +310,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self@.invariants(),
     {
         self.pt_mem.lemma_contains_root();
-        self.lemma_build_node_implies_invariants(self.pt_mem.root(), 0);
+        self.lemma_construct_node_implies_invariants(self.pt_mem.root(), 0);
     }
 
     /// Lemma. The specification-level walk is consistent with the node model traversal
@@ -320,7 +324,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         ensures
             ({
                 let (pte, level2) = self.walk(vaddr, base, level);
-                let node = self.build_node(base, level);
+                let node = self.construct_node(base, level);
                 let path = PTTreePath::from_vaddr(
                     vaddr,
                     self.constants.arch,
@@ -347,9 +351,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let arch = self.constants.arch;
         let (pte, level2) = self.walk(vaddr, base, level);
 
-        let node = self.build_node(base, level);
+        let node = self.construct_node(base, level);
         let end = (arch.level_count() - 1) as nat;
-        self.lemma_build_node_implies_invariants(base, level);
+        self.lemma_construct_node_implies_invariants(base, level);
         let path = PTTreePath::from_vaddr(vaddr, arch, level, end);
         PTTreePath::lemma_from_vaddr_yields_valid_path(vaddr, arch, level, end);
         // Precondition of `recursive_visit`: node.invariants and path.valid
@@ -370,7 +374,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     let subtable_base = pte2.spec_addr();
                     // TODO: why can't Verus prove this?
                     assume(pte2.spec_valid() && !pte2.spec_huge());
-                    assume(subnode == self.build_node(subtable_base, level + 1));
+                    assume(subnode == self.construct_node(subtable_base, level + 1));
                     // Recursive visit from the subtable
                     self.lemma_walk_consistent_with_model(vaddr, subtable_base, level + 1);
                     assert(pte == self.walk(vaddr, subtable_base, level + 1).0);
@@ -411,16 +415,12 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pt_mem.contains_table(base),
             level == self.pt_mem.table(base).level,
             level <= target_level < self.constants.arch.level_count(),
-            new_pte.spec_valid() && if target_level == self.constants.arch.level_count() - 1 {
-                !new_pte.spec_huge()
-            } else {
-                new_pte.spec_huge()
-            },
+            self.pte_points_to_frame(new_pte, target_level),
         ensures
             ({
                 let (s2, res) = self.insert(vbase, base, level, target_level, new_pte);
-                let node = self.build_node(base, level);
-                let node2 = s2.build_node(base, level);
+                let node = self.construct_node(base, level);
+                let node2 = s2.construct_node(base, level);
                 let path = PTTreePath::from_vaddr(vbase, self.constants.arch, level, target_level);
                 (node2, res) == node.recursive_insert(
                     path,
@@ -435,8 +435,8 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         assume(false);
     }
 
-    /// Lemma. The specification-level insertion will not change the root node.
-    pub proof fn lemma_insert_not_change_root(
+    /// Lemma. `insert` does not change the physical root address of the page table.
+    pub proof fn lemma_insert_preserves_root(
         self,
         vbase: VAddr,
         base: PAddr,
@@ -449,11 +449,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pt_mem.contains_table(base),
             level == self.pt_mem.table(base).level,
             level <= target_level < self.constants.arch.level_count(),
-            new_pte.spec_valid() && if target_level == self.constants.arch.level_count() - 1 {
-                !new_pte.spec_huge()
-            } else {
-                new_pte.spec_huge()
-            },
+            self.pte_points_to_frame(new_pte, target_level),
         ensures
             self.insert(vbase, base, level, target_level, new_pte).0.pt_mem.root()
                 == self.pt_mem.root(),
@@ -464,7 +460,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         assert(self.pt_mem.accessible(base, idx));
         if level < target_level {
             if pte.spec_valid() && !pte.spec_huge() {
-                self.lemma_insert_not_change_root(
+                self.lemma_insert_preserves_root(
                     vbase,
                     pte.spec_addr(),
                     level + 1,
@@ -481,12 +477,12 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let s2 = Self::new(pt_mem, self.constants);
                 // TODO: prove this
                 assume(s2.invariants());
-                s2.lemma_insert_not_change_root(vbase, table.base, level + 1, target_level, new_pte)
+                s2.lemma_insert_preserves_root(vbase, table.base, level + 1, target_level, new_pte)
             }
         }
     }
 
-    /// Lemma. `insert` preserves invariants.
+    /// Lemma. Inserting an entry using `insert` preserves the page table invariants.
     pub proof fn lemma_insert_preserves_invariants(
         self,
         vbase: VAddr,
@@ -500,18 +496,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pt_mem.contains_table(base),
             level == self.pt_mem.table(base).level,
             level <= target_level < self.constants.arch.level_count(),
-            new_pte.spec_valid() && if target_level == self.constants.arch.level_count() - 1 {
-                !new_pte.spec_huge()
-            } else {
-                new_pte.spec_huge()
-            },
+            self.pte_points_to_frame(new_pte, target_level),
         ensures
             self.insert(vbase, base, level, target_level, new_pte).0.invariants(),
     {
         assume(false);
     }
 
-    /// Lemma. If an intermediate node is allocated during insertion, the result must be `Ok`.
+    /// Lemma. When `insert` allocates an intermediate table, the result must succeed (`Ok`).
     pub proof fn lemma_insert_intermediate_node_results_ok(
         self,
         vbase: VAddr,
@@ -525,11 +517,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pt_mem.contains_table(base),
             level == self.pt_mem.table(base).level,
             level <= target_level < self.constants.arch.level_count(),
-            new_pte.spec_valid() && if target_level == self.constants.arch.level_count() - 1 {
-                !new_pte.spec_huge()
-            } else {
-                new_pte.spec_huge()
-            },
+            self.pte_points_to_frame(new_pte, target_level),
         ensures
             ({
                 let idx = self.constants.arch.pte_index(vbase, level);
@@ -591,8 +579,8 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         ensures
             ({
                 let (s2, res) = self.remove(vbase, base, level);
-                let node = self.build_node(base, level);
-                let node2 = s2.build_node(base, level);
+                let node = self.construct_node(base, level);
+                let node2 = s2.construct_node(base, level);
                 let path = PTTreePath::from_vaddr(
                     vbase,
                     self.constants.arch,
@@ -605,7 +593,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         assume(false);
     }
 
-    /// Lemma. `remove` preserves invariants.
+    /// Lemma. Removing a page table entry using `remove` maintains the page table invariants.
     pub proof fn lemma_remove_preserves_invariants(self, vbase: VAddr, base: PAddr, level: nat)
         requires
             self.invariants(),
@@ -614,9 +602,27 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level < self.constants.arch.level_count(),
         ensures
             self.remove(vbase, base, level).0.invariants(),
-            self.remove(vbase, base, level).0.pt_mem.root() == self.pt_mem.root(),
     {
         assume(false);
+    }
+
+    /// Lemma. `remove` does not change the physical root address of the page table.
+    pub proof fn lemma_remove_preserves_root(self, vbase: VAddr, base: PAddr, level: nat)
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            level == self.pt_mem.table(base).level,
+            level < self.constants.arch.level_count(),
+        ensures
+            self.remove(vbase, base, level).0.pt_mem.root() == self.pt_mem.root(),
+        decreases self.constants.arch.level_count() - level,
+    {
+        let idx = self.constants.arch.pte_index(vbase, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        assert(self.pt_mem.accessible(base, idx));
+        if pte.spec_valid() && level < self.constants.arch.level_count() - 1 && !pte.spec_huge() {
+            self.lemma_remove_preserves_root(vbase, pte.spec_addr(), level + 1)
+        }
     }
 
     /// Axiom. The interpreted view of the page table memory is consistent with the view derived
@@ -714,11 +720,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             level <= target_level < old(self).spec_arch().level_count(),
             old(self).pt_mem@.contains_table(base@),
             old(self).pt_mem@.table(base@).level == level,
-            new_pte.spec_valid() && if target_level == old(self).constants.arch@.level_count() - 1 {
-                !new_pte.spec_huge()
-            } else {
-                new_pte.spec_huge()
-            },
+            old(self)@.pte_points_to_frame(new_pte, target_level as nat),
         ensures
             (self@, res) == old(self)@.insert(
                 vbase@,
@@ -729,7 +731,6 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             ),
             res is Err ==> old(self) == self,
     {
-
         let idx = self.constants.arch.pte_index(vbase, level);
         assert(self.pt_mem@.accessible(base@, idx as nat));
         let pte = PTE::from_u64(self.pt_mem.read(base, idx));
@@ -832,8 +833,8 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
         proof {
             // spec `recursive_get_pte` == node `recursive_visit`
             self.pt_mem@.lemma_contains_root();
-            self@.lemma_build_node_implies_invariants(self.pt_mem@.root(), 0);
-            let node = self@.build_node(self.pt_mem@.root(), 0);
+            self@.lemma_construct_node_implies_invariants(self.pt_mem@.root(), 0);
+            let node = self@.construct_node(self.pt_mem@.root(), 0);
             self@.lemma_walk_consistent_with_model(vaddr@, self.pt_mem@.root(), 0);
             node.lemma_visit_length_bounds(
                 PTTreePath::from_vaddr_root(
@@ -914,13 +915,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                 target_level as nat,
                 new_pte,
             );
-            self.view().lemma_insert_not_change_root(
-                vbase@,
-                root,
-                0,
-                target_level as nat,
-                new_pte,
-            );
+            self.view().lemma_insert_preserves_root(vbase@, root, 0, target_level as nat, new_pte);
         }
 
         self.insert(vbase, self.pt_mem.root(), 0, target_level, new_pte)
@@ -944,6 +939,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             self@.lemma_remove_preserves_invariants(vbase@, root, 0);
             // Ensures #2
             self@.lemma_remove_consistent_with_model(vbase@, root, 0);
+            self@.lemma_remove_preserves_root(vbase@, root, 0);
         }
 
         self.remove(vbase, self.pt_mem.root(), 0)
