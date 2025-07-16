@@ -138,6 +138,43 @@ impl PTTreePath {
         assert(self.0 == pref.0);
     }
 
+    /// Lemma. `other` is a prefix of `self` if the first element of `other` is the same as the first
+    /// element of `self`, and the tail of `other` is a prefix of the tail of `self`.
+    pub proof fn lemma_prefix_step(self, other: Self)
+        requires
+            self.len() > 0,
+            other.len() > 0,
+            self.step().0 == other.step().0,
+            self.step().1.has_prefix(other.step().1),
+        ensures
+            self.has_prefix(other),
+    {
+        let (idx1, remain1) = self.step();
+        let (idx2, remain2) = other.step();
+        assert forall|i| 0 <= i < other.len() implies self.0[i] == other.0[i] by {
+            if i == 0 {
+                assert(idx1 == idx2);
+            } else {
+                assert(remain1.0[i - 1] == remain2.0[i - 1]);
+            }
+        }
+    }
+
+    /// Lemma. If `pref` is a prefix of `self`, then `self.trim(pref.len())` is equal to `pref`.
+    pub proof fn lemma_trim_prefix(self, pref: Self)
+        requires
+            self.has_prefix(pref),
+        ensures
+            self.trim(pref.len()) == pref,
+    {
+        let trimmed = self.trim(pref.len());
+        // assert(trimmed.len() == pref.len());
+        assert forall|i| 0 <= i < trimmed.len() implies trimmed.0[i] == pref.0[i] by {
+            assert(self.0[i] == pref.0[i]);
+        }
+        assert(trimmed.0 == pref.0);
+    }
+
     /// Lemma. Existence of the first differing index between two distinct paths.
     pub proof fn lemma_first_diff_idx_exists(a: Self, b: Self)
         requires

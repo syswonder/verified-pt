@@ -713,8 +713,7 @@ impl PTTreeNode {
                 (self.level + path.len() - 1) as nat,
                 self.constants,
             ),
-            // The new entry is not already in the tree
-            self.recursive_visit(path).last() is Empty,
+            self.recursive_insert(path, frame).1 is Ok,
         ensures
             self.recursive_insert(path, frame).0.path_mappings().contains_pair(path, frame),
         decreases path.len(),
@@ -833,8 +832,7 @@ impl PTTreeNode {
                 (self.level + path.len() - 1) as nat,
                 self.constants,
             ),
-            // The new entry is not already in the tree
-            self.recursive_visit(path).last() is Empty,
+            self.recursive_insert(path, frame).1 is Ok,
         ensures
             forall|path2: PTTreePath, frame2: Frame| #[trigger]
                 self.recursive_insert(path, frame).0.path_mappings().contains_pair(path2, frame2)
@@ -952,8 +950,7 @@ impl PTTreeNode {
                 (self.level + path.len() - 1) as nat,
                 self.constants,
             ),
-            // The new entry is not already in the tree
-            self.recursive_visit(path).last() is Empty,
+            self.recursive_insert(path, frame).1 is Ok,
         ensures
             self.recursive_insert(path, frame).0.path_mappings() == self.path_mappings().insert(
                 path,
@@ -1059,7 +1056,7 @@ impl PTTreeNode {
                             node.lemma_path_mappings_after_removal_is_subset(remain);
                             assert(node.path_mappings().contains_pair(remain2, frame2));
                         },
-                        _ => assert(new == self),
+                        _ => (),
                     }
                 } else {
                     // `path` and `path2` do not share any prefix
@@ -1068,7 +1065,7 @@ impl PTTreeNode {
                             idx,
                             NodeEntry::Node(node.recursive_remove(remain).0),
                         )),
-                        _ => assert(new == self),
+                        _ => (),
                     }
                     // `self.entries` only updates at `idx`
                     assert(self.entries[idx2 as int] == new.entries[idx2 as int]);
@@ -1084,7 +1081,7 @@ impl PTTreeNode {
             path.valid(self.constants.arch, self.level),
         ensures
             forall|path2: PTTreePath, frame2: Frame| #[trigger]
-                self.path_mappings().contains_pair(path2, frame2) ==> path2 == path
+                self.path_mappings().contains_pair(path2, frame2) ==> path.has_prefix(path2)
                     || self.recursive_remove(path).0.path_mappings().contains_pair(path2, frame2),
         decreases path.len(),
     {
@@ -1092,7 +1089,7 @@ impl PTTreeNode {
         self.lemma_remove_preserves_invariants(path);
 
         assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
-            self.path_mappings().contains_pair(path2, frame2) implies path2 == path
+            self.path_mappings().contains_pair(path2, frame2) implies path.has_prefix(path2)
             || new.path_mappings().contains_pair(path2, frame2) by {
             let (idx, remain) = path.step();
             let (idx2, remain2) = path2.step();
@@ -1111,7 +1108,7 @@ impl PTTreeNode {
                     match entry {
                         NodeEntry::Frame(_) => {
                             assert(new.recursive_visit(path2) == seq![NodeEntry::Empty]);
-                            assert(path2.len() == 1);
+                            // assert(path2.len() == 1);
                             assert(path.0 == path2.0);
                         },
                         _ => assert(new == self),
@@ -1130,12 +1127,11 @@ impl PTTreeNode {
                             assert(node.path_mappings().contains_pair(remain2, frame2));
                             // Recursive prove that `new_node` has one less mapping than `node`
                             node.lemma_remove_not_affect_other_mappings(remain);
-                            assert(remain == remain2 || new_node.path_mappings().contains_pair(
-                                remain2,
-                                frame2,
-                            ));
-                            if remain == remain2 {
-                                path.lemma_eq_step(path2);
+                            assert(remain.has_prefix(remain2)
+                                || new_node.path_mappings().contains_pair(remain2, frame2));
+                            if remain.has_prefix(remain2) {
+                                path.lemma_prefix_step(path2);
+                                assert(path.has_prefix(path2));
                             } else {
                                 assert(new.path_mappings().contains_pair(path2, frame2));
                             }
@@ -1145,7 +1141,13 @@ impl PTTreeNode {
                             assert(new_entry == NodeEntry::Node(node.recursive_remove(remain).0));
                             assert(false);  // unreachable
                         },
-                        (NodeEntry::Frame(_), _) | (NodeEntry::Empty, _) => assert(new == self),
+                        (NodeEntry::Frame(_), _) => {
+                            if remain.0 == seq![0nat; remain.len()] {
+                                assert(new.recursive_visit(path2) == seq![NodeEntry::Empty]);
+                                assert(self.recursive_visit(path2) == seq![entry]);
+                            }
+                        },
+                        _ => (),
                     }
                 } else {
                     // `path` and `path2` do not share any prefix
@@ -1154,7 +1156,7 @@ impl PTTreeNode {
                             idx,
                             NodeEntry::Node(node.recursive_remove(remain).0),
                         )),
-                        _ => assert(new == self),
+                        _ => (),
                     }
                     // `self.entries` only updates at `idx`
                     assert(entry2 == new_entry2);

@@ -73,6 +73,27 @@ impl PTTreeModel {
         )
     }
 
+    /// If there exists a mapping for `vaddr`.
+    pub open spec fn has_mapping_for(self, vaddr: VAddr) -> bool {
+        exists|vbase: VAddr, frame: Frame|
+            {
+                &&& #[trigger] self.mappings().contains_pair(vbase, frame)
+                &&& vaddr.within(vbase, frame.size.as_nat())
+            }
+    }
+
+    /// Get the mapping for `vaddr`.
+    pub open spec fn mapping_for(self, vaddr: VAddr) -> (VAddr, Frame)
+        recommends
+            self.has_mapping_for(vaddr),
+    {
+        choose|vbase: VAddr, frame: Frame|
+            {
+                &&& #[trigger] self.mappings().contains_pair(vbase, frame)
+                &&& vaddr.within(vbase, frame.size.as_nat())
+            }
+    }
+
     /// View the tree as `PageTableState`.
     pub open spec fn view(self) -> PageTableState {
         PageTableState {
@@ -360,27 +381,61 @@ impl PTTreeModel {
     {
         let new = self.unmap(vbase).unwrap();
         self.unmap_preserves_invariants(vbase);
-        self.lemma_query_succeeds(vbase);
+        self.lemma_mapping_exist_implies_query_ok(vbase);
         // TODO
         assume(false);
     }
 
     /// Lemma. `query` succeeds if the address is within a mapped region.
-    pub proof fn lemma_query_succeeds(self, vaddr: VAddr)
+    pub proof fn lemma_mapping_exist_implies_query_ok(self, vaddr: VAddr)
+        requires
+            self.invariants(),
+            self.has_mapping_for(vaddr),
+        ensures
+            self.query(vaddr) is Ok,
+            self.query(vaddr).unwrap() == self.mapping_for(vaddr),
+    {
+        let (vbase, frame) = self.mapping_for(vaddr);
+
+        assert(exists|path: PTTreePath| #[trigger]
+            self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase);
+        let path = choose|path: PTTreePath| #[trigger]
+            self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
+        assert(self.root.path_mappings().contains_pair(path, frame));
+
+        // `path2` is the path used by `recursive_visit`
+        let path2 = PTTreePath::from_vaddr_root(
+            vaddr,
+            self.arch(),
+            (self.arch().level_count() - 1) as nat,
+        );
+        // TODO: add lemma to `PTTreePath`
+        assume(path2.has_prefix(path));
+
+        self.root.lemma_visit_preserves_prefix(path2, path);
+        self.root.lemma_visited_entry_is_node_except_final(path);
+        self.root.lemma_visited_entry_is_node_except_final(path2);
+        assert(self.root.recursive_visit(path) == self.root.recursive_visit(path2));
+        path2.lemma_trim_prefix(path);
+        assert(path2.trim(path.len()) == path);
+
+        assert(self.root.real_path(path2) == path);
+
+        let visited = self.root.recursive_visit(path2);
+        self.root.lemma_real_path_visits_same_entry(path2);
+        assert(visited.last() == NodeEntry::Frame(frame));
+
+        // TODO: add lemma to `PTTreePath`
+        assume(self.arch().vbase(vaddr, (visited.len() - 1) as nat) == vbase);
+    }
+
+    /// Lemma. The address is within a mapped region if `query` succeeds.
+    pub proof fn lemma_query_ok_implies_mapping_exist(self, vaddr: VAddr)
         requires
             self.invariants(),
             self.query(vaddr) is Ok,
         ensures
-            exists|vbase, frame| #[trigger]
-                self.mappings().contains_pair(vbase, frame) && vaddr.within(
-                    vbase,
-                    frame.size.as_nat(),
-                ),
-            self.query(vaddr).unwrap() == choose|vbase: VAddr, frame: Frame| #[trigger]
-                self.mappings().contains_pair(vbase, frame) && vaddr.within(
-                    vbase,
-                    frame.size.as_nat(),
-                ),
+            self.has_mapping_for(vaddr),
     {
         let path = PTTreePath::from_vaddr_root(
             vaddr,
@@ -388,75 +443,33 @@ impl PTTreeModel {
             (self.arch().level_count() - 1) as nat,
         );
         let visited = self.root.recursive_visit(path);
-        // `query` succeeds implies `visited.last()` is a frame.
+        // `query` succeeds implies `visited.last()` is a frame
         assert(visited.last() is Frame);
         let frame = visited.last()->Frame_0;
 
+        // Path mapping for `vaddr`
         let real_path = self.root.real_path(path);
         self.root.lemma_visit_length_bounds(path);
         self.root.lemma_real_path_visits_same_entry(path);
         assert(self.root.path_mappings().contains_pair(real_path, frame));
+
+        // Mapping for `vaddr`
         let vbase = real_path.to_vaddr(self.arch());
         self.lemma_mappings_consistent_with_path_mappings();
         assert(self.mappings().contains_pair(vbase, frame));
-        // TODO
-        assume(real_path.to_vaddr(self.arch()) == self.arch().vbase(
-            vaddr,
-            (real_path.len() - 1) as nat,
-        ));
+
+        // TODO: add lemma to `PTTreePath`
         assume(vaddr.within(vbase, frame.size.as_nat()));
 
-        // Prove there is only one mapped region that contains `vaddr`.
+        // Prove there is only one mapped region that contains `vaddr`
         assert forall|vbase2, frame2| #[trigger]
             self.mappings().contains_pair(vbase2, frame2) && vaddr.within(
                 vbase2,
                 frame2.size.as_nat(),
             ) implies vbase2 == vbase by {
+            // Prove by contradiction
             assert(VAddr::overlap(vbase, frame.size.as_nat(), vbase2, frame2.size.as_nat()));
             self.lemma_mappings_nonoverlap_in_vmem();
-        }
-    }
-
-    /// Lemma. `query` fails if there is no mapping for the address.
-    pub proof fn lemma_query_fails(self, vaddr: VAddr)
-        requires
-            self.invariants(),
-            self.query(vaddr) is Err,
-        ensures
-            !exists|vbase, frame| #[trigger]
-                self.mappings().contains_pair(vbase, frame) && vaddr.within(
-                    vbase,
-                    frame.size.as_nat(),
-                ),
-    {
-        if exists|vbase, frame| #[trigger]
-            self.mappings().contains_pair(vbase, frame) && vaddr.within(
-                vbase,
-                frame.size.as_nat(),
-            ) {
-            // Proof by contradiction
-            let (vbase, frame) = choose|vbase: VAddr, frame: Frame| #[trigger]
-                self.mappings().contains_pair(vbase, frame) && vaddr.within(
-                    vbase,
-                    frame.size.as_nat(),
-                );
-            let path = PTTreePath::from_vaddr_root(
-                vaddr,
-                self.arch(),
-                (self.arch().level_count() - 1) as nat,
-            );
-            let base_path = choose|base_path| #[trigger]
-                self.root.path_mappings().contains_key(base_path) && base_path.to_vaddr(self.arch())
-                    == vbase;
-            // TODO
-            assume(path.has_prefix(base_path));
-
-            // Visit sequence of `base_path` is a prefix of `path`
-            self.root.lemma_visit_preserves_prefix(path, base_path);
-            assert(self.root.recursive_visit(base_path).last() is Frame);
-            // Frame can only presents at the last entry of the visit sequence
-            self.root.lemma_visited_entry_is_node_except_final(path);
-            assert(self.root.recursive_visit(path) == self.root.recursive_visit(base_path));
         }
     }
 
@@ -561,7 +574,7 @@ impl PTTreeModel {
                 self.lemma_unmap_removes_mapping(vbase);
             } else {
                 assert(self.query(vbase) is Ok);
-                self.lemma_query_succeeds(vbase);
+                self.lemma_mapping_exist_implies_query_ok(vbase);
                 let (vbase2, frame2) = self.query(vbase).unwrap();
                 if self.mappings().contains_key(vbase) {
                     if vbase2 != vbase {
@@ -595,8 +608,18 @@ impl PTTreeModel {
         ensures
             PageTableState::query(self@, self@, vaddr, self.query(vaddr)),
     {
-        // TODO
-        assume(false);
+        assert(self.mappings() == self@.mappings);  // I don't know why this is necessary
+        let res = self.query(vaddr);
+        if self.has_mapping_for(vaddr) {
+            self.lemma_mapping_exist_implies_query_ok(vaddr);
+            assert(res is Ok);
+        } else {
+            if res is Ok {
+                // Prove by contradiction
+                self.lemma_query_ok_implies_mapping_exist(vaddr);
+            }
+            assert(res is Err);
+        }
     }
 }
 
