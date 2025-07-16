@@ -282,6 +282,11 @@ impl PageTableMem {
                 // new table is empty
                 &&& s2.table_view(table.base)
                     == seq![0u64; self.arch.entry_count(level)]
+                // old tables are the same
+                &&& forall|base: PAddr| #[trigger]
+                    self.contains_table(base) ==> s2.table_view(base) == self.table_view(
+                        base,
+                    )
                 // new table doesn't overlap with existing tables
                 &&& forall|i|
                     #![auto]
@@ -441,6 +446,47 @@ impl PageTableMem {
         assert(s2.tables.contains(table));
     }
 
+    /// Lemma. pt_mem after `alloc_table` contains all pre-existing tables.
+    pub broadcast proof fn lemma_allocated_contains_old_tables(self, level: nat)
+        requires
+            self.invariants(),
+            level < self.arch.level_count(),
+        ensures
+            ({
+                let (s2, table) = #[trigger] self.alloc_table(level);
+                forall|base: PAddr|
+                    s2.contains_table(base) && base != table.base ==> self.contains_table(base)
+            }),
+    {
+        let (s2, table) = self.alloc_table(level);
+        self.alloc_table_facts(level);
+        assert forall|base: PAddr|
+            s2.contains_table(base) && base != table.base implies self.contains_table(base) by {
+            let table = choose|table: Table| #[trigger]
+                s2.tables.contains(table) && table.base == base;
+            assert(self.tables.contains(table));
+        }
+    }
+
+    /// Lemma. `self.tables` after `alloc_table` is a superset of before.
+    pub broadcast proof fn lemma_allocated_is_superset(self, level: nat)
+        requires
+            self.invariants(),
+            level < self.arch.level_count(),
+        ensures
+            ({
+                let (s2, table) = #[trigger] self.alloc_table(level);
+                forall|base: PAddr| self.contains_table(base) ==> s2.contains_table(base)
+            }),
+    {
+        let (s2, table) = self.alloc_table(level);
+        self.alloc_table_facts(level);
+        assert forall|base: PAddr| self.contains_table(base) implies s2.contains_table(base) by {
+            let i = choose|i| 0 <= i < self.tables.len() && #[trigger] self.tables[i].base == base;
+            assert(s2.tables.contains(s2.tables[i]));
+        }
+    }
+
     /// Lemma. `write` preserves invariants.
     pub broadcast proof fn lemma_write_preserves_invariants(
         self,
@@ -456,18 +502,6 @@ impl PageTableMem {
     {
         self.write_facts(base, index, entry);
     }
-
-    /// Lemma. read after `write`
-    pub broadcast proof fn lemma_read_after_write(self, base: PAddr, index: nat, entry: u64)
-        requires
-            self.invariants(),
-            self.accessible(base, index),
-        ensures
-            #[trigger] self.write(base, index, entry).read(base, index) == entry,
-    {
-        self.write_facts(base, index, entry);
-        self.table_view_facts(base);
-    }
 }
 
 /// Broadcast page table memory related lemmas.
@@ -480,9 +514,10 @@ pub broadcast group group_pt_mem_lemmas {
     PageTableMem::lemma_init_implies_invariants,
     PageTableMem::lemma_alloc_table_preserves_invariants,
     PageTableMem::lemma_allocated_contains_new_table,
+    PageTableMem::lemma_allocated_contains_old_tables,
+    PageTableMem::lemma_allocated_is_superset,
     PageTableMem::lemma_alloc_table_preserves_accessibility,
     PageTableMem::lemma_write_preserves_invariants,
-    PageTableMem::lemma_read_after_write,
 }
 
 /// **EXEC-MODE** Describe a page table stored in physical memory.

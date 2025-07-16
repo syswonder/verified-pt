@@ -30,6 +30,8 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
     }
 
     proof fn init_implies_invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) {
+        broadcast use super::pte::group_pte_lemmas;
+
         pt_mem.view().lemma_init_implies_invariants();
         let pt = PageTableExec::<PTE> { pt_mem, constants, _phantom: PhantomData };
         assert forall|base: PAddr, idx: nat| pt.pt_mem@.accessible(base, idx) implies {
@@ -41,7 +43,6 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
             assert(base == pt_mem@.root());
             assert(pt_mem@.table_view(base) == seq![0u64; pt_mem@.arch.entry_count(0)]);
             assert(pt_mem@.read(base, idx) == 0);
-            PTE::pte_from_0_invalid();
         }
     }
 

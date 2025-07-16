@@ -46,7 +46,8 @@ pub trait GenericPTE: Sized + Clone {
     /// Convert to a u64 value.
     fn to_u64(&self) -> (res: u64)
         ensures
-            self.spec_to_u64() == res,
+            res == self.spec_to_u64(),
+            self == Self::spec_from_u64(res),
     ;
 
     /// Convert to a u64 value (spec mode).
@@ -90,11 +91,40 @@ pub trait GenericPTE: Sized + Clone {
     /// Returns whether this entry maps to a huge frame (spec mode).
     spec fn spec_huge(self) -> bool;
 
-    /// If a page table entrt has value 0, it must be invalid.
-    proof fn pte_from_0_invalid()
+    /// PTE constructed by `spec_new` keeps the same value.
+    broadcast proof fn lemma_spec_new_keeps_value(addr: PAddr, attr: MemAttr, huge: bool)
         ensures
-            Self::spec_from_u64(0).spec_valid() == false,
+            ({
+                let pte = #[trigger] Self::spec_new(addr, attr, huge);
+                pte.spec_valid() && pte.spec_addr() == addr && pte.spec_attr() == attr
+                    && pte.spec_huge() == huge
+            }),
     ;
+
+    /// If a page table entrt has value 0, it must be invalid.
+    broadcast proof fn lemma_from_0_invalid()
+        ensures
+            #[trigger] Self::spec_from_u64(0).spec_valid() == false,
+    ;
+
+    /// `pte1.spec_to_u64() == pte2.spec_to_u64()` implies `pte1 == pte2`.
+    broadcast proof fn lemma_eq_by_u64(pte1: Self, pte2: Self)
+        ensures
+            #[trigger] pte1.spec_to_u64() == #[trigger] pte2.spec_to_u64() ==> pte1 == pte2,
+    ;
+
+    /// `from_u64` and `to_u64` are inverses.
+    broadcast proof fn lemma_from_to_u64_inverse(val: u64)
+        ensures
+            #[trigger] Self::spec_from_u64(val).spec_to_u64() == val,
+    ;
+}
+
+pub broadcast group group_pte_lemmas {
+    GenericPTE::lemma_from_0_invalid,
+    GenericPTE::lemma_eq_by_u64,
+    GenericPTE::lemma_from_to_u64_inverse,
+    GenericPTE::lemma_spec_new_keeps_value,
 }
 
 } // verus!

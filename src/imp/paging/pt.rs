@@ -252,7 +252,6 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         }
     }
 
-
     /// Lemma. Constructing a node from memory with a valid table results in a
     /// structurally invariant model node.
     pub proof fn lemma_construct_node_implies_invariants(self, base: PAddr, level: nat)
@@ -435,6 +434,84 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         assume(false);
     }
 
+    /// Lemma. Allocating an intermediate table preserves invariants.
+    pub proof fn lemma_alloc_intermediate_table_preserves_invariants(
+        self,
+        base: PAddr,
+        level: nat,
+        idx: nat,
+    )
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            level == self.pt_mem.table(base).level,
+            level + 1 < self.constants.arch.level_count(),
+            self.pt_mem.accessible(base, idx),
+            !PTE::spec_from_u64(self.pt_mem.read(base, idx)).spec_valid(),
+        ensures
+            ({
+                let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
+                let pt_mem = pt_mem.write(
+                    base,
+                    idx,
+                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                );
+                Self::new(pt_mem, self.constants).invariants()
+            }),
+    {
+        broadcast use super::pte::group_pte_lemmas;
+
+        let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
+        let pt_mem = pt_mem.write(
+            base,
+            idx,
+            PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+        );
+        let s2 = Self::new(pt_mem, self.constants);
+
+        assert forall|base2: PAddr, idx2: nat| pt_mem.accessible(base2, idx2) implies {
+            let table2 = pt_mem.table(base2);
+            let pte = PTE::spec_from_u64(pt_mem.read(base2, idx2));
+            &&& ({
+                &&& table2.level < self.constants.arch.level_count() - 1
+                &&& pte.spec_valid()
+                &&& !pte.spec_huge()
+            }) ==> {
+                &&& pt_mem.contains_table(pte.spec_addr())
+                &&& pt_mem.table(pte.spec_addr()).level == table2.level + 1
+            }
+            &&& (table2.level == self.constants.arch.level_count() - 1 && pte.spec_valid())
+                ==> !pte.spec_huge()
+        } by {
+            let table2 = pt_mem.table(base2);
+            let val = pt_mem.read(base2, idx2);
+            let pte = PTE::spec_from_u64(val);
+
+            if base2 == base && idx2 == idx {
+                // `(base2, idx2)` is the entry we just inserted
+                PTE::lemma_eq_by_u64(pte, PTE::spec_new(table.base, MemAttr::spec_default(), false));
+                assert(pte == PTE::spec_new(table.base, MemAttr::spec_default(), false));
+            } else {
+                if base2 == table.base {
+                    // `base2` is the newly allocated table
+                    assert(pte == PTE::spec_from_u64(0));
+                } else {
+                    // Entry at `(base2, idx2)` is not updated
+                    assert(self.pt_mem.accessible(base2, idx2));
+                    assert(val == self.pt_mem.read(base2, idx2));
+                    if table2.level < self.constants.arch.level_count() - 1 && pte.spec_valid()
+                        && !pte.spec_huge() {
+                        assert(pt_mem.contains_table(pte.spec_addr()));
+                        assert(pt_mem.table(pte.spec_addr()).level == table2.level + 1);
+                    }
+                    if table2.level == self.constants.arch.level_count() - 1 && pte.spec_valid() {
+                        assert(!pte.spec_huge());
+                    }
+                }
+            }
+        }
+    }
+
     /// Lemma. `insert` does not change the physical root address of the page table.
     pub proof fn lemma_insert_preserves_root(
         self,
@@ -458,25 +535,32 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let idx = self.constants.arch.pte_index(vbase, level);
         let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
+
         if level < target_level {
-            if pte.spec_valid() && !pte.spec_huge() {
-                self.lemma_insert_preserves_root(
-                    vbase,
-                    pte.spec_addr(),
-                    level + 1,
-                    target_level,
-                    new_pte,
-                )
+            if pte.spec_valid() {
+                if !pte.spec_huge() {
+                    // Recursively insert into the next table
+                    self.lemma_insert_preserves_root(
+                        vbase,
+                        pte.spec_addr(),
+                        level + 1,
+                        target_level,
+                        new_pte,
+                    )
+                }
             } else {
+                // Allocate intermediate table
                 let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
                 let pt_mem = pt_mem.write(
                     base,
                     idx,
                     PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
                 );
+                // `s2` is the state after allocating an intermediate table
                 let s2 = Self::new(pt_mem, self.constants);
-                // TODO: prove this
-                assume(s2.invariants());
+
+                self.lemma_alloc_intermediate_table_preserves_invariants(base, level, idx);
+                assert(s2.invariants());
                 s2.lemma_insert_preserves_root(vbase, table.base, level + 1, target_level, new_pte)
             }
         }
@@ -499,8 +583,46 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pte_points_to_frame(new_pte, target_level),
         ensures
             self.insert(vbase, base, level, target_level, new_pte).0.invariants(),
+        decreases target_level - level,
     {
-        assume(false);
+        let idx = self.constants.arch.pte_index(vbase, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        assert(self.pt_mem.accessible(base, idx));
+
+        if level < target_level {
+            if pte.spec_valid() {
+                if !pte.spec_huge() {
+                    // Recursively insert into the next table
+                    self.lemma_insert_preserves_invariants(
+                        vbase,
+                        pte.spec_addr(),
+                        level + 1,
+                        target_level,
+                        new_pte,
+                    )
+                }
+            } else {
+                // Allocate intermediate table
+                let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
+                let pt_mem = pt_mem.write(
+                    base,
+                    idx,
+                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                );
+                // `s2` is the state after allocating an intermediate table
+                let s2 = Self::new(pt_mem, self.constants);
+
+                self.lemma_alloc_intermediate_table_preserves_invariants(base, level, idx);
+                assert(s2.invariants());
+                s2.lemma_insert_preserves_invariants(
+                    vbase,
+                    table.base,
+                    level + 1,
+                    target_level,
+                    new_pte,
+                );
+            }
+        }
     }
 
     /// Lemma. When `insert` allocates an intermediate table, the result must succeed (`Ok`).
@@ -535,6 +657,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let idx = self.constants.arch.pte_index(vbase, level);
         let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
         if level < target_level && !pte.spec_valid() {
+            // Allocate intermediate table
             let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
             let pt_mem = pt_mem.write(
                 base,
@@ -543,8 +666,8 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             );
             // `s2` is the state after allocating an intermediate table
             let s2 = Self::new(pt_mem, self.constants);
-            // TODO: prove this
-            assume(s2.invariants());
+            self.lemma_alloc_intermediate_table_preserves_invariants(base, level, idx);
+            assert(s2.invariants());
 
             let (_, insert_res) = s2.insert(vbase, table.base, level + 1, target_level, new_pte);
             let idx = s2.constants.arch.pte_index(vbase, level + 1);
@@ -553,18 +676,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             assert(s2.pt_mem.read(table.base, idx) == 0);
             assert(!pte.spec_valid());
 
-            if level >= target_level {
-                assert(insert_res is Ok);
-            } else {
-                // Recursive proof for the next level
-                s2.lemma_insert_intermediate_node_results_ok(
-                    vbase,
-                    table.base,
-                    level + 1,
-                    target_level,
-                    new_pte,
-                );
-            }
+            // Recursive proof for the next level
+            s2.lemma_insert_intermediate_node_results_ok(
+                vbase,
+                table.base,
+                level + 1,
+                target_level,
+                new_pte,
+            );
         }
     }
 
@@ -602,8 +721,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level < self.constants.arch.level_count(),
         ensures
             self.remove(vbase, base, level).0.invariants(),
+        decreases self.constants.arch.level_count() - level,
     {
-        assume(false);
+        let idx = self.constants.arch.pte_index(vbase, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        assert(self.pt_mem.accessible(base, idx));
+        if pte.spec_valid() && level < self.constants.arch.level_count() - 1 && !pte.spec_huge() {
+            self.lemma_remove_preserves_invariants(vbase, pte.spec_addr(), level + 1)
+        }
     }
 
     /// Lemma. `remove` does not change the physical root address of the page table.
