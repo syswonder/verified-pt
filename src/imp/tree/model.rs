@@ -551,10 +551,57 @@ impl PTTreeModel {
             !self.overlaps_vmem(vbase, frame),
         ensures
             self.map(vbase, frame).1 is Ok,
-            self.map(vbase, frame).0.mappings() == self.mappings().insert(vbase, frame),
     {
-        // TODO
-        assume(false);
+        let (new, res) = self.map(vbase, frame);
+        let path = PTTreePath::from_vaddr_root(
+            vbase,
+            self.arch(),
+            self.arch().level_of_frame_size(frame.size),
+        );
+        PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr_root(self.arch(), vbase, path);
+        assert(path.len() == self.arch().level_of_frame_size(frame.size) + 1);
+
+        if res is Err {
+            // Prove by contradiction
+            self.root.lemma_insert_fails_implies_prefix(path, frame);
+            let path2 = choose|path2: PTTreePath| #[trigger]
+                self.root.path_mappings().contains_key(path2) && (path2.has_prefix(path)
+                    || path.has_prefix(path2));
+            let frame2 = self.root.path_mappings()[path2];
+            self.root.lemma_path_mappings_valid();
+
+            assert(self.root.path_mappings().contains_pair(path2, frame2));
+            self.lemma_mappings_consistent_with_path_mappings();
+            assert(self.mappings().contains_pair(path2.to_vaddr(self.arch()), frame2));
+
+            if path.has_prefix(path2) {
+                PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path, path2);
+                assert(path2.to_vaddr(self.arch()).0 <= path.to_vaddr(self.arch()).0);
+                PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path, path2);
+                assert(path.to_vaddr(self.arch()).0 + frame.size.as_nat() <= path2.to_vaddr(
+                    self.arch(),
+                ).0 + frame2.size.as_nat());
+                assert(VAddr::overlap(
+                    path.to_vaddr(self.arch()),
+                    frame.size.as_nat(),
+                    path2.to_vaddr(self.arch()),
+                    frame2.size.as_nat(),
+                ));
+            } else {
+                PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path2, path);
+                assert(path.to_vaddr(self.arch()).0 <= path2.to_vaddr(self.arch()).0);
+                PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path2, path);
+                assert(path2.to_vaddr(self.arch()).0 + frame2.size.as_nat() <= path.to_vaddr(
+                    self.arch(),
+                ).0 + frame.size.as_nat());
+                assert(VAddr::overlap(
+                    path2.to_vaddr(self.arch()),
+                    frame2.size.as_nat(),
+                    path.to_vaddr(self.arch()),
+                    frame.size.as_nat(),
+                ));
+            }
+        }
     }
 
     /// Lemma. The address does not overlap with any existing mapped region if `map` succeeds.
@@ -615,7 +662,6 @@ impl PTTreeModel {
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        // Prove `path` is valid
         PTTreePath::lemma_from_vaddr_root_yields_valid_path(
             vbase,
             self.arch(),
@@ -661,7 +707,6 @@ impl PTTreeModel {
         if !self.overlaps_vmem(vbase, frame) {
             self.lemma_nonoverlap_implies_map_ok(vbase, frame);
             self.lemma_map_adds_mapping(vbase, frame);
-            assert(new.mappings() == self.mappings().insert(vbase, frame));
         } else {
             if res is Ok {
                 // Prove by contradiction
