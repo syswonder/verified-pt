@@ -95,11 +95,11 @@ impl PTTreePath {
     }
 
     /// Lemma. Two paths are equal if they have the same first element and the same tail.
-    pub proof fn lemma_eq_step(self, other: Self)
+    pub broadcast proof fn lemma_eq_step(self, other: Self)
         requires
             self.len() > 0,
             other.len() > 0,
-            self.step() == other.step(),
+            #[trigger] self.step() == #[trigger] other.step(),
         ensures
             self == other,
     {
@@ -116,21 +116,10 @@ impl PTTreePath {
         assert(self.0 == other.0);
     }
 
-    /// Lemma. A prefix of a valid path is also valid.
-    pub proof fn lemma_prefix_valid(self, arch: PTArch, start: nat, pref: Self)
-        requires
-            arch.valid(),
-            self.valid(arch, start),
-            self.has_prefix(pref),
-        ensures
-            pref.valid(arch, start),
-    {
-    }
-
     /// Lemma. If a prefix has the same length as the full path, then the two paths are equal.
-    pub proof fn lemma_prefix_equals_full(self, pref: Self)
+    pub broadcast proof fn lemma_prefix_eq_full(self, pref: Self)
         requires
-            self.has_prefix(pref),
+            #[trigger] self.has_prefix(pref),
             pref.len() == self.len(),
         ensures
             self == pref,
@@ -140,12 +129,12 @@ impl PTTreePath {
 
     /// Lemma. `other` is a prefix of `self` if the first element of `other` is the same as the first
     /// element of `self`, and the tail of `other` is a prefix of the tail of `self`.
-    pub proof fn lemma_prefix_step(self, other: Self)
+    pub broadcast proof fn lemma_prefix_step(self, other: Self)
         requires
             self.len() > 0,
             other.len() > 0,
             self.step().0 == other.step().0,
-            self.step().1.has_prefix(other.step().1),
+            #[trigger] self.step().1.has_prefix(other.step().1),
         ensures
             self.has_prefix(other),
     {
@@ -161,9 +150,9 @@ impl PTTreePath {
     }
 
     /// Lemma. If `pref` is a prefix of `self`, then `self.trim(pref.len())` is equal to `pref`.
-    pub proof fn lemma_trim_prefix(self, pref: Self)
+    pub broadcast proof fn lemma_trim_prefix(self, pref: Self)
         requires
-            self.has_prefix(pref),
+            #[trigger] self.has_prefix(pref),
         ensures
             self.trim(pref.len()) == pref,
     {
@@ -176,11 +165,11 @@ impl PTTreePath {
     }
 
     /// Lemma. Existence of the first differing index between two distinct paths.
-    pub proof fn lemma_first_diff_idx_exists(a: Self, b: Self)
+    pub broadcast proof fn lemma_first_diff_idx_exists(a: Self, b: Self)
         requires
             a.len() > 0,
             b.len() > 0,
-            !a.has_prefix(b),
+            ! #[trigger] a.has_prefix(b),
             !b.has_prefix(a),
         ensures
             exists|i: int|
@@ -214,7 +203,7 @@ impl PTTreePath {
     }
 
     /// Lemma. `from_vaddr` produces a valid path.
-    pub proof fn lemma_from_vaddr_yields_valid_path(
+    pub broadcast proof fn lemma_from_vaddr_yields_valid_path(
         vaddr: VAddr,
         arch: PTArch,
         start: nat,
@@ -225,7 +214,7 @@ impl PTTreePath {
             start <= end < arch.level_count(),
             arch.valid(),
         ensures
-            Self::from_vaddr(vaddr, arch, start, end).valid(arch, start),
+            #[trigger] Self::from_vaddr(vaddr, arch, start, end).valid(arch, start),
     {
         let path = Self::from_vaddr(vaddr, arch, start, end);
         assert forall|i: int| 0 <= i < path.len() implies path.0[i] < arch.entry_count(
@@ -235,23 +224,23 @@ impl PTTreePath {
     }
 
     /// Lemma. `from_vaddr_root` produces a valid path.
-    pub proof fn lemma_from_vaddr_root_yields_valid_path(vaddr: VAddr, arch: PTArch, end: nat)
+    pub broadcast proof fn lemma_from_vaddr_root_yields_valid_path(vaddr: VAddr, arch: PTArch, end: nat)
         requires
             end < arch.level_count(),
             arch.valid(),
         ensures
-            Self::from_vaddr_root(vaddr, arch, end).valid(arch, 0),
+            #[trigger] Self::from_vaddr_root(vaddr, arch, end).valid(arch, 0),
     {
         Self::lemma_from_vaddr_yields_valid_path(vaddr, arch, 0, end);
     }
 
     /// Lemma. from_vaddr(vaddr, arch, start, end).step().1 == from_vaddr(vaddr, arch, start + 1, end)
-    pub proof fn lemma_from_vaddr_step(vaddr: VAddr, arch: PTArch, start: nat, end: nat)
+    pub broadcast proof fn lemma_from_vaddr_step(vaddr: VAddr, arch: PTArch, start: nat, end: nat)
         requires
             start < end < arch.level_count(),
             arch.valid(),
         ensures
-            Self::from_vaddr(vaddr, arch, start, end).step().1 == Self::from_vaddr(
+            #[trigger] Self::from_vaddr(vaddr, arch, start, end).step().1 == Self::from_vaddr(
                 vaddr,
                 arch,
                 start + 1,
@@ -265,11 +254,11 @@ impl PTTreePath {
     }
 
     /// Lemma. The address computed by `to_vaddr` is aligned to the frame size of the last level.
-    pub proof fn lemma_to_vaddr_frame_alignment(self, arch: PTArch)
+    pub broadcast proof fn lemma_to_vaddr_frame_alignment(self, arch: PTArch)
         by (nonlinear_arith)
         requires
             arch.valid(),
-            self.valid(arch, 0),
+            #[trigger] self.valid(arch, 0),
         ensures
             self.to_vaddr(arch).aligned(arch.frame_size((self.len() - 1) as nat).as_nat()),
     {
@@ -291,18 +280,18 @@ impl PTTreePath {
     }
 
     /// Lemma. If `path` has a prefix `pref`, then `path.to_vaddr()` has a lower bound.
-    pub proof fn lemma_to_vaddr_lower_bound(arch: PTArch, path: Self, pref: Self)
+    pub broadcast proof fn lemma_to_vaddr_lower_bound(arch: PTArch, path: Self, pref: Self)
         requires
             arch.valid(),
-            path.valid(arch, 0),
-            path.has_prefix(pref),
+            #[trigger] path.valid(arch, 0),
+            #[trigger] path.has_prefix(pref),
         ensures
             pref.to_vaddr(arch).0 <= path.to_vaddr(arch).0,
         decreases path.len(),
     {
         if path.len() <= pref.len() {
             // `pref` equals `path`
-            path.lemma_prefix_equals_full(pref);
+            path.lemma_prefix_eq_full(pref);
             assert(path.to_vaddr(arch).0 == pref.to_vaddr(arch).0);
         } else {
             // `pref2` is the longest prefix of `path` and not equal to `path`
@@ -331,12 +320,12 @@ impl PTTreePath {
     }
 
     /// Lemma. If `path` has a prefix `pref`, then `path.to_vaddr()` has an upper bound.
-    pub proof fn lemma_to_vaddr_upper_bound(arch: PTArch, path: Self, pref: Self)
+    pub broadcast proof fn lemma_to_vaddr_upper_bound(arch: PTArch, path: Self, pref: Self)
         by (nonlinear_arith)
         requires
             arch.valid(),
-            path.valid(arch, 0),
-            path.has_prefix(pref),
+            #[trigger] path.valid(arch, 0),
+            #[trigger] path.has_prefix(pref),
         ensures
             path.to_vaddr(arch).0 <= pref.to_vaddr(arch).0 + arch.frame_size(
                 (pref.len() - 1) as nat,
@@ -345,7 +334,7 @@ impl PTTreePath {
     {
         if path.len() <= pref.len() {
             // `pref` equals `path`
-            path.lemma_prefix_equals_full(pref);
+            path.lemma_prefix_eq_full(pref);
             assert(path.to_vaddr(arch).0 == pref.to_vaddr(arch).0);
         } else {
             // `pref2` is the longest prefix of `path` and not equal to `path`
@@ -388,13 +377,13 @@ impl PTTreePath {
 
     /// Lemma. If `a` and `b` are not a prefix of each other, then the order of their virtual
     /// addresses is the same as the order of their path indices.
-    pub proof fn lemma_path_order_implies_vaddr_order(arch: PTArch, a: Self, b: Self)
+    pub broadcast proof fn lemma_path_order_implies_vaddr_order(arch: PTArch, a: Self, b: Self)
         by (nonlinear_arith)
         requires
             arch.valid(),
-            a.valid(arch, 0),
+            #[trigger] a.valid(arch, 0),
             b.valid(arch, 0),
-            !a.has_prefix(b),
+            ! #[trigger] a.has_prefix(b),
             !b.has_prefix(a),
             a.0[Self::first_diff_idx(a, b)] < b.0[Self::first_diff_idx(a, b)],
         ensures
@@ -462,12 +451,12 @@ impl PTTreePath {
     }
 
     /// Lemma. If `a` and `b` are not a prefix of each other, then `a.vaddr() != b.vaddr()`.
-    pub proof fn lemma_nonprefix_implies_vaddr_inequality(arch: PTArch, a: Self, b: Self)
+    pub broadcast proof fn lemma_nonprefix_implies_vaddr_inequality(arch: PTArch, a: Self, b: Self)
         requires
             arch.valid(),
-            a.valid(arch, 0),
+            #[trigger]a.valid(arch, 0),
             b.valid(arch, 0),
-            !a.has_prefix(b),
+            ! #[trigger] a.has_prefix(b),
             !b.has_prefix(a),
         ensures
             a.to_vaddr(arch) != b.to_vaddr(arch),
@@ -481,8 +470,8 @@ impl PTTreePath {
         }
     }
 
-    // Lemma. `to_vaddr` is the inverse of `from_vaddr`
-    pub proof fn lemma_to_vaddr_is_inverse_of_from_vaddr_root(
+    // Lemma. `to_vaddr` is the inverse of `from_vaddr_root`
+    pub broadcast proof fn lemma_to_vaddr_is_inverse_of_from_vaddr_root(
         arch: PTArch,
         vaddr: VAddr,
         path: Self,
@@ -491,7 +480,7 @@ impl PTTreePath {
             arch.valid(),
             path.valid(arch, 0),
             vaddr.aligned(arch.frame_size((path.len() - 1) as nat).as_nat()),
-            path == Self::from_vaddr_root(vaddr, arch, (path.len() - 1) as nat),
+            path == #[trigger] Self::from_vaddr_root(vaddr, arch, (path.len() - 1) as nat),
         ensures
             path.to_vaddr(arch) == vaddr,
     {
@@ -506,6 +495,25 @@ impl PTTreePath {
         // TODO consider add a lemma to `PTArch`
         assume(false);
     }
+}
+
+pub broadcast group group_pt_tree_path_lemmas {
+    // prefix related lemmas
+    PTTreePath::lemma_eq_step,
+    PTTreePath::lemma_prefix_eq_full,
+    PTTreePath::lemma_prefix_step,
+    PTTreePath::lemma_trim_prefix,
+    PTTreePath::lemma_first_diff_idx_exists,
+    // vaddr related lemmas
+    PTTreePath::lemma_from_vaddr_yields_valid_path,
+    PTTreePath::lemma_from_vaddr_root_yields_valid_path,
+    PTTreePath::lemma_from_vaddr_step,
+    PTTreePath::lemma_to_vaddr_frame_alignment,
+    PTTreePath::lemma_to_vaddr_lower_bound,
+    PTTreePath::lemma_to_vaddr_upper_bound,
+    PTTreePath::lemma_path_order_implies_vaddr_order,
+    PTTreePath::lemma_nonprefix_implies_vaddr_inequality,
+    PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr_root,
 }
 
 } // verus!

@@ -10,6 +10,9 @@ use crate::{
 
 verus! {
 
+// Use path related lemmas.
+broadcast use super::path::group_pt_tree_path_lemmas;
+
 /// Represents a node in the page table tree, which can be either an intermediate node
 /// or a leaf node mapping to a physical frame.
 pub struct PTTreeNode {
@@ -593,7 +596,7 @@ impl PTTreeNode {
                     assert(visited2.len() == path2.len());
                     // Prove `path2.len() - 1` and `path1.len() - 1` are different
                     if path1.len() == path2.len() {
-                        path1.lemma_prefix_equals_full(path2);
+                        path1.lemma_prefix_eq_full(path2);
                     }
                     assert(path2.len() < path1.len());
                     self.lemma_visit_preserves_prefix(path1, path2);

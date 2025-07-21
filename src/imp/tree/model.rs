@@ -18,6 +18,9 @@ use crate::{
 
 verus! {
 
+// Use path related lemmas.
+broadcast use super::path::group_pt_tree_path_lemmas;
+
 /// Page table tree model.
 pub struct PTTreeModel {
     /// The root node.
@@ -310,12 +313,6 @@ impl PTTreeModel {
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        PTTreePath::lemma_from_vaddr_root_yields_valid_path(
-            vbase,
-            self.arch(),
-            self.arch().level_of_frame_size(frame.size),
-        );
-        PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr_root(self.arch(), vbase, path);
         assert(path.to_vaddr(self.arch()) == vbase);
 
         // `path_mappings` is updated according to lemma.
@@ -406,13 +403,6 @@ impl PTTreeModel {
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        PTTreePath::lemma_from_vaddr_root_yields_valid_path(
-            vbase,
-            self.arch(),
-            self.arch().level_of_frame_size(frame.size),
-        );
-        PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr_root(self.arch(), vbase, path);
-        assert(path.to_vaddr(self.arch()) == vbase);
 
         // TODO: Add a lemma to `PTTreeNode`
         assume(self.root.recursive_visit(path).last() is Empty);
@@ -558,8 +548,6 @@ impl PTTreeModel {
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr_root(self.arch(), vbase, path);
-        assert(path.len() == self.arch().level_of_frame_size(frame.size) + 1);
 
         if res is Err {
             // Prove by contradiction
@@ -576,11 +564,7 @@ impl PTTreeModel {
 
             if path.has_prefix(path2) {
                 PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path, path2);
-                assert(path2.to_vaddr(self.arch()).0 <= path.to_vaddr(self.arch()).0);
                 PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path, path2);
-                assert(path.to_vaddr(self.arch()).0 + frame.size.as_nat() <= path2.to_vaddr(
-                    self.arch(),
-                ).0 + frame2.size.as_nat());
                 assert(VAddr::overlap(
                     path.to_vaddr(self.arch()),
                     frame.size.as_nat(),
@@ -589,11 +573,7 @@ impl PTTreeModel {
                 ));
             } else {
                 PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path2, path);
-                assert(path.to_vaddr(self.arch()).0 <= path2.to_vaddr(self.arch()).0);
                 PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path2, path);
-                assert(path2.to_vaddr(self.arch()).0 + frame2.size.as_nat() <= path.to_vaddr(
-                    self.arch(),
-                ).0 + frame.size.as_nat());
                 assert(VAddr::overlap(
                     path2.to_vaddr(self.arch()),
                     frame2.size.as_nat(),
@@ -662,11 +642,6 @@ impl PTTreeModel {
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        PTTreePath::lemma_from_vaddr_root_yields_valid_path(
-            vbase,
-            self.arch(),
-            self.arch().level_of_frame_size(frame.size),
-        );
         self.root.lemma_insert_preserves_invariants(path, frame);
     }
 
@@ -679,11 +654,6 @@ impl PTTreeModel {
             self.unmap(vbase).0.invariants(),
     {
         let path = PTTreePath::from_vaddr_root(
-            vbase,
-            self.arch(),
-            (self.arch().level_count() - 1) as nat,
-        );
-        PTTreePath::lemma_from_vaddr_root_yields_valid_path(
             vbase,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
