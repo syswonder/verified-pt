@@ -1202,6 +1202,29 @@ impl PTTreeNode {
         }
         lemma_map_eq_pair(self.path_mappings().remove(path), new.path_mappings());
     }
+
+    /// Lemma. `recursive_insert` fails for `path` implies `self.path_mappings()`
+    /// contains `path2` such that `path2` is a prefix of `path` or `path` is a
+    /// prefix of `path2`.
+    pub proof fn lemma_insert_fails_implies_prefix(self, path: PTTreePath, frame: Frame)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            Self::is_entry_valid(
+                NodeEntry::Frame(frame),
+                (self.level + path.len() - 1) as nat,
+                self.constants,
+            ),
+            self.recursive_insert(path, frame).1 is Err,
+        ensures
+            exists|path2: PTTreePath| #[trigger]
+                self.path_mappings().contains_key(path2) && (path2.has_prefix(path)
+                    || path.has_prefix(path2)),
+        decreases path.len(),
+    {
+        // TODO
+        assume(false);
+    }
 }
 
 } // verus!

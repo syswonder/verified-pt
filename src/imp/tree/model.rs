@@ -94,6 +94,20 @@ impl PTTreeModel {
             }
     }
 
+    /// If mapping `(vaddr, frame)` overlaps with existing virtual memory.
+    pub open spec fn overlaps_vmem(self, vbase: VAddr, frame: Frame) -> bool {
+        exists|vbase2: VAddr|
+            {
+                &&& #[trigger] self.mappings().contains_key(vbase2)
+                &&& VAddr::overlap(
+                    vbase2,
+                    self.mappings()[vbase2].size.as_nat(),
+                    vbase,
+                    frame.size.as_nat(),
+                )
+            }
+    }
+
     /// View the tree as `PageTableState`.
     pub open spec fn view(self) -> PageTableState {
         PageTableState {
@@ -109,7 +123,7 @@ impl PTTreeModel {
     /// Map a virtual address to a physical frame.
     ///
     /// If mapping succeeds, return `Ok` and the updated tree.
-    pub open spec fn map(self, vbase: VAddr, frame: Frame) -> PagingResult<Self>
+    pub open spec fn map(self, vbase: VAddr, frame: Frame) -> (Self, PagingResult)
         recommends
             self.invariants(),
             self.arch().is_valid_frame_size(frame.size),
@@ -125,16 +139,16 @@ impl PTTreeModel {
         );
         let (node, res) = self.root.recursive_insert(path, frame);
         if res is Ok {
-            Ok(Self::new(node))
+            (Self::new(node), Ok(()))
         } else {
-            Err(())
+            (self, Err(()))
         }
     }
 
     /// Unmap a virtual address.
     ///
     /// If unmapping succeeds, return `Ok` and the updated tree.
-    pub open spec fn unmap(self, vbase: VAddr) -> PagingResult<Self>
+    pub open spec fn unmap(self, vbase: VAddr) -> (Self, PagingResult)
         recommends
             self.invariants(),
     {
@@ -145,9 +159,9 @@ impl PTTreeModel {
         );
         let (node, res) = self.root.recursive_remove(path);
         if res is Ok {
-            Ok(Self::new(node))
+            (Self::new(node), Ok(()))
         } else {
-            Err(())
+            (self, Err(()))
         }
     }
 
@@ -283,11 +297,11 @@ impl PTTreeModel {
             frame.base.aligned(frame.size.as_nat()),
             frame.base.0 >= self.pmem_lb().0,
             frame.base.0 + frame.size.as_nat() <= self.pmem_ub().0,
-            self.map(vbase, frame) is Ok,
+            self.map(vbase, frame).1 is Ok,
         ensures
-            self.map(vbase, frame).unwrap().mappings() === self.mappings().insert(vbase, frame),
+            self.map(vbase, frame).0.mappings() === self.mappings().insert(vbase, frame),
     {
-        let new = self.map(vbase, frame).unwrap();
+        let new = self.map(vbase, frame).0;
         self.map_preserves_invariants(vbase, frame);
 
         // `path` is the path to the entry containing the mapping.
@@ -371,17 +385,69 @@ impl PTTreeModel {
         lemma_map_eq_pair(new.mappings(), self.mappings().insert(vbase, frame));
     }
 
+    /// Lemma. `map` succeeds implies `vbase` not in `mappings()`.
+    pub proof fn lemma_map_ok_implies_vbase_nonexist(self, vbase: VAddr, frame: Frame)
+        requires
+            self.invariants(),
+            self.arch().is_valid_frame_size(frame.size),
+            vbase.aligned(frame.size.as_nat()),
+            frame.base.aligned(frame.size.as_nat()),
+            frame.base.0 >= self.pmem_lb().0,
+            frame.base.0 + frame.size.as_nat() <= self.pmem_ub().0,
+            self.map(vbase, frame).1 is Ok,
+        ensures
+            !self.mappings().contains_key(vbase),
+    {
+        let new = self.map(vbase, frame).0;
+        self.map_preserves_invariants(vbase, frame);
+
+        let path = PTTreePath::from_vaddr_root(
+            vbase,
+            self.arch(),
+            self.arch().level_of_frame_size(frame.size),
+        );
+        PTTreePath::lemma_from_vaddr_root_yields_valid_path(
+            vbase,
+            self.arch(),
+            self.arch().level_of_frame_size(frame.size),
+        );
+        PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr_root(self.arch(), vbase, path);
+        assert(path.to_vaddr(self.arch()) == vbase);
+
+        // TODO: Add a lemma to `PTTreeNode`
+        assume(self.root.recursive_visit(path).last() is Empty);
+
+        if self.mappings().contains_key(vbase) {
+            let path2 = choose|path: PTTreePath| #[trigger]
+                self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
+            assert(self.root.recursive_visit(path2).last() is Frame);
+
+            if !path.has_prefix(path2) && !path2.has_prefix(path) {
+                PTTreePath::lemma_nonprefix_implies_vaddr_inequality(self.arch(), path, path2);
+            }
+            if path.has_prefix(path2) {
+                self.root.lemma_visited_entry_is_node_except_final(path);
+                self.root.lemma_visit_preserves_prefix(path, path2);
+                assert(false);
+            }
+            if path2.has_prefix(path) {
+                self.root.lemma_visited_entry_is_node_except_final(path2);
+                self.root.lemma_visit_preserves_prefix(path2, path);
+                assert(false);
+            }
+        }
+    }
+
     /// Lemma. A successful `unmap` operation removes the `(vbase, frame)` pair from mappings.
     pub proof fn lemma_unmap_removes_mapping(self, vbase: VAddr)
         requires
             self.invariants(),
-            self.unmap(vbase) is Ok,
+            self.unmap(vbase).1 is Ok,
         ensures
-            self.unmap(vbase).unwrap().mappings() === self.mappings().remove(vbase),
+            self.unmap(vbase).0.mappings() === self.mappings().remove(vbase),
     {
-        let new = self.unmap(vbase).unwrap();
+        let new = self.unmap(vbase).0;
         self.unmap_preserves_invariants(vbase);
-        self.lemma_mapping_exist_implies_query_ok(vbase);
         // TODO
         assume(false);
     }
@@ -473,6 +539,65 @@ impl PTTreeModel {
         }
     }
 
+    /// Lemma. `map` succeeds if the address does not overlap with any existing mapped region.
+    pub proof fn lemma_nonoverlap_implies_map_ok(self, vbase: VAddr, frame: Frame)
+        requires
+            self.invariants(),
+            self.arch().is_valid_frame_size(frame.size),
+            vbase.aligned(frame.size.as_nat()),
+            frame.base.aligned(frame.size.as_nat()),
+            frame.base.0 >= self.pmem_lb().0,
+            frame.base.0 + frame.size.as_nat() <= self.pmem_ub().0,
+            !self.overlaps_vmem(vbase, frame),
+        ensures
+            self.map(vbase, frame).1 is Ok,
+            self.map(vbase, frame).0.mappings() == self.mappings().insert(vbase, frame),
+    {
+        // TODO
+        assume(false);
+    }
+
+    /// Lemma. The address does not overlap with any existing mapped region if `map` succeeds.
+    pub proof fn lemma_map_ok_implies_nonoverlap(self, vbase: VAddr, frame: Frame)
+        requires
+            self.invariants(),
+            self.arch().is_valid_frame_size(frame.size),
+            vbase.aligned(frame.size.as_nat()),
+            frame.base.aligned(frame.size.as_nat()),
+            frame.base.0 >= self.pmem_lb().0,
+            frame.base.0 + frame.size.as_nat() <= self.pmem_ub().0,
+            self.map(vbase, frame).1 is Ok,
+        ensures
+            !self.overlaps_vmem(vbase, frame),
+    {
+        let (new, res) = self.map(vbase, frame);
+        self.lemma_map_adds_mapping(vbase, frame);
+        self.map_preserves_invariants(vbase, frame);
+        new.lemma_mappings_nonoverlap_in_vmem();
+        self.lemma_mappings_nonoverlap_in_vmem();
+        assert(new.mappings().contains_pair(vbase, frame));
+        assert(new.mappings() == self.mappings().insert(vbase, frame));
+
+        assert(forall|vbase2, frame2| #[trigger]
+            new.mappings().contains_pair(vbase2, frame2) && vbase2 != vbase ==> !VAddr::overlap(
+                vbase2,
+                frame2.size.as_nat(),
+                vbase,
+                frame.size.as_nat(),
+            ));
+
+        self.lemma_map_ok_implies_vbase_nonexist(vbase, frame);
+        assert(!self.mappings().contains_key(vbase));
+        assert forall|vbase2, frame2| #[trigger]
+            self.mappings().contains_pair(vbase2, frame2) implies new.mappings().contains_pair(
+            vbase2,
+            frame2,
+        ) by {
+            assert(vbase2 != vbase);
+        }
+        assert(!self.overlaps_vmem(vbase, frame));
+    }
+
     /// Theorem. `map` preserves invariants.
     pub proof fn map_preserves_invariants(self, vbase: VAddr, frame: Frame)
         requires
@@ -482,9 +607,8 @@ impl PTTreeModel {
             frame.base.aligned(frame.size.as_nat()),
             frame.base.0 >= self.pmem_lb().0,
             frame.base.0 + frame.size.as_nat() <= self.pmem_ub().0,
-            self.map(vbase, frame) is Ok,
         ensures
-            self.map(vbase, frame).unwrap().invariants(),
+            self.map(vbase, frame).0.invariants(),
     {
         let path = PTTreePath::from_vaddr_root(
             vbase,
@@ -504,9 +628,9 @@ impl PTTreeModel {
     pub proof fn unmap_preserves_invariants(self, vbase: VAddr)
         requires
             self.invariants(),
-            self.unmap(vbase) is Ok,
+            self.unmap(vbase).1 is Ok,
         ensures
-            self.unmap(vbase).unwrap().invariants(),
+            self.unmap(vbase).0.invariants(),
     {
         let path = PTTreePath::from_vaddr_root(
             vbase,
@@ -528,24 +652,21 @@ impl PTTreeModel {
             self.invariants(),
             self@.map_pre(vbase, frame),
         ensures
-            match self.map(vbase, frame) {
-                Ok(new) => PageTableState::map(self@, new@, vbase, frame, Ok(())),
-                Err(_) => PageTableState::map(self@, self@, vbase, frame, Err(())),
-            },
+            ({
+                let (new, res) = self.map(vbase, frame);
+                PageTableState::map(self@, new@, vbase, frame, res)
+            }),
     {
-        let path = PTTreePath::from_vaddr_root(
-            vbase,
-            self.arch(),
-            self.arch().level_of_frame_size(frame.size),
-        );
-        let visited = self.root.recursive_visit(path);
-        if visited.last() is Empty {
-            // TODO
-            assume(!self@.overlaps_vmem(vbase, frame));
+        let (new, res) = self.map(vbase, frame);
+        if !self.overlaps_vmem(vbase, frame) {
+            self.lemma_nonoverlap_implies_map_ok(vbase, frame);
             self.lemma_map_adds_mapping(vbase, frame);
+            assert(new.mappings() == self.mappings().insert(vbase, frame));
         } else {
-            // TODO
-            assume(self@.overlaps_vmem(vbase, frame));
+            if res is Ok {
+                // Prove by contradiction
+                self.lemma_map_ok_implies_nonoverlap(vbase, frame);
+            }
         }
     }
 
@@ -555,48 +676,24 @@ impl PTTreeModel {
             self.invariants(),
             self@.unmap_pre(vbase),
         ensures
-            match self.unmap(vbase) {
-                Ok(new) => PageTableState::unmap(self@, new@, vbase, Ok(())),
-                Err(_) => PageTableState::unmap(self@, self@, vbase, Err(())),
-            },
+            ({
+                let (new, res) = self.unmap(vbase);
+                PageTableState::unmap(self@, new@, vbase, res)
+            }),
     {
         let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
-        let visited = self.root.recursive_visit(path);
-        self.root.lemma_visited_entries_satisfy_invariants(path);
-        if let NodeEntry::Frame(frame) = visited.last() {
-            if vbase.aligned(frame.size.as_nat()) {
-                // TODO
-                assume(self.mappings().contains_key(vbase));
-                self.lemma_unmap_removes_mapping(vbase);
-            } else {
-                assert(self.query(vbase) is Ok);
-                self.lemma_mapping_exist_implies_query_ok(vbase);
-                let (vbase2, frame2) = self.query(vbase).unwrap();
-                if self.mappings().contains_key(vbase) {
-                    if vbase2 != vbase {
-                        self.lemma_mappings_nonoverlap_in_vmem();
-                        assert(VAddr::overlap(
-                            vbase,
-                            self.mappings()[vbase].size.as_nat(),
-                            vbase2,
-                            frame2.size.as_nat(),
-                        ));
-                        assert(false);
-                    } else {
-                        assert(frame2 == frame);
-                        self.lemma_mappings_valid();
-                        assert(vbase.aligned(frame.size.as_nat()));
-                        assert(false);
-                    }
-                }
-            }
+        if self.mappings().contains_key(vbase) {
+            self.lemma_unmap_removes_mapping(vbase);
+            assume(false);
         } else {
-            // TODO
-            assume(!self.mappings().contains_key(vbase));
+            assert(!exists|path: PTTreePath| #[trigger]
+                self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch())
+                    == vbase);
+            assert(self.root.recursive_remove(path).1 is Err);
         }
     }
 

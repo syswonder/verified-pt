@@ -489,7 +489,10 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
 
             if base2 == base && idx2 == idx {
                 // `(base2, idx2)` is the entry we just inserted
-                PTE::lemma_eq_by_u64(pte, PTE::spec_new(table.base, MemAttr::spec_default(), false));
+                PTE::lemma_eq_by_u64(
+                    pte,
+                    PTE::spec_new(table.base, MemAttr::spec_default(), false),
+                );
                 assert(pte == PTE::spec_new(table.base, MemAttr::spec_default(), false));
             } else {
                 if base2 == table.base {
@@ -1012,11 +1015,10 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             frame.base.0 + frame.size.as_nat() <= old(self).constants.pmem_ub.0,
         ensures
             self@.invariants(),
-            old(self)@@.map(vbase@, frame@) == match res {
-                Ok(()) => Ok(self@@),
-                Err(()) => Err(()),
-            },
-            res is Err ==> old(self) == self,
+            ({
+                let (s2, r) = old(self)@@.map(vbase@, frame@);
+                r is Ok == res is Ok && s2 == self@@
+            }),
     {
         let target_level = self.constants.arch.level_of_frame_size(frame.size);
         let huge = target_level < self.constants.arch.level_count() - 1;
@@ -1052,11 +1054,10 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             old(self)@.invariants(),
         ensures
             self@.invariants(),
-            old(self)@@.unmap(vbase@) == match res {
-                Ok(()) => Ok(self@@),
-                Err(()) => Err(()),
-            },
-            res is Err ==> old(self) == self,
+            ({
+                let (s2, r) = old(self)@@.unmap(vbase@);
+                r is Ok == res is Ok && s2 == self@@
+            }),
     {
         proof {
             let root = self.pt_mem@.root();
