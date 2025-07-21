@@ -169,7 +169,7 @@ impl PTTreePath {
         requires
             a.len() > 0,
             b.len() > 0,
-            ! #[trigger] a.has_prefix(b),
+            !#[trigger] a.has_prefix(b),
             !b.has_prefix(a),
         ensures
             exists|i: int|
@@ -224,7 +224,11 @@ impl PTTreePath {
     }
 
     /// Lemma. `from_vaddr_root` produces a valid path.
-    pub broadcast proof fn lemma_from_vaddr_root_yields_valid_path(vaddr: VAddr, arch: PTArch, end: nat)
+    pub broadcast proof fn lemma_from_vaddr_root_yields_valid_path(
+        vaddr: VAddr,
+        arch: PTArch,
+        end: nat,
+    )
         requires
             end < arch.level_count(),
             arch.valid(),
@@ -383,7 +387,7 @@ impl PTTreePath {
             arch.valid(),
             #[trigger] a.valid(arch, 0),
             b.valid(arch, 0),
-            ! #[trigger] a.has_prefix(b),
+            !#[trigger] a.has_prefix(b),
             !b.has_prefix(a),
             a.0[Self::first_diff_idx(a, b)] < b.0[Self::first_diff_idx(a, b)],
         ensures
@@ -454,9 +458,9 @@ impl PTTreePath {
     pub broadcast proof fn lemma_nonprefix_implies_vaddr_inequality(arch: PTArch, a: Self, b: Self)
         requires
             arch.valid(),
-            #[trigger]a.valid(arch, 0),
+            #[trigger] a.valid(arch, 0),
             b.valid(arch, 0),
-            ! #[trigger] a.has_prefix(b),
+            !#[trigger] a.has_prefix(b),
             !b.has_prefix(a),
         ensures
             a.to_vaddr(arch) != b.to_vaddr(arch),
@@ -470,19 +474,17 @@ impl PTTreePath {
         }
     }
 
-    // Lemma. `to_vaddr` is the inverse of `from_vaddr_root`
-    pub broadcast proof fn lemma_to_vaddr_is_inverse_of_from_vaddr_root(
-        arch: PTArch,
-        vaddr: VAddr,
-        path: Self,
-    )
+    /// Lemma. The computed base virtual address of a path and the frame size guarantee that
+    /// any derived `to_vaddr` falls within the address window.
+    pub broadcast proof fn lemma_vaddr_range_from_path(arch: PTArch, vaddr: VAddr, path: Self)
         requires
             arch.valid(),
             path.valid(arch, 0),
-            vaddr.aligned(arch.frame_size((path.len() - 1) as nat).as_nat()),
             path == #[trigger] Self::from_vaddr_root(vaddr, arch, (path.len() - 1) as nat),
         ensures
-            path.to_vaddr(arch) == vaddr,
+            path.to_vaddr(arch).0 <= vaddr.0 < path.to_vaddr(arch).0 + arch.frame_size(
+                (path.len() - 1) as nat,
+            ).as_nat(),
     {
         let parts: Seq<nat> = Seq::new(
             path.len(),
@@ -492,7 +494,21 @@ impl PTTreePath {
             0 <= i < path.len() ==> parts[i] == arch.pte_index(vaddr, i as nat) * arch.frame_size(
                 i as nat,
             ).as_nat());
-        // TODO consider add a lemma to `PTArch`
+        // TODO: consider adding a lemma to `PTArch`
+        assume(false);
+    }
+
+    /// Lemma. Converting a vaddr into a path and then back exactly inverts the operation.
+    pub broadcast proof fn lemma_to_vaddr_inverts_from_vaddr(arch: PTArch, vaddr: VAddr, path: Self)
+        requires
+            arch.valid(),
+            path.valid(arch, 0),
+            vaddr.aligned(arch.frame_size((path.len() - 1) as nat).as_nat()),
+            path == #[trigger] Self::from_vaddr_root(vaddr, arch, (path.len() - 1) as nat),
+        ensures
+            path.to_vaddr(arch) == vaddr,
+    {
+        // TODO: prove by the above lemma
         assume(false);
     }
 }
@@ -513,7 +529,8 @@ pub broadcast group group_pt_tree_path_lemmas {
     PTTreePath::lemma_to_vaddr_upper_bound,
     PTTreePath::lemma_path_order_implies_vaddr_order,
     PTTreePath::lemma_nonprefix_implies_vaddr_inequality,
-    PTTreePath::lemma_to_vaddr_is_inverse_of_from_vaddr_root,
+    PTTreePath::lemma_vaddr_range_from_path,
+    PTTreePath::lemma_to_vaddr_inverts_from_vaddr,
 }
 
 } // verus!

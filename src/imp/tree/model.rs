@@ -458,6 +458,7 @@ impl PTTreeModel {
         let path = choose|path: PTTreePath| #[trigger]
             self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
         assert(self.root.path_mappings().contains_pair(path, frame));
+        self.root.lemma_path_mappings_valid();
 
         // `path2` is the path used by `recursive_visit`
         let path2 = PTTreePath::from_vaddr_root(
@@ -465,8 +466,25 @@ impl PTTreeModel {
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
-        // TODO: add lemma to `PTTreePath`
-        assume(path2.has_prefix(path));
+        assert(vbase.0 <= vaddr.0 < vbase.0 + frame.size.as_nat());
+        assert(path2.to_vaddr(self.arch()).0 <= vaddr.0 < path2.to_vaddr(self.arch()).0
+            + self.arch().leaf_frame_size().as_nat());
+
+        if !path2.has_prefix(path) {
+            let diff_idx = PTTreePath::first_diff_idx(path, path2);
+            if path.0[diff_idx] < path2.0[diff_idx] {
+                PTTreePath::lemma_path_order_implies_vaddr_order(self.arch(), path, path2);
+                assert(path.to_vaddr(self.arch()).0 + frame.size.as_nat() <= path2.to_vaddr(
+                    self.arch(),
+                ).0);
+            } else {
+                PTTreePath::lemma_path_order_implies_vaddr_order(self.arch(), path2, path);
+                assert(path2.to_vaddr(self.arch()).0 + self.arch().leaf_frame_size().as_nat()
+                    <= path.to_vaddr(self.arch()).0);
+            }
+            assert(false);
+        }
+        assert(path2.has_prefix(path));
 
         self.root.lemma_visit_preserves_prefix(path2, path);
         self.root.lemma_visited_entry_is_node_except_final(path);
