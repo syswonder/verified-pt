@@ -183,7 +183,7 @@ impl PTTreeNode {
                     (self.update(idx, NodeEntry::Node(node)), res)
                 },
                 NodeEntry::Frame(frame) => {
-                    if remain.0 == seq![0nat; remain.len()] {
+                    if remain.is_zero() {
                         (self.update(idx, NodeEntry::Empty), Ok(()))
                     } else {
                         (self, Err(()))
@@ -344,7 +344,7 @@ impl PTTreeNode {
                     );
                 },
                 NodeEntry::Frame(_) => {
-                    if remain.0 == seq![0nat; remain.len()] {
+                    if remain.is_zero() {
                         self.lemma_update_preserves_invariants(idx, NodeEntry::Empty);
                     }
                 },
@@ -532,6 +532,21 @@ impl PTTreeNode {
                 },
             }
         }
+    }
+
+    /// Lemma. If `self.recursive_visit(path)` reaches a frame, then `self.real_path(path)`
+    /// is contained in path mappings.
+    pub proof fn lemma_real_path_in_path_mappings(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            self.recursive_visit(path).last() is Frame,
+        ensures
+            self.path_mappings().contains_key(self.real_path(path)),
+    {
+        self.lemma_visit_length_bounds(path);
+        self.lemma_real_path_valid(path);
+        self.lemma_real_path_visits_same_entry(path);
     }
 
     /// Lemma. All `(path, frame)` mappings have valid size and alignment.
@@ -1224,6 +1239,35 @@ impl PTTreeNode {
                 self.path_mappings().contains_key(path2) && (path2.has_prefix(path)
                     || path.has_prefix(path2)),
         decreases path.len(),
+    {
+        // TODO
+        assume(false);
+    }
+
+    /// Lemma. If `path` is contained in `self.path_mappings()`, and `path` is a real prefix of `path2`,
+    /// then `self.recursive_remove(path2)` succeeds.
+    pub proof fn lemma_remove_real_prefix_ok(self, path: PTTreePath, path2: PTTreePath)
+        requires
+            self.invariants(),
+            self.path_mappings().contains_key(path),
+            path2.valid(self.constants.arch, self.level),
+            path2.has_real_prefix(path),
+        ensures
+            self.recursive_remove(path2).1 is Ok,
+    {
+        // TODO
+        assume(false);
+    }
+
+    /// Lemma. If `self.recursive_remove(path)` succeeds, then `self.recursive_visit(path)` reaches a frame.
+    pub proof fn lemma_remove_ok_implies_visit_reaches_frame(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            self.recursive_remove(path).1 is Ok,
+        ensures
+            self.recursive_visit(path).last() is Frame,
+            path.has_zero_tail(self.recursive_visit(path).len()),
     {
         // TODO
         assume(false);

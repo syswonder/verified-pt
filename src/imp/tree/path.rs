@@ -49,6 +49,22 @@ impl PTTreePath {
         &&& forall|i: int| 0 <= i < p.len() ==> self.0[i] == p.0[i]
     }
 
+    /// If `self` has a zero tail.
+    pub open spec fn has_zero_tail(self, idx: nat) -> bool {
+        forall|i: int| idx <= i < self.len() ==> self.0[i] == 0
+    }
+
+    /// If `self` has a non-empty prefix `p` and the remaining tail is zero.
+    pub open spec fn has_real_prefix(self, p: Self) -> bool {
+        &&& self.has_prefix(p)
+        &&& self.has_zero_tail(p.len())
+    }
+
+    /// If `self` is a zero sequence
+    pub open spec fn is_zero(self) -> bool {
+        forall|i: int| 0 <= i < self.len() ==> self.0[i] == 0
+    }
+
     /// Get the first position at which two paths differ.
     pub open spec fn first_diff_idx(a: Self, b: Self) -> int
         recommends
@@ -474,6 +490,35 @@ impl PTTreePath {
         }
     }
 
+    /// Lemma. If `a.to_vaddr()` is equal to `b.to_vaddr()`, then `a` is a real prefix of `b` or
+    /// `b` is a real prefix of `a`.
+    pub broadcast proof fn lemma_vaddr_eq_implies_real_prefix(arch: PTArch, a: Self, b: Self)
+        requires
+            #[trigger] arch.valid(),
+            a.valid(arch, 0),
+            b.valid(arch, 0),
+            a.to_vaddr(arch) == b.to_vaddr(arch),
+        ensures
+            #[trigger] a.has_real_prefix(b) || b.has_real_prefix(a),
+    {
+        // TODO
+        assume(false);
+    }
+
+    /// Lemma. If `a` is a real prefix of `b`, then `a.to_vaddr() == b.to_vaddr()`.
+    pub broadcast proof fn lemma_real_prefix_implies_vaddr_eq(arch: PTArch, a: Self, b: Self)
+        requires
+            #[trigger] arch.valid(),
+            a.valid(arch, 0),
+            b.valid(arch, 0),
+            #[trigger] a.has_real_prefix(b),
+        ensures
+            a.to_vaddr(arch) == b.to_vaddr(arch),
+    {
+        // TODO
+        assume(false);
+    }
+
     /// Lemma. The computed base virtual address of a path and the frame size guarantee that
     /// any derived `to_vaddr` falls within the address window.
     pub broadcast proof fn lemma_vaddr_range_from_path(arch: PTArch, vaddr: VAddr, path: Self)
@@ -529,6 +574,8 @@ pub broadcast group group_pt_tree_path_lemmas {
     PTTreePath::lemma_to_vaddr_upper_bound,
     PTTreePath::lemma_path_order_implies_vaddr_order,
     PTTreePath::lemma_nonprefix_implies_vaddr_inequality,
+    PTTreePath::lemma_vaddr_eq_implies_real_prefix,
+    PTTreePath::lemma_real_prefix_implies_vaddr_eq,
     PTTreePath::lemma_vaddr_range_from_path,
     PTTreePath::lemma_to_vaddr_inverts_from_vaddr,
 }
