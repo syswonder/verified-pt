@@ -313,7 +313,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     }
 
     /// Lemma. The specification-level walk is consistent with the node model traversal
-    /// via `PTTreeNode::recursive_visit`.
+    /// via `PTTreeNode::visit`.
     proof fn lemma_walk_consistent_with_model(self, vaddr: VAddr, base: PAddr, level: nat)
         requires
             self.invariants(),
@@ -330,8 +330,8 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     level,
                     (self.constants.arch.level_count() - 1) as nat,
                 );
-                let visited = node.recursive_visit(path);
-                // This last entry returned by `recursive_visit` is consistent with
+                let visited = node.visit(path);
+                // This last entry returned by `visit` is consistent with
                 // the page table entry returned by `spec_walk`.
                 level2 == level + visited.len() - 1 && visited.last() == if pte.spec_valid() {
                     NodeEntry::Frame(
@@ -355,8 +355,8 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         self.lemma_construct_node_implies_invariants(base, level);
         let path = PTTreePath::from_vaddr(vaddr, arch, level, end);
         PTTreePath::lemma_from_vaddr_yields_valid_path(vaddr, arch, level, end);
-        // Precondition of `recursive_visit`: node.invariants and path.valid
-        let visited = node.recursive_visit(path);
+        // Precondition of `visit`: node.invariants and path.valid
+        let visited = node.visit(path);
 
         let (idx, remain) = path.step();
         let entry = node.entries[idx as int];
@@ -377,7 +377,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     // Recursive visit from the subtable
                     self.lemma_walk_consistent_with_model(vaddr, subtable_base, level + 1);
                     assert(pte == self.walk(vaddr, subtable_base, level + 1).0);
-                    assert(visited == seq![entry].add(subnode.recursive_visit(remain)));
+                    assert(visited == seq![entry].add(subnode.visit(remain)));
 
                     PTTreePath::lemma_from_vaddr_step(vaddr, arch, level, end);
                     assert(remain == PTTreePath::from_vaddr(vaddr, arch, level + 1, end));
@@ -400,7 +400,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     }
 
     /// Lemma. The specification-level insertion is consistent with the node model
-    /// insertion via `PTTreeNode::recursive_insert`.
+    /// insertion via `PTTreeNode::insert`.
     pub proof fn lemma_insert_consistent_with_model(
         self,
         vbase: VAddr,
@@ -421,7 +421,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let node = self.construct_node(base, level);
                 let node2 = s2.construct_node(base, level);
                 let path = PTTreePath::from_vaddr(vbase, self.constants.arch, level, target_level);
-                (node2, res) == node.recursive_insert(
+                (node2, res) == node.insert(
                     path,
                     Frame {
                         base: new_pte.spec_addr(),
@@ -691,7 +691,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     }
 
     /// Lemma. The specification-level removal is consistent with the node model
-    /// insertion via `PTTreeNode::recursive_insert`.
+    /// insertion via `PTTreeNode::insert`.
     pub proof fn lemma_remove_consistent_with_model(self, vbase: VAddr, base: PAddr, level: nat)
         requires
             self.invariants(),
@@ -709,7 +709,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     level,
                     (self.constants.arch.level_count() - 1) as nat,
                 );
-                (node2, res) == node.recursive_remove(path)
+                (node2, res) == node.remove(path)
             }),
     {
         assume(false);
@@ -959,7 +959,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
     {
         let (pte, level) = self.walk(vaddr, self.pt_mem.root(), 0);
         proof {
-            // spec `recursive_get_pte` == node `recursive_visit`
+            // spec `get_pte` == node `visit`
             self.pt_mem@.lemma_contains_root();
             self@.lemma_construct_node_implies_invariants(self.pt_mem@.root(), 0);
             let node = self@.construct_node(self.pt_mem@.root(), 0);

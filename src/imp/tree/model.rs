@@ -140,7 +140,7 @@ impl PTTreeModel {
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-        let (node, res) = self.root.recursive_insert(path, frame);
+        let (node, res) = self.root.insert(path, frame);
         if res is Ok {
             (Self::new(node), Ok(()))
         } else {
@@ -160,7 +160,7 @@ impl PTTreeModel {
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
-        let (node, res) = self.root.recursive_remove(path);
+        let (node, res) = self.root.remove(path);
         if res is Ok {
             (Self::new(node), Ok(()))
         } else {
@@ -180,7 +180,7 @@ impl PTTreeModel {
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
-        let visited = self.root.recursive_visit(path);
+        let visited = self.root.visit(path);
         match visited.last() {
             NodeEntry::Frame(frame) => Ok(
                 (self.arch().vbase(vaddr, (visited.len() - 1) as nat), frame),
@@ -238,8 +238,8 @@ impl PTTreeModel {
                 #![auto]
                 {
                     &&& path.valid(self.arch(), 0)
-                    &&& self.root.recursive_visit(path).len() == path.len()
-                    &&& self.root.recursive_visit(path).last() == NodeEntry::Frame(frame)
+                    &&& self.root.visit(path).len() == path.len()
+                    &&& self.root.visit(path).last() == NodeEntry::Frame(frame)
                     &&& path.to_vaddr(self.arch()) == vbase
                 };
             assert(self.root.path_mappings().contains_pair(path, frame));
@@ -278,10 +278,10 @@ impl PTTreeModel {
                 {
                     &&& path1.valid(self.arch(), 0)
                     &&& path2.valid(self.arch(), 0)
-                    &&& self.root.recursive_visit(path1).len() == path1.len()
-                    &&& self.root.recursive_visit(path2).len() == path2.len()
-                    &&& self.root.recursive_visit(path1).last() == NodeEntry::Frame(frame1)
-                    &&& self.root.recursive_visit(path2).last() == NodeEntry::Frame(frame2)
+                    &&& self.root.visit(path1).len() == path1.len()
+                    &&& self.root.visit(path2).len() == path2.len()
+                    &&& self.root.visit(path1).last() == NodeEntry::Frame(frame1)
+                    &&& self.root.visit(path2).last() == NodeEntry::Frame(frame2)
                     &&& path1.to_vaddr(self.arch()) == vbase1
                     &&& path2.to_vaddr(self.arch()) == vbase2
                 };
@@ -514,7 +514,7 @@ impl PTTreeModel {
             let path2 = choose|path: PTTreePath| #[trigger]
                 self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
             PTTreePath::lemma_vaddr_eq_implies_real_prefix(self.arch(), path, path2);
-            assert(self.root.recursive_visit(path2).last() is Frame);
+            assert(self.root.visit(path2).last() is Frame);
 
             // The prefix relation leads to a contradiction of the lasted visited entry.
             if path.has_prefix(path2) {
@@ -689,7 +689,7 @@ impl PTTreeModel {
         let path = choose|path: PTTreePath| #[trigger]
             self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
         assert(self.root.path_mappings().contains_pair(path, frame));
-        
+
         // `path2` is the path used to find the mapping.
         let path2 = PTTreePath::from_vaddr_root(
             vaddr,
@@ -723,12 +723,12 @@ impl PTTreeModel {
         self.root.lemma_visit_preserves_prefix(path2, path);
         self.root.lemma_visited_entry_is_node_except_final(path);
         self.root.lemma_visited_entry_is_node_except_final(path2);
-        assert(self.root.recursive_visit(path) == self.root.recursive_visit(path2));
+        assert(self.root.visit(path) == self.root.visit(path2));
         path2.lemma_trim_prefix(path);
         assert(path2.trim(path.len()) == path);
         assert(self.root.real_path(path2) == path);
 
-        let visited = self.root.recursive_visit(path2);
+        let visited = self.root.visit(path2);
         assert(visited.last() == NodeEntry::Frame(frame));
 
         // TODO: add lemma to `PTTreePath`
@@ -748,7 +748,7 @@ impl PTTreeModel {
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
-        let visited = self.root.recursive_visit(path);
+        let visited = self.root.visit(path);
         // `query` succeeds implies `visited.last()` is a frame
         assert(visited.last() is Frame);
         let frame = visited.last()->Frame_0;
