@@ -344,6 +344,7 @@ impl PTTreeModel {
             self.lemma_mappings_consistent_with_path_mappings();
             assert(self.mappings().contains_pair(path2.to_vaddr(self.arch()), frame2));
 
+            // The prefix relation implies that the two frames overlap
             if path.has_prefix(path2) {
                 PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path, path2);
                 PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path, path2);
@@ -380,30 +381,26 @@ impl PTTreeModel {
             !self.overlaps_vmem(vbase, frame),
     {
         let (new, res) = self.map(vbase, frame);
-        self.lemma_map_adds_mapping(vbase, frame);
         self.map_preserves_invariants(vbase, frame);
-        new.lemma_mappings_nonoverlap_in_vmem();
-        self.lemma_mappings_nonoverlap_in_vmem();
-        assert(new.mappings().contains_pair(vbase, frame));
+
+        self.lemma_map_adds_mapping(vbase, frame);
         assert(new.mappings() == self.mappings().insert(vbase, frame));
 
+        // The newly added mapping is not in the original mappings
+        self.lemma_map_ok_implies_vbase_nonexist(vbase, frame);
+        assert(!self.mappings().contains_key(vbase));
+
+        // `self` and `new` both have non-overlapping mappings
+        new.lemma_mappings_nonoverlap_in_vmem();
+        self.lemma_mappings_nonoverlap_in_vmem();
+        // So the newly added mapping cannot overlap with any existing mapping
         assert(forall|vbase2, frame2| #[trigger]
-            new.mappings().contains_pair(vbase2, frame2) && vbase2 != vbase ==> !VAddr::overlap(
+            self.mappings().contains_pair(vbase2, frame2) ==> !VAddr::overlap(
                 vbase2,
                 frame2.size.as_nat(),
                 vbase,
                 frame.size.as_nat(),
             ));
-
-        self.lemma_map_ok_implies_vbase_nonexist(vbase, frame);
-        assert(!self.mappings().contains_key(vbase));
-        assert forall|vbase2, frame2| #[trigger]
-            self.mappings().contains_pair(vbase2, frame2) implies new.mappings().contains_pair(
-            vbase2,
-            frame2,
-        ) by {
-            assert(vbase2 != vbase);
-        }
         assert(!self.overlaps_vmem(vbase, frame));
     }
 
@@ -511,25 +508,20 @@ impl PTTreeModel {
             self.arch(),
             self.arch().level_of_frame_size(frame.size),
         );
-
-        // TODO: Add a lemma to `PTTreeNode`
-        // `recursive_insert` succeeds ==> `the last entry visited` is empty
-        assume(self.root.recursive_visit(path).last() is Empty);
+        self.root.lemma_insert_ok_implies_visit_reaches_empty(path, frame);
 
         if self.mappings().contains_key(vbase) {
             let path2 = choose|path: PTTreePath| #[trigger]
                 self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
+            PTTreePath::lemma_vaddr_eq_implies_real_prefix(self.arch(), path, path2);
             assert(self.root.recursive_visit(path2).last() is Frame);
 
-            if !path.has_prefix(path2) && !path2.has_prefix(path) {
-                PTTreePath::lemma_nonprefix_implies_vaddr_inequality(self.arch(), path, path2);
-            }
+            // The prefix relation leads to a contradiction of the lasted visited entry.
             if path.has_prefix(path2) {
                 self.root.lemma_visited_entry_is_node_except_final(path);
                 self.root.lemma_visit_preserves_prefix(path, path2);
                 assert(false);
-            }
-            if path2.has_prefix(path) {
+            } else {
                 self.root.lemma_visited_entry_is_node_except_final(path2);
                 self.root.lemma_visit_preserves_prefix(path2, path);
                 assert(false);
@@ -697,19 +689,21 @@ impl PTTreeModel {
         let path = choose|path: PTTreePath| #[trigger]
             self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
         assert(self.root.path_mappings().contains_pair(path, frame));
-        self.root.lemma_path_mappings_valid();
-
-        // `path2` is the path used by `recursive_visit`
+        
+        // `path2` is the path used to find the mapping.
         let path2 = PTTreePath::from_vaddr_root(
             vaddr,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
+        self.root.lemma_path_mappings_valid();
         assert(vbase.0 <= vaddr.0 < vbase.0 + frame.size.as_nat());
+        // Substitute address with path
         assert(path2.to_vaddr(self.arch()).0 <= vaddr.0 < path2.to_vaddr(self.arch()).0
             + self.arch().leaf_frame_size().as_nat());
 
         if !path2.has_prefix(path) {
+            // Leads to a contradiction
             let diff_idx = PTTreePath::first_diff_idx(path, path2);
             if path.0[diff_idx] < path2.0[diff_idx] {
                 PTTreePath::lemma_path_order_implies_vaddr_order(self.arch(), path, path2);
@@ -725,17 +719,16 @@ impl PTTreeModel {
         }
         assert(path2.has_prefix(path));
 
+        // Show that `path` is the real path of `path2`.
         self.root.lemma_visit_preserves_prefix(path2, path);
         self.root.lemma_visited_entry_is_node_except_final(path);
         self.root.lemma_visited_entry_is_node_except_final(path2);
         assert(self.root.recursive_visit(path) == self.root.recursive_visit(path2));
         path2.lemma_trim_prefix(path);
         assert(path2.trim(path.len()) == path);
-
         assert(self.root.real_path(path2) == path);
 
         let visited = self.root.recursive_visit(path2);
-        self.root.lemma_real_path_visits_same_entry(path2);
         assert(visited.last() == NodeEntry::Frame(frame));
 
         // TODO: add lemma to `PTTreePath`
@@ -849,13 +842,11 @@ impl PTTreeModel {
         let res = self.query(vaddr);
         if self.has_mapping_for(vaddr) {
             self.lemma_mapping_exist_implies_query_ok(vaddr);
-            assert(res is Ok);
         } else {
             if res is Ok {
                 // Prove by contradiction
                 self.lemma_query_ok_implies_mapping_exist(vaddr);
             }
-            assert(res is Err);
         }
     }
 }
