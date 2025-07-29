@@ -640,8 +640,8 @@ impl PTTreeModel {
                     self.arch(),
                 ) && new.root.path_mappings().index(path2) == frame2;
             assert(new.root.path_mappings().contains_pair(path2, frame2));
-            // TODO: `lemma_remove_removes_path_mapping` ensures this.
-            assume(self.root.path_mappings().remove(real_path).contains_pair(path2, frame2));
+            // `lemma_remove_removes_path_mapping` ensures this.
+            assert(self.root.path_mappings().remove(real_path).contains_pair(path2, frame2));
             assert(self.root.path_mappings().contains_pair(path2, frame2));
 
             // `self.mappings()` contains the mapping consistently.

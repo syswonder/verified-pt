@@ -979,8 +979,9 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
+            self.remove(path).1 is Ok,
         ensures
-            !self.remove(path).0.path_mappings().contains_key(path),
+            !self.remove(path).0.path_mappings().contains_key(self.real_path(path)),
         decreases path.len(),
     {
         let new = self.remove(path).0;
@@ -990,7 +991,7 @@ impl PTTreeNode {
         if path.len() <= 1 {
             match entry {
                 NodeEntry::Frame(_) => assert(new.visit(path) == seq![NodeEntry::Empty]),
-                _ => assert(!new.is_frame_path(path)),
+                _ => (),
             }
         } else {
             match entry {
@@ -999,8 +1000,10 @@ impl PTTreeNode {
                     assert(node.invariants());
                     // Recursively prove `node.remove(remain)`
                     node.lemma_path_mappings_after_removal_not_contain_mapping(remain);
+                    // TODO
+                    assume(self.real_path(path).step() == (idx, node.real_path(remain)));
                 },
-                _ => assert(!new.is_frame_path(path)),
+                _ => (),
             }
         }
     }
@@ -1010,6 +1013,7 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
+            self.remove(path).1 is Ok,
         ensures
             forall|path2: PTTreePath, frame2: Frame| #[trigger]
                 self.remove(path).0.path_mappings().contains_pair(path2, frame2)
@@ -1063,9 +1067,10 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
+            self.remove(path).1 is Ok,
         ensures
             forall|path2: PTTreePath, frame2: Frame| #[trigger]
-                self.path_mappings().contains_pair(path2, frame2) ==> path.has_prefix(path2)
+                self.path_mappings().contains_pair(path2, frame2) ==> path2 == self.real_path(path)
                     || self.remove(path).0.path_mappings().contains_pair(path2, frame2),
         decreases path.len(),
     {
@@ -1073,7 +1078,7 @@ impl PTTreeNode {
         self.lemma_remove_preserves_invariants(path);
 
         assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
-            self.path_mappings().contains_pair(path2, frame2) implies path.has_prefix(path2)
+            self.path_mappings().contains_pair(path2, frame2) implies path2 == self.real_path(path)
             || new.path_mappings().contains_pair(path2, frame2) by {
             let (idx, remain) = path.step();
             let (idx2, remain2) = path2.step();
@@ -1091,9 +1096,7 @@ impl PTTreeNode {
                 if idx == idx2 {
                     match entry {
                         NodeEntry::Frame(_) => {
-                            assert(new.visit(path2) == seq![NodeEntry::Empty]);
-                            // assert(path2.len() == 1);
-                            assert(path.0 == path2.0);
+                            assert(path2.0 == path.0.take(1));
                         },
                         _ => assert(new == self),
                     }
@@ -1111,11 +1114,13 @@ impl PTTreeNode {
                             assert(node.path_mappings().contains_pair(remain2, frame2));
                             // Recursive prove that `new_node` has one less mapping than `node`
                             node.lemma_remove_not_affect_other_mappings(remain);
-                            assert(remain.has_prefix(remain2)
+                            assert(remain2 == node.real_path(remain)
                                 || new_node.path_mappings().contains_pair(remain2, frame2));
-                            if remain.has_prefix(remain2) {
-                                path.lemma_prefix_step(path2);
-                                assert(path.has_prefix(path2));
+                            if remain2 == node.real_path(remain) {
+                                // TODO
+                                assume(self.real_path(path).step() == (idx, node.real_path(remain)));
+                                assume(path.has_prefix(self.real_path(path)));
+                                path.lemma_prefix_step(self.real_path(path));
                             } else {
                                 assert(new.path_mappings().contains_pair(path2, frame2));
                             }
@@ -1127,8 +1132,7 @@ impl PTTreeNode {
                         },
                         (NodeEntry::Frame(_), _) => {
                             if remain.0 == seq![0nat; remain.len()] {
-                                assert(new.visit(path2) == seq![NodeEntry::Empty]);
-                                assert(self.visit(path2) == seq![entry]);
+                                assert(path2.0 == path.0.take(1));
                             }
                         },
                         _ => (),
@@ -1155,11 +1159,15 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
+            self.remove(path).1 is Ok,
         ensures
-            self.remove(path).0.path_mappings() == self.path_mappings().remove(path),
+            self.remove(path).0.path_mappings() == self.path_mappings().remove(
+                self.real_path(path),
+            ),
     {
         let new = self.remove(path).0;
         self.lemma_remove_preserves_invariants(path);
+        let real_path = self.real_path(path);
 
         // `new.path_mappings()` does not contain the mapping `(path, frame)`
         self.lemma_path_mappings_after_removal_not_contain_mapping(path);
@@ -1171,20 +1179,20 @@ impl PTTreeNode {
         // `new.path_mappings()` is a subset of `self.path_mappings().remove(path)`
         assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
             new.path_mappings().contains_pair(path2, frame2) implies self.path_mappings().remove(
-            path,
+            real_path,
         ).contains_pair(path2, frame2) by {
-            assert(path2 != path);
+            assert(path2 != real_path);
         }
         // `self.path_mappings().remove(path)` is a subset of `new.path_mappings()`
         assert forall|path2: PTTreePath, frame2: Frame| #[trigger]
-            self.path_mappings().remove(path).contains_pair(
+            self.path_mappings().remove(real_path).contains_pair(
                 path2,
                 frame2,
             ) implies new.path_mappings().contains_pair(path2, frame2) by {
-            assert(path2 != path);
+            assert(path2 != real_path);
             assert(self.path_mappings().contains_pair(path2, frame2));
         }
-        lemma_map_eq_pair(self.path_mappings().remove(path), new.path_mappings());
+        lemma_map_eq_pair(self.path_mappings().remove(real_path), new.path_mappings());
     }
 
     /// Lemma. `insert` fails for `path` implies `self.path_mappings()` contains `path2`
