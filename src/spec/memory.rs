@@ -187,6 +187,14 @@ impl PageTableMem {
     {
     }
 
+    /// If a table is empty.
+    pub open spec fn is_table_empty(self, base: PAddr) -> bool
+        recommends
+            self.contains_table(base),
+    {
+        self.table_view(base) == seq![0u64; self.table_view(base).len()]
+    }
+
     /// If accessing the given table at the given index is allowed.
     pub open spec fn accessible(self, base: PAddr, index: nat) -> bool {
         self.contains_table(base) && index < self.arch.entry_count(self.table(base).level)
@@ -224,8 +232,7 @@ impl PageTableMem {
         // Root table level is 0
         &&& self.tables[0].level == 0
         // Table level is valid.
-        &&& forall|table: Table| #[trigger]
-            self.tables.contains(table) ==> table.level
+        &&& forall|i| 0 <= i < self.tables.len() ==> #[trigger] self.tables[i].level
                 < self.arch.level_count()
         // Table size is valid.
         &&& forall|i|
@@ -252,8 +259,12 @@ impl PageTableMem {
         &&& self.table_view(self.root()) == seq![0u64; self.arch.entry_count(0)]
     }
 
-    /// Alloc a new table.
-    pub open spec fn alloc_table(self, level: nat) -> (Self, Table);
+    /// Allocate a new table.
+    pub open spec fn alloc_table(self, level: nat) -> (Self, Table)
+        recommends
+            self.invariants(),
+            level < self.arch.level_count(),
+    ;
 
     /// Facts that `alloc_table` should satisfy.
     #[verifier::external_body]
@@ -300,6 +311,17 @@ impl PageTableMem {
                 &&& s2.tables == self.tables.push(table)
             }),
     {
+    }
+
+    /// Deallocate a table.
+    pub open spec fn dealloc_table(self, base: PAddr) -> Self
+        recommends
+            self.invariants(),
+            self.contains_table(base),
+            base != self.root(),
+    {
+        let i = choose|i| 0 <= i < self.tables.len() && #[trigger] self.tables[i].base == base;
+        Self { arch: self.arch, tables: self.tables.remove(i) }
     }
 
     /// Update the entry at the given index in the given table.
@@ -487,6 +509,46 @@ impl PageTableMem {
         }
     }
 
+    /// Lemma. `dealloc_table` preserves invariants.
+    pub broadcast proof fn lemma_dealloc_table_preserves_invariants(self, base: PAddr)
+        requires
+            self.invariants(),
+            self.contains_table(base),
+            base != self.root(),
+        ensures
+            #[trigger] self.dealloc_table(base).invariants(),
+    {
+    }
+
+    /// Lemma. `dealloc_table` preserves accessibility except for the table being deallocated.
+    pub broadcast proof fn lemma_dealloc_table_preserves_accessibility(
+        self,
+        base: PAddr,
+        base2: PAddr,
+        index: nat,
+    )
+        requires
+            self.invariants(),
+            self.contains_table(base),
+            base != self.root(),
+            self.accessible(base2, index),
+            base != base2,
+        ensures
+            #[trigger] self.dealloc_table(base).accessible(base2, index),
+    {
+        let s2 = self.dealloc_table(base);
+        let i = choose|i| 0 <= i < self.tables.len() && #[trigger] self.tables[i].base == base;
+        let j = choose|j| 0 <= j < self.tables.len() && #[trigger] self.tables[j].base == base2;
+        self.lemma_table_base_unique();
+        assert(i != j);
+        if j < i {
+            assert(s2.tables[j] == self.tables[j]);
+        } else {
+            assert(s2.tables[j - 1] == self.tables[j]);
+        }
+        assert(s2.tables.contains(self.tables[j]));
+    }
+
     /// Lemma. `write` preserves invariants.
     pub broadcast proof fn lemma_write_preserves_invariants(
         self,
@@ -517,6 +579,8 @@ pub broadcast group group_pt_mem_lemmas {
     PageTableMem::lemma_allocated_contains_old_tables,
     PageTableMem::lemma_allocated_is_superset,
     PageTableMem::lemma_alloc_table_preserves_accessibility,
+    PageTableMem::lemma_dealloc_table_preserves_invariants,
+    PageTableMem::lemma_dealloc_table_preserves_accessibility,
     PageTableMem::lemma_write_preserves_invariants,
 }
 
@@ -567,7 +631,28 @@ impl PageTableMemExec {
         self.tables[0].base
     }
 
-    /// Alloc a new table and returns the table descriptor.
+    /// If a table is empty.
+    #[verifier::external_body]
+    pub fn is_table_empty(&self, base: PAddrExec) -> (res: bool)
+        requires
+            self@.contains_table(base@),
+        ensures
+            res == self@.is_table_empty(base@),
+    {
+        let table = self.tables.iter().find(|t| t.base == base).unwrap();
+        let contents = unsafe {
+            core::slice::from_raw_parts(base.0 as *const u8, table.size.as_usize())
+        };
+        // Note: verumfmt cannot parse closure in `iter().all()`
+        for &byte in contents {
+            if byte != 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Allocate a new table and returns the table descriptor.
     ///
     /// Assumption: To satisfy the post-condition we need to assume the correctness of
     /// the memory allocator, which may be verified in the future work.
@@ -575,8 +660,25 @@ impl PageTableMemExec {
     pub fn alloc_table(&mut self, level: usize) -> (res: TableExec)
         requires
             old(self)@.invariants(),
+            level < old(self)@.arch.level_count(),
         ensures
             (self@, res@) == old(self)@.alloc_table(level as nat),
+    {
+        unreached()
+    }
+
+    /// Deallocate a table.
+    ///
+    /// Assumption: To satisfy the post-condition we need to assume the correctness of
+    /// the memory allocator, which may be verified in the future work.
+    #[verifier::external_body]
+    pub fn dealloc_table(&mut self, base: PAddrExec)
+        requires
+            old(self)@.invariants(),
+            old(self)@.contains_table(base@),
+            base@ != old(self)@.root(),
+        ensures
+            self@ == old(self)@.dealloc_table(base@),
     {
         unreached()
     }
