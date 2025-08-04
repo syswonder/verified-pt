@@ -232,7 +232,8 @@ impl PageTableMem {
         // Root table level is 0
         &&& self.tables[0].level == 0
         // Table level is valid.
-        &&& forall|i| 0 <= i < self.tables.len() ==> #[trigger] self.tables[i].level
+        &&& forall|i|
+            0 <= i < self.tables.len() ==> #[trigger] self.tables[i].level
                 < self.arch.level_count()
         // Table size is valid.
         &&& forall|i|

@@ -2,7 +2,7 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::{pt::PageTableExec, pte::GenericPTE};
+use super::{pt_exec::PageTableExec, pte::GenericPTE};
 use crate::{
     common::{
         addr::{PAddr, VAddrExec},
