@@ -252,6 +252,43 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         }
     }
 
+    /// Recursively remove empty nodes along `vaddr` from `base`.
+    pub open spec fn recycle(self, vaddr: VAddr, base: PAddr, level: nat) -> Self
+        recommends
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            level < self.constants.arch.level_count(),
+        decreases self.constants.arch.level_count() - level,
+    {
+        let idx = self.constants.arch.pte_index(vaddr, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        if level >= self.constants.arch.level_count() - 1 {
+            // Leaf node
+            self
+        } else {
+            if pte.spec_valid() && !pte.spec_huge() {
+                // Recycle subnode
+                let s2 = self.recycle(vaddr, pte.spec_addr(), level + 1);
+                if s2.pt_mem.is_table_empty(pte.spec_addr()) {
+                    // If subnode is empty, deallocate the table, and mark the entry as invalid
+                    Self::new(
+                        s2.pt_mem.dealloc_table(pte.spec_addr()).write(
+                            base,
+                            idx,
+                            PTE::spec_empty().spec_to_u64(),
+                        ),
+                        self.constants,
+                    )
+                } else {
+                    s2
+                }
+            } else {
+                self
+            }
+        }
+    }
+
     /// Lemma. Constructing a node from memory with a valid table results in a
     /// structurally invariant model node.
     pub proof fn lemma_construct_node_implies_invariants(self, base: PAddr, level: nat)
@@ -753,6 +790,50 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         }
     }
 
+    /// Lemma. `recycle` mantains the page table invariants.
+    pub proof fn lemma_recycle_preserves_invariants(self, vaddr: VAddr, base: PAddr, level: nat)
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            level == self.pt_mem.table(base).level,
+            level < self.constants.arch.level_count(),
+        ensures
+            self.recycle(vaddr, base, level).invariants(),
+            self.recycle(vaddr, base, level).constants == self.constants,
+        decreases self.constants.arch.level_count() - level,
+    {
+        let idx = self.constants.arch.pte_index(vaddr, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        assert(self.pt_mem.accessible(base, idx));
+        if level < self.constants.arch.level_count() - 1 && pte.spec_valid() && !pte.spec_huge() {
+            self.lemma_recycle_preserves_invariants(vaddr, pte.spec_addr(), level + 1);
+            let s2 = self.recycle(vaddr, pte.spec_addr(), level + 1);
+            if s2.pt_mem.is_table_empty(pte.spec_addr()) {
+                let pt_mem = s2.pt_mem.dealloc_table(pte.spec_addr()).write(
+                    base,
+                    idx,
+                    PTE::spec_empty().spec_to_u64(),
+                );
+                // TODO
+                assume(Self::new(pt_mem, self.constants).invariants());
+            }
+        }
+    }
+
+    /// Lemma. `recycle` does not remove current page table.
+    pub proof fn lemma_recycle_preserves_current(self, vaddr: VAddr, base: PAddr, level: nat)
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            level == self.pt_mem.table(base).level,
+            level < self.constants.arch.level_count(),
+        ensures
+            self.recycle(vaddr, base, level).pt_mem.contains_table(base),
+        decreases self.constants.arch.level_count() - level,
+    {
+        assume(false);
+    }
+
     /// Axiom. The interpreted view of the page table memory is consistent with the view derived
     /// from the model tree, ensuring semantic agreement between hardware and software views.
     #[verifier::external_body]
@@ -944,6 +1025,53 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             }
         } else {
             PagingResult::Err(())
+        }
+    }
+
+    /// Recursively remove empty nodes along `vaddr` from `base`.
+    pub fn recycle(&mut self, vaddr: VAddrExec, base: PAddrExec, level: usize)
+        requires
+            old(self)@.invariants(),
+            level < old(self).spec_arch().level_count(),
+            old(self).pt_mem@.contains_table(base@),
+            old(self).pt_mem@.table(base@).level == level,
+        ensures
+            self@ == old(self)@.recycle(vaddr@, base@, level as nat),
+    {
+        let idx = self.constants.arch.pte_index(vaddr, level);
+        assert(self.pt_mem@.accessible(base@, idx as nat));
+        let pte = PTE::from_u64(self.pt_mem.read(base, idx));
+        if level < self.constants.arch.level_count() - 1 && pte.valid() && !pte.huge() {
+            // Recycle subnode
+            proof {
+                self.view().lemma_recycle_preserves_invariants(
+                    vaddr@,
+                    pte.spec_addr(),
+                    level as nat + 1,
+                );
+                self.view().lemma_recycle_preserves_current(
+                    vaddr@,
+                    pte.spec_addr(),
+                    level as nat + 1,
+                );
+            }
+            self.recycle(vaddr, pte.addr(), level + 1);
+            assume(self.pt_mem@.accessible(base@, idx as nat));
+
+            if self.pt_mem.is_table_empty(pte.addr()) {
+                // If subnode is empty, deallocate the table, and mark the entry as invalid
+                assume(self.pt_mem@.root() != pte.spec_addr());
+                proof {
+                    self.pt_mem.view().lemma_dealloc_table_preserves_accessibility(
+                        pte.spec_addr(),
+                        base@,
+                        idx as nat,
+                    );
+                }
+                self.pt_mem.dealloc_table(pte.addr());
+                assert(self.pt_mem@.contains_table(base@));
+                self.pt_mem.write(base, idx, PTE::empty().to_u64());
+            }
         }
     }
 

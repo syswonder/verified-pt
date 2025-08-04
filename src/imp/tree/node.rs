@@ -37,6 +37,24 @@ pub enum NodeEntry {
 }
 
 impl PTTreeNode {
+    /// If the node is a leaf node.
+    pub open spec fn is_leaf(self) -> bool {
+        self.level == self.constants.arch.level_count() - 1
+    }
+
+    /// If the node is root node.
+    pub open spec fn is_root(self) -> bool {
+        self.level == 0
+    }
+
+    /// If all entries are empty.
+    pub open spec fn is_empty(self) -> bool
+        recommends
+            self.invariants(),
+    {
+        forall|entry: NodeEntry| #[trigger] self.entries.contains(entry) ==> entry is Empty
+    }
+
     /// If a node entry at the specified level is valid under the given configuration.
     pub open spec fn is_entry_valid(entry: NodeEntry, level: nat, constants: PTConstants) -> bool
         recommends
@@ -69,11 +87,37 @@ impl PTTreeNode {
     {
         &&& self.constants.arch.valid()
         &&& self.level < self.constants.arch.level_count()
-        &&& self.entries.len() == self.constants.arch.entry_count(self.level)
+        &&& self.entries.len() == self.constants.arch.entry_count(
+            self.level,
+        )
+        // Invariants satisfied recursively
         &&& forall|entry: NodeEntry| #[trigger]
             self.entries.contains(entry) ==> {
                 &&& Self::is_entry_valid(entry, self.level, self.constants)
                 &&& entry is Node ==> entry->Node_0.invariants()
+            }
+    }
+
+    /// If there are no empty node in a subtree.
+    pub open spec fn nonempty(self) -> bool
+        recommends
+            self.invariants(),
+        decreases self.constants.arch.level_count() - self.level,
+    {
+        &&& if self.is_leaf() {
+            // Leaf node must have at least one frame entry
+            exists|entry: NodeEntry| #[trigger] self.entries.contains(entry) ==> entry is Frame
+        } else {
+            // Intermediate node must have at least one sub-node or frame entry
+            // Only root node can have empty entries
+            self.is_root() || (exists|entry: NodeEntry| #[trigger]
+                self.entries.contains(entry) ==> entry is Node || entry is Frame)
+        }
+        // Nonempty property satisfied recursively
+        &&& forall|entry: NodeEntry| #[trigger]
+            self.entries.contains(entry) ==> {
+                &&& Self::is_entry_valid(entry, self.level, self.constants)
+                &&& entry is Node ==> entry->Node_0.nonempty()
             }
     }
 
@@ -190,6 +234,36 @@ impl PTTreeNode {
                     }
                 },
                 _ => (self, Err(())),
+            }
+        }
+    }
+
+    /// Recursively remove empty nodes along `path`.
+    pub open spec fn recycle(self, path: PTTreePath) -> Self
+        recommends
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+        decreases path.len(),
+    {
+        let (idx, remain) = path.step();
+        let entry = self.entries[idx as int];
+        if path.len() <= 1 {
+            // Leaf node.
+            self
+        } else {
+            match entry {
+                NodeEntry::Node(node) => {
+                    // Recycle subnode.
+                    let new_node = node.recycle(remain);
+                    if new_node.is_empty() {
+                        // If subnode is empty, mark the entry as empty.
+                        self.update(idx, NodeEntry::Empty)
+                    } else {
+                        // Otherwise, update the entry
+                        self.update(idx, NodeEntry::Node(new_node))
+                    }
+                },
+                _ => self,  // entry is Frame
             }
         }
     }
@@ -1118,7 +1192,10 @@ impl PTTreeNode {
                                 || new_node.path_mappings().contains_pair(remain2, frame2));
                             if remain2 == node.real_path(remain) {
                                 // TODO
-                                assume(self.real_path(path).step() == (idx, node.real_path(remain)));
+                                assume(self.real_path(path).step() == (
+                                    idx,
+                                    node.real_path(remain),
+                                ));
                                 assume(path.has_prefix(self.real_path(path)));
                                 path.lemma_prefix_step(self.real_path(path));
                             } else {
@@ -1243,6 +1320,20 @@ impl PTTreeNode {
                 _ => (),
             }
         }
+    }
+
+    /// Lemma. `recycle` after `remove` will eliminate empty nodes
+    pub proof fn lemma_recycle_after_remove_preserves_nonempty(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            self.remove(path).1 is Ok,
+            self.nonempty(),
+        ensures
+            self.remove(path).0.recycle(path).nonempty(),
+    {
+        // TODO
+        assume(false);
     }
 
     /// Lemma. If `path` is contained in `self.path_mappings()`, and `path` is a real prefix
