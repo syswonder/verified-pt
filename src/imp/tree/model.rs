@@ -583,20 +583,17 @@ impl PTTreeModel {
         ensures
             self.unmap(vbase).1 is Ok,
     {
-        let frame: Frame = self.mappings()[vbase];
-        let path = choose|path: PTTreePath| #[trigger]
-            self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
-
-        let path2 = PTTreePath::from_vaddr_root(
+        let path = PTTreePath::from_vaddr_root(
             vbase,
             self.arch(),
             (self.arch().level_count() - 1) as nat,
         );
+        let path2 = choose|path: PTTreePath| #[trigger]
+            self.root.path_mappings().contains_key(path) && path.to_vaddr(self.arch()) == vbase;
 
-        PTTreePath::lemma_to_vaddr_inverts_from_vaddr(self.arch(), vbase, path2);
-        PTTreePath::lemma_vaddr_eq_implies_real_prefix(self.arch(), path2, path);
-        assert(path2.has_real_prefix(path));
-
+        PTTreePath::lemma_to_vaddr_inverts_from_vaddr(self.arch(), vbase, path);
+        PTTreePath::lemma_vaddr_eq_implies_real_prefix(self.arch(), path, path2);
+        assert(path.has_real_prefix(path2));
         self.root.lemma_remove_real_prefix_ok(path, path2);
     }
 
