@@ -39,9 +39,11 @@ impl PTTreeModel {
     }
 
     /// Invariants. The tree structure and node configurations are valid.
+    /// The tree is fully populated or empty.
     pub open spec fn invariants(self) -> bool {
         &&& self.root.level == 0
         &&& self.root.invariants()
+        &&& self.root.fully_populated() || self.root.empty()
     }
 
     /// Get page table architecture.
@@ -162,7 +164,7 @@ impl PTTreeModel {
         );
         let (node, res) = self.root.remove(path);
         if res is Ok {
-            (Self::new(node), Ok(()))
+            (Self::new(node.prune(path)), Ok(()))
         } else {
             (self, Err(()))
         }
@@ -309,6 +311,9 @@ impl PTTreeModel {
             self.arch().level_of_frame_size(frame.size),
         );
         self.root.lemma_insert_preserves_invariants(path, frame);
+        if self.map(vbase, frame).1 is Ok {
+            self.root.lemma_insert_preserves_fully_populated(path, frame);
+        }
     }
 
     /// Lemma. `map` succeeds if the address does not overlap with any existing mapped region.
@@ -331,38 +336,45 @@ impl PTTreeModel {
             self.arch().level_of_frame_size(frame.size),
         );
 
-        if res is Err {
-            // Prove by contradiction
-            self.root.lemma_insert_fails_implies_prefix(path, frame);
-            let path2 = choose|path2: PTTreePath| #[trigger]
-                self.root.path_mappings().contains_key(path2) && (path2.has_prefix(path)
-                    || path.has_prefix(path2));
-            let frame2 = self.root.path_mappings()[path2];
-            self.root.lemma_path_mappings_valid();
+        if self.root.empty() {
+            // Tree is empty, insertion succeeds trivially
+            self.root.lemma_empty_implies_insert_ok(path, frame);
+        } else {
+            // Tree is fully populated
+            assert(self.root.fully_populated());
+            if res is Err {
+                // Prove by contradiction
+                self.root.lemma_insert_fails_implies_prefix(path, frame);
+                let path2 = choose|path2: PTTreePath| #[trigger]
+                    self.root.path_mappings().contains_key(path2) && (path2.has_prefix(path)
+                        || path.has_prefix(path2));
+                let frame2 = self.root.path_mappings()[path2];
+                self.root.lemma_path_mappings_valid();
 
-            assert(self.root.path_mappings().contains_pair(path2, frame2));
-            self.lemma_mappings_consistent_with_path_mappings();
-            assert(self.mappings().contains_pair(path2.to_vaddr(self.arch()), frame2));
+                assert(self.root.path_mappings().contains_pair(path2, frame2));
+                self.lemma_mappings_consistent_with_path_mappings();
+                assert(self.mappings().contains_pair(path2.to_vaddr(self.arch()), frame2));
 
-            // The prefix relation implies that the two frames overlap
-            if path.has_prefix(path2) {
-                PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path, path2);
-                PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path, path2);
-                assert(VAddr::overlap(
-                    path.to_vaddr(self.arch()),
-                    frame.size.as_nat(),
-                    path2.to_vaddr(self.arch()),
-                    frame2.size.as_nat(),
-                ));
-            } else {
-                PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path2, path);
-                PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path2, path);
-                assert(VAddr::overlap(
-                    path2.to_vaddr(self.arch()),
-                    frame2.size.as_nat(),
-                    path.to_vaddr(self.arch()),
-                    frame.size.as_nat(),
-                ));
+                // The prefix relation implies that the two frames overlap
+                if path.has_prefix(path2) {
+                    PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path, path2);
+                    PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path, path2);
+                    assert(VAddr::overlap(
+                        path.to_vaddr(self.arch()),
+                        frame.size.as_nat(),
+                        path2.to_vaddr(self.arch()),
+                        frame2.size.as_nat(),
+                    ));
+                } else {
+                    PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path2, path);
+                    PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path2, path);
+                    assert(VAddr::overlap(
+                        path2.to_vaddr(self.arch()),
+                        frame2.size.as_nat(),
+                        path.to_vaddr(self.arch()),
+                        frame.size.as_nat(),
+                    ));
+                }
             }
         }
     }
@@ -543,6 +555,13 @@ impl PTTreeModel {
             (self.arch().level_count() - 1) as nat,
         );
         self.root.lemma_remove_preserves_invariants(path);
+        self.root.remove(path).0.lemma_prune_preserves_invariants(path);
+
+        if self.root.empty() {
+            self.root.lemma_empty_implies_remove_fail(path);
+        }
+        assert(self.root.fully_populated());
+        self.root.lemma_prune_after_remove_preserves_fully_populated(path);
     }
 
     /// Lemma. `unmap` succeeds implies `vbase` in `mappings()`.
@@ -626,6 +645,8 @@ impl PTTreeModel {
 
         // `path_mappings` is updated according to lemma.
         self.root.lemma_remove_removes_path_mapping(path);
+        self.root.lemma_remove_preserves_invariants(path);
+        self.root.remove(path).0.lemma_prune_not_affect_path_mappings(path);
 
         // `new.mappings()` is a subset of `self.mappings().remove(vbase)`.
         assert forall|vbase2, frame2| #[trigger]

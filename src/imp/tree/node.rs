@@ -37,14 +37,6 @@ pub enum NodeEntry {
 }
 
 impl PTTreeNode {
-    /// If all entries are empty.
-    pub open spec fn is_empty(self) -> bool
-        recommends
-            self.invariants(),
-    {
-        forall|entry: NodeEntry| #[trigger] self.entries.contains(entry) ==> entry is Empty
-    }
-
     /// If a node entry at the specified level is valid under the given configuration.
     pub open spec fn is_entry_valid(entry: NodeEntry, level: nat, constants: PTConstants) -> bool
         recommends
@@ -88,8 +80,8 @@ impl PTTreeNode {
             }
     }
 
-    /// Additional invariants. If there are no empty node in a subtree.
-    pub open spec fn nonempty(self) -> bool
+    /// Additional invariants. If there are no empty nodes in a subtree.
+    pub open spec fn fully_populated(self) -> bool
         recommends
             self.invariants(),
         decreases self.constants.arch.level_count() - self.level,
@@ -100,15 +92,21 @@ impl PTTreeNode {
         } else {
             // Intermediate node must have at least one sub-node or frame entry
             // Only root node can have empty entries
-            self.level == 0 || (exists|entry: NodeEntry| #[trigger]
-                self.entries.contains(entry) && (entry is Node || entry is Frame))
+            exists|entry: NodeEntry| #[trigger]
+                self.entries.contains(entry) && (entry is Node || entry is Frame)
         }
         // Nonempty property satisfied recursively
         &&& forall|entry: NodeEntry| #[trigger]
-            self.entries.contains(entry) ==> {
-                &&& Self::is_entry_valid(entry, self.level, self.constants)
-                &&& entry is Node ==> entry->Node_0.nonempty()
-            }
+            self.entries.contains(entry) && Self::is_entry_valid(entry, self.level, self.constants)
+                && entry is Node ==> entry->Node_0.fully_populated()
+    }
+
+    /// If all entries are empty.
+    pub open spec fn empty(self) -> bool
+        recommends
+            self.invariants(),
+    {
+        forall|entry: NodeEntry| #[trigger] self.entries.contains(entry) ==> entry is Empty
     }
 
     /// Creates an empty node.
@@ -228,8 +226,8 @@ impl PTTreeNode {
         }
     }
 
-    /// Recursively remove empty nodes along `path`.
-    pub open spec fn recycle(self, path: PTTreePath) -> Self
+    /// Recursively eliminate empty nodes along `path`.
+    pub open spec fn prune(self, path: PTTreePath) -> Self
         recommends
             self.invariants(),
             path.valid(self.constants.arch, self.level),
@@ -244,8 +242,8 @@ impl PTTreeNode {
             match entry {
                 NodeEntry::Node(node) => {
                     // Recycle subnode.
-                    let new_node = node.recycle(remain);
-                    if new_node.is_empty() {
+                    let new_node = node.prune(remain);
+                    if new_node.empty() {
                         // If subnode is empty, mark the entry as empty.
                         self.update(idx, NodeEntry::Empty)
                     } else {
@@ -468,7 +466,7 @@ impl PTTreeNode {
         self.lemma_visit_length_bounds(path);
     }
 
-    /// Lemma.
+    /// Lemma. `self.real_path(path).step() == (idx, node.real_path(remain))`
     pub proof fn lemma_real_path_step(self, path: PTTreePath)
         requires
             self.invariants(),
@@ -717,11 +715,11 @@ impl PTTreeNode {
         }
     }
 
-    /// Lemma. `self.nonempty()` implies `!self.path_mappings().is_empty()`.
-    pub proof fn lemma_path_mappings_nonempty(self)
+    /// Lemma. `self.fully_populated()` implies `!self.path_mappings().empty()`.
+    pub proof fn lemma_fully_populated_implies_path_mappings_nonempty(self)
         requires
             self.invariants(),
-            self.nonempty(),
+            self.fully_populated(),
             self.level > 0,
         ensures
             exists|path: PTTreePath| self.path_mappings().contains_key(path),
@@ -739,7 +737,7 @@ impl PTTreeNode {
             let entry = self.entries[idx];
             assert(self.entries.contains(entry));
             if let NodeEntry::Node(node) = entry {
-                node.lemma_path_mappings_nonempty();
+                node.lemma_fully_populated_implies_path_mappings_nonempty();
                 let remain = choose|subpath| node.path_mappings().contains_key(subpath);
                 // Construct path from subpath
                 let path = PTTreePath(seq![idx as nat].add(remain.0));
@@ -815,11 +813,6 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
-            Self::is_entry_valid(
-                NodeEntry::Frame(frame),
-                (self.level + path.len() - 1) as nat,
-                self.constants,
-            ),
             self.insert(path, frame).1 is Ok,
         ensures
             self.insert(path, frame).0.path_mappings().contains_pair(path, frame),
@@ -863,11 +856,6 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
-            Self::is_entry_valid(
-                NodeEntry::Frame(frame),
-                (self.level + path.len() - 1) as nat,
-                self.constants,
-            ),
         ensures
             forall|path2: PTTreePath, frame2: Frame| #[trigger]
                 self.path_mappings().contains_pair(path2, frame2) ==> self.insert(
@@ -1092,13 +1080,8 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
-            Self::is_entry_valid(
-                NodeEntry::Frame(frame),
-                (self.level + path.len() - 1) as nat,
-                self.constants,
-            ),
             self.insert(path, frame).1 is Err,
-            self.nonempty(),
+            self.fully_populated(),
         ensures
             exists|path2: PTTreePath| #[trigger]
                 self.path_mappings().contains_key(path2) && (path2.has_prefix(path)
@@ -1114,7 +1097,7 @@ impl PTTreeNode {
                     assert(self.path_mappings().contains_key(path));
                 },
                 NodeEntry::Node(node) => {
-                    node.lemma_path_mappings_nonempty();
+                    node.lemma_fully_populated_implies_path_mappings_nonempty();
                     let remain2 = choose|path: PTTreePath| node.path_mappings().contains_key(path);
                     let path2 = PTTreePath(seq![idx].add(remain2.0));
                     assert(path2.0.skip(1) == remain2.0);
@@ -1154,11 +1137,6 @@ impl PTTreeNode {
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
-            Self::is_entry_valid(
-                NodeEntry::Frame(frame),
-                (self.level + path.len() - 1) as nat,
-                self.constants,
-            ),
             self.entries[path.0[0] as int] is Empty,
         ensures
             self.insert(path, frame).1 is Ok,
@@ -1173,16 +1151,27 @@ impl PTTreeNode {
         }
     }
 
+    /// Lemma. `insert` always succeeds if `self` is empty.
+    pub proof fn lemma_empty_implies_insert_ok(self, path: PTTreePath, frame: Frame)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            self.empty(),
+        ensures
+            self.insert(path, frame).1 is Ok,
+    {
+        let (idx, _) = path.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+        assert(entry is Empty);
+        self.lemma_empty_entry_implies_insert_ok(path, frame);
+    }
+
     /// Lemma. If `self.insert(path, frame)` succeeds, then `self.visit(path)` reaches an empty entry.
     pub proof fn lemma_insert_ok_implies_visit_reaches_empty(self, path: PTTreePath, frame: Frame)
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
-            Self::is_entry_valid(
-                NodeEntry::Frame(frame),
-                (self.level + path.len() - 1) as nat,
-                self.constants,
-            ),
             self.insert(path, frame).1 is Ok,
         ensures
             self.visit(path).last() is Empty,
@@ -1195,6 +1184,73 @@ impl PTTreeNode {
             match entry {
                 NodeEntry::Node(node) => {
                     node.lemma_insert_ok_implies_visit_reaches_empty(remain, frame);
+                },
+                _ => (),
+            }
+        }
+    }
+
+    /// Lemma. `insert` preserves `fully_populated` property.
+    pub proof fn lemma_insert_preserves_fully_populated(self, path: PTTreePath, frame: Frame)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            self.insert(path, frame).1 is Ok,
+            self.fully_populated() || self.empty(),
+        ensures
+            self.insert(path, frame).0.fully_populated(),
+        decreases path.len(),
+    {
+        let new = self.insert(path, frame).0;
+
+        let (idx, remain) = path.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+        if path.len() <= 1 {
+            match entry {
+                NodeEntry::Empty => {
+                    // New entry ensures node is fully_populated
+                    assert(new.entries.contains(new.entries[idx as int]));
+                    assert forall|entry|
+                        #![auto]
+                        new.entries.contains(entry)
+                            && entry is Node implies entry->Node_0.fully_populated() by {
+                        assert(self.entries.contains(entry));
+                    }
+                    assert(new.fully_populated());
+                },
+                _ => (),
+            }
+        } else {
+            match entry {
+                NodeEntry::Node(node) => {
+                    // Subnode is fully_populated after insertion
+                    node.lemma_insert_preserves_fully_populated(remain, frame);
+                    assert(new.entries.contains(new.entries[idx as int]));
+                    assert forall|entry|
+                        #![auto]
+                        new.entries.contains(entry)
+                            && entry is Node implies entry->Node_0.fully_populated() by {
+                        if entry != new.entries[idx as int] {
+                            assert(self.entries.contains(entry));
+                        }
+                    }
+                    assert(new.fully_populated());
+                },
+                NodeEntry::Empty => {
+                    let node = PTTreeNode::new(self.constants, self.level + 1);
+                    // Subnode is fully populated after insertion
+                    node.lemma_insert_preserves_fully_populated(remain, frame);
+                    assert(new.entries.contains(new.entries[idx as int]));
+                    assert forall|entry|
+                        #![auto]
+                        new.entries.contains(entry)
+                            && entry is Node implies entry->Node_0.fully_populated() by {
+                        if entry != new.entries[idx as int] {
+                            assert(self.entries.contains(entry));
+                        }
+                    }
+                    assert(new.fully_populated());
                 },
                 _ => (),
             }
@@ -1517,18 +1573,273 @@ impl PTTreeNode {
         }
     }
 
-    /// Lemma. `recycle` after `remove` will eliminate empty nodes
-    pub proof fn lemma_recycle_after_remove_preserves_nonempty(self, path: PTTreePath)
+    /// Lemma. `remove` always fails if `self` is empty.
+    pub proof fn lemma_empty_implies_remove_fail(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            self.empty(),
+        ensures
+            self.remove(path).1 is Err,
+    {
+        let (idx, remain) = path.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+        assert(entry is Empty);
+    }
+
+    /* prune related lemmas */
+    /// Lemma. `prune` preserves invariants.
+    pub proof fn lemma_prune_preserves_invariants(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+        ensures
+            self.prune(path).invariants(),
+        decreases path.len(),
+    {
+        let (idx, remain) = path.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+        if path.len() > 1 && entry is Node {
+            let node = entry->Node_0;
+            let new_node = node.prune(remain);
+            if new_node.empty() {
+                self.lemma_update_preserves_invariants(idx, NodeEntry::Empty);
+            } else {
+                node.lemma_prune_preserves_invariants(remain);
+                self.lemma_update_preserves_invariants(idx, NodeEntry::Node(new_node));
+            }
+        }
+    }
+
+    /// Lemma. `prune` does not introduce new frame paths.
+    pub proof fn lemma_prune_not_add_frame_path(self, path: PTTreePath, path2: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            self.prune(path).is_frame_path(path2),
+        ensures
+            self.is_frame_path(path2),
+            self.prune(path).visit(path2).last() == self.visit(path2).last(),
+        decreases path.len(),
+    {
+        let new = self.prune(path);
+        self.lemma_prune_preserves_invariants(path);
+
+        let (idx, remain) = path.step();
+        let (idx2, remain2) = path2.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+
+        if path.len() > 1 {
+            if entry is Node {
+                let new_node = entry->Node_0.prune(remain);
+                // Only entry at `idx` is updated, and the updated entry(`idx`)
+                // must be empty or a node.
+                if new_node.empty() {
+                    assert(new == self.update(idx, NodeEntry::Empty));
+                } else {
+                    assert(new == self.update(idx, NodeEntry::Node(new_node)));
+                }
+            }
+            if idx == idx2 {
+                if path2.len() > 1 {
+                    // `entry` is a node or frame.
+                    match entry {
+                        NodeEntry::Node(node) => {
+                            let new_node = node.prune(remain);
+                            node.lemma_prune_not_add_frame_path(remain, remain2);
+                        },
+                        NodeEntry::Frame(_) => {
+                            assert(new == self);
+                        },
+                        _ => assert(false),
+                    }
+                } else {
+                    // `path2` is a frame path, so `entry` must be a frame.
+                    assert(entry is Frame);
+                }
+            } else {
+                // Entry at `idx2` is not updated.
+                assert(new.entries[idx2 as int] == self.entries[idx2 as int]);
+            }
+        }
+    }
+
+    /// Lemma. `prune` does not remove existing frame paths.
+    pub proof fn lemma_prune_not_remove_frame_path(self, path: PTTreePath, path2: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+            self.is_frame_path(path2),
+        ensures
+            self.prune(path).is_frame_path(path2),
+            self.prune(path).visit(path2).last() == self.visit(path2).last(),
+        decreases path.len(),
+    {
+        let new = self.prune(path);
+
+        let (idx, remain) = path.step();
+        let (idx2, remain2) = path2.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+
+        if path.len() > 1 {
+            if entry is Node {
+                let new_node = entry->Node_0.prune(remain);
+                // Only entry at `idx` is updated, and the updated entry(`idx`)
+                // must be empty or a node.
+                if new_node.empty() {
+                    assert(new == self.update(idx, NodeEntry::Empty));
+                } else {
+                    assert(new == self.update(idx, NodeEntry::Node(new_node)));
+                }
+            }
+            if idx == idx2 {
+                if path2.len() > 1 {
+                    // `entry` is a node or frame.
+                    match entry {
+                        NodeEntry::Node(node) => {
+                            let new_node = node.prune(remain);
+                            node.lemma_prune_preserves_invariants(remain);
+                            node.lemma_prune_not_remove_frame_path(remain, remain2);
+
+                            let entry2 = new_node.entries[remain2.step().0 as int];
+                            assert(new_node.entries.contains(entry2));
+                            assert(!(entry2 is Empty));
+                            assert(!new_node.empty());
+                            // `new_node` is not empty, so it is not eliminated.
+                            assert(new == self.update(idx, NodeEntry::Node(new_node)));
+                        },
+                        NodeEntry::Frame(_) => {
+                            assert(new == self);
+                        },
+                        _ => assert(false),
+                    }
+                } else {
+                    // `path2` is a frame path, so `entry` must be a frame.
+                    assert(entry is Frame);
+                }
+            } else {
+                // Entry at `idx2` is not updated.
+                assert(new.entries[idx2 as int] == self.entries[idx2 as int]);
+            }
+        }
+    }
+
+    /// Lemma. `prune` does not affect path mappings.
+    pub proof fn lemma_prune_not_affect_path_mappings(self, path: PTTreePath)
+        requires
+            self.invariants(),
+            path.valid(self.constants.arch, self.level),
+        ensures
+            self.path_mappings() == self.prune(path).path_mappings(),
+    {
+        let new = self.prune(path);
+        assert forall|path2, frame2|
+            self.path_mappings().contains_pair(
+                path2,
+                frame2,
+            ) implies new.path_mappings().contains_pair(path2, frame2) by {
+            self.lemma_prune_not_remove_frame_path(path, path2);
+        }
+        assert forall|path2, frame2|
+            new.path_mappings().contains_pair(
+                path2,
+                frame2,
+            ) implies self.path_mappings().contains_pair(path2, frame2) by {
+            self.lemma_prune_not_add_frame_path(path, path2);
+        }
+        lemma_map_eq_pair(self.path_mappings(), new.path_mappings());
+    }
+
+    /// Lemma. `prune` after `remove` will eliminate empty nodes
+    pub proof fn lemma_prune_after_remove_preserves_fully_populated(self, path: PTTreePath)
         requires
             self.invariants(),
             path.valid(self.constants.arch, self.level),
             self.remove(path).1 is Ok,
-            self.nonempty(),
+            self.fully_populated(),
         ensures
-            self.remove(path).0.recycle(path).nonempty(),
+            ({
+                let new = self.remove(path).0.prune(path);
+                new.fully_populated() || new.empty()
+            }),
+        decreases path.len(),
     {
-        // TODO
-        assume(false);
+        let new = self.remove(path).0.prune(path);
+
+        let (idx, remain) = path.step();
+        let entry = self.entries[idx as int];
+        assert(self.entries.contains(entry));
+        if path.len() <= 1 {
+            match entry {
+                NodeEntry::Frame(_) => {
+                    if !new.empty() {
+                        // Another entry exists in the node
+                        let idx2 = choose|idx2|
+                            0 <= idx2 < self.entries.len() && idx2 != idx && (
+                            self.entries[idx2] is Node || self.entries[idx2] is Frame);
+                        assert(self.entries.contains(self.entries[idx2]));
+                        assert(self.entries[idx2] == new.entries[idx2]);
+                        assert(new.entries.contains(self.entries[idx2]));
+                        assert forall|entry|
+                            #![auto]
+                            new.entries.contains(entry)
+                                && entry is Node implies entry->Node_0.fully_populated() by {
+                            assert(self.entries.contains(entry));
+                        }
+                        assert(new.fully_populated());
+                    }
+                },
+                _ => (),
+            }
+        } else {
+            match entry {
+                NodeEntry::Node(node) => {
+                    let new_node = node.remove(remain).0.prune(remain);
+                    // Recursively prove that the new node is fully populated or an empty node
+                    node.lemma_prune_after_remove_preserves_fully_populated(remain);
+                    if new_node.empty() {
+                        // Empty subnode is eliminated by `prune`
+                        if !new.empty() {
+                            assert forall|entry|
+                                #![auto]
+                                new.entries.contains(entry)
+                                    && entry is Node implies entry->Node_0.fully_populated() by {
+                                assert(self.entries.contains(entry));
+                            }
+                            assert(new.fully_populated());
+                        }
+                    } else {
+                        assert(new_node.fully_populated());
+                        assert(new.entries.contains(new.entries[idx as int]));
+                        assert forall|entry|
+                            #![auto]
+                            new.entries.contains(entry)
+                                && entry is Node implies entry->Node_0.fully_populated() by {
+                            if entry != new.entries[idx as int] {
+                                assert(self.entries.contains(entry));
+                            }
+                        }
+                        assert(new.fully_populated());
+                    }
+                },
+                NodeEntry::Frame(_) => {
+                    if !new.empty() {
+                        assert forall|entry|
+                            #![auto]
+                            new.entries.contains(entry)
+                                && entry is Node implies entry->Node_0.fully_populated() by {
+                            assert(self.entries.contains(entry));
+                        }
+                        assert(new.fully_populated());
+                    }
+                },
+                _ => (),
+            }
+        }
     }
 }
 
