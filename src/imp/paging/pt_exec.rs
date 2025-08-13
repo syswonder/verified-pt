@@ -133,8 +133,12 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                     self.insert(vbase, pte.addr(), level + 1, target_level, new_pte)
                 }
             } else {
-                // Insert intermediate table
                 proof {
+                    self@.lemma_alloc_intermediate_table_preserves_invariants(
+                        base@,
+                        level as nat,
+                        idx as nat,
+                    );
                     // Lemma ensures this branch returns Ok
                     self@.lemma_insert_intermediate_node_results_ok(
                         vbase@,
@@ -144,18 +148,14 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                         new_pte,
                     );
                 }
-                // Allocate a new table
+                // Allocate intermediate table
                 let table = self.pt_mem.alloc_table(level + 1);
                 // Write entry
                 let pte = PTE::new(table.base, MemAttr::default(), false);
                 self.pt_mem.write(base, idx, pte.to_u64());
-                proof {
-                    assert(self.pt_mem@.contains_table(table.base@));
-                    // TODO
-                    assume(self@.invariants());
-                }
-                let res = self.insert(vbase, table.base, level + 1, target_level, new_pte);
-                res
+
+                // Insert at next level
+                self.insert(vbase, table.base, level + 1, target_level, new_pte)
             }
         }
     }
@@ -201,48 +201,56 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
         }
     }
 
-    /// Recursively remove empty nodes along `vaddr` from `base`.
-    pub fn recycle(&mut self, vaddr: VAddrExec, base: PAddrExec, level: usize)
+    /// Recursively deallocate empty tables along `vaddr` from `base`.
+    pub fn prune(&mut self, vaddr: VAddrExec, base: PAddrExec, level: usize)
         requires
             old(self)@.invariants(),
             level < old(self).spec_arch().level_count(),
             old(self).pt_mem@.contains_table(base@),
             old(self).pt_mem@.table(base@).level == level,
         ensures
-            self@ == old(self)@.recycle(vaddr@, base@, level as nat),
+            self@ == old(self)@.prune(vaddr@, base@, level as nat),
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
         assert(self.pt_mem@.accessible(base@, idx as nat));
         let pte = PTE::from_u64(self.pt_mem.read(base, idx));
         if level < self.constants.arch.level_count() - 1 && pte.valid() && !pte.huge() {
-            // Recycle subnode
+            // Recycle from subtable
             proof {
-                self.view().lemma_recycle_preserves_invariants(
+                // Invariants satisfied after recycling from subtable
+                self.view().lemma_prune_preserves_invariants(
                     vaddr@,
                     pte.spec_addr(),
                     level as nat + 1,
                 );
-                self.view().lemma_recycle_preserves_current(
+                // Current table and subtable are accessible after recycling from subtable
+                self.view().lemma_prune_preserves_lower_tables(
                     vaddr@,
                     pte.spec_addr(),
                     level as nat + 1,
+                    base@,
+                );
+                self.view().lemma_prune_preserves_lower_tables(
+                    vaddr@,
+                    pte.spec_addr(),
+                    level as nat + 1,
+                    pte.spec_addr(),
                 );
             }
-            self.recycle(vaddr, pte.addr(), level + 1);
-            assume(self.pt_mem@.accessible(base@, idx as nat));
+            self.prune(vaddr, pte.addr(), level + 1);
+            assert(self.pt_mem@.accessible(base@, idx as nat));
+            assert(self.pt_mem@.contains_table(pte.spec_addr()));
 
             if self.pt_mem.is_table_empty(pte.addr()) {
-                // If subnode is empty, deallocate the table, and mark the entry as invalid
-                assume(self.pt_mem@.root() != pte.spec_addr());
+                // If subtable is empty, deallocate the table, and mark the entry as invalid
                 proof {
-                    self.pt_mem.view().lemma_dealloc_table_preserves_accessibility(
+                    self.pt_mem.view().lemma_dealloc_table_not_affect_other_tables(
                         pte.spec_addr(),
                         base@,
-                        idx as nat,
                     );
                 }
                 self.pt_mem.dealloc_table(pte.addr());
-                assert(self.pt_mem@.contains_table(base@));
+                assert(self.pt_mem@.accessible(base@, idx as nat));
                 self.pt_mem.write(base, idx, PTE::empty().to_u64());
             }
         }
@@ -360,16 +368,26 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                 r is Ok == res is Ok && s2 == self@@
             }),
     {
+        let ghost root = self.pt_mem@.root();
         proof {
-            let root = self.pt_mem@.root();
             // Ensures #1
             self@.lemma_remove_preserves_invariants(vbase@, root, 0);
             // Ensures #2
             self@.lemma_remove_consistent_with_model(vbase@, root, 0);
             self@.lemma_remove_preserves_root(vbase@, root, 0);
         }
-
-        self.remove(vbase, self.pt_mem.root(), 0)
+        let res = self.remove(vbase, self.pt_mem.root(), 0);
+        proof {
+            // Ensures #1
+            self@.lemma_prune_preserves_invariants(vbase@, root, 0);
+            // Ensures #2
+            self@.lemma_prune_consistent_with_model(vbase@, root, 0);
+            self@.lemma_prune_preserves_lower_tables(vbase@, root, 0, root);
+        }
+        if res.is_ok() {
+            self.prune(vbase, self.pt_mem.root(), 0);
+        }
+        res
     }
 }
 

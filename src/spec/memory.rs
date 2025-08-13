@@ -521,33 +521,35 @@ impl PageTableMem {
     {
     }
 
-    /// Lemma. `dealloc_table` preserves accessibility except for the table being deallocated.
-    pub broadcast proof fn lemma_dealloc_table_preserves_accessibility(
+    /// Lemma. `dealloc_table` does not affect tables with different base addresses.
+    pub broadcast proof fn lemma_dealloc_table_not_affect_other_tables(
         self,
         base: PAddr,
         base2: PAddr,
-        index: nat,
     )
         requires
             self.invariants(),
             self.contains_table(base),
             base != self.root(),
-            self.accessible(base2, index),
+            self.contains_table(base2),
             base != base2,
         ensures
-            #[trigger] self.dealloc_table(base).accessible(base2, index),
+            #[trigger] self.dealloc_table(base).contains_table(base2),
+            #[trigger] self.dealloc_table(base).table(base2) == self.table(base2),
     {
         let s2 = self.dealloc_table(base);
         let i = choose|i| 0 <= i < self.tables.len() && #[trigger] self.tables[i].base == base;
         let j = choose|j| 0 <= j < self.tables.len() && #[trigger] self.tables[j].base == base2;
         self.lemma_table_base_unique();
         assert(i != j);
+        assert(s2.tables.len() == self.tables.len() - 1);
         if j < i {
             assert(s2.tables[j] == self.tables[j]);
+            assert(s2.tables.contains(s2.tables[j]));
         } else {
             assert(s2.tables[j - 1] == self.tables[j]);
+            assert(s2.tables.contains(s2.tables[j - 1]));
         }
-        assert(s2.tables.contains(self.tables[j]));
     }
 
     /// Lemma. `write` preserves invariants.
@@ -581,7 +583,7 @@ pub broadcast group group_pt_mem_lemmas {
     PageTableMem::lemma_allocated_is_superset,
     PageTableMem::lemma_alloc_table_preserves_accessibility,
     PageTableMem::lemma_dealloc_table_preserves_invariants,
-    PageTableMem::lemma_dealloc_table_preserves_accessibility,
+    PageTableMem::lemma_dealloc_table_not_affect_other_tables,
     PageTableMem::lemma_write_preserves_invariants,
 }
 

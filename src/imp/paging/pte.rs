@@ -27,7 +27,6 @@ pub trait GenericPTE: Sized + Clone {
     fn empty() -> (pte: Self)
         ensures
             pte == Self::spec_empty(),
-            pte.spec_valid() == false,
     ;
 
     /// Construct an empty entry (spec mode).
@@ -101,7 +100,13 @@ pub trait GenericPTE: Sized + Clone {
             }),
     ;
 
-    /// If a page table entrt has value 0, it must be invalid.
+    /// `PTE::spec_empty().spec_valid()` is false.
+    broadcast proof fn lemma_empty_invalid()
+        ensures
+            #[trigger] Self::spec_empty().spec_valid() == false,
+    ;
+
+    /// If a page table entry has value 0, it must be invalid.
     broadcast proof fn lemma_from_0_invalid()
         ensures
             #[trigger] Self::spec_from_u64(0).spec_valid() == false,
@@ -122,6 +127,7 @@ pub trait GenericPTE: Sized + Clone {
 
 pub broadcast group group_pte_lemmas {
     GenericPTE::lemma_from_0_invalid,
+    GenericPTE::lemma_empty_invalid,
     GenericPTE::lemma_eq_by_u64,
     GenericPTE::lemma_from_to_u64_inverse,
     GenericPTE::lemma_spec_new_keeps_value,
