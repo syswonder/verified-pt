@@ -320,13 +320,52 @@ impl PageTableMem {
             self.invariants(),
             self.contains_table(base),
             base != self.root(),
+    ;
+
+    /// Facts that `dealloc_table` should satisfy.
+    #[verifier::external_body]
+    pub broadcast proof fn dealloc_table_facts(self, base: PAddr)
+        requires
+            self.invariants(),
+            self.contains_table(base),
+            base != self.root(),
+        ensures
+            ({
+                let s2 = #[trigger] self.dealloc_table(base);
+                &&& s2.arch == self.arch
+                // Root is preserved
+                &&& s2.tables[0] == self.tables[0]
+                // `base` is removed
+                &&& !s2.contains_table(base)
+                // Subset
+                &&& forall|table|
+                    s2.tables.contains(table) ==> self.tables.contains(
+                        table,
+                    )
+                // Other tables are the same
+                &&& forall|table| #[trigger]
+                    self.tables.contains(table) && table.base != base ==> s2.tables.contains(
+                        table,
+                    )
+                // Table base unique
+                &&& forall|i, j|
+                    #![auto]
+                    0 <= i < s2.tables.len() && 0 <= j < s2.tables.len() ==> i == j
+                        || s2.tables[i].base
+                        != s2.tables[j].base
+                // Table contents are the same
+                &&& forall|base: PAddr| #[trigger]
+                    self.contains_table(base) ==> s2.table_view(base) == self.table_view(base)
+            }),
     {
-        let i = choose|i| 0 <= i < self.tables.len() && #[trigger] self.tables[i].base == base;
-        Self { arch: self.arch, tables: self.tables.remove(i) }
     }
 
     /// Update the entry at the given index in the given table.
-    pub open spec fn write(self, base: PAddr, index: nat, entry: u64) -> Self;
+    pub open spec fn write(self, base: PAddr, index: nat, entry: u64) -> Self
+        recommends
+            self.invariants(),
+            self.accessible(base, index),
+    ;
 
     /// Facts that `write` should satisfy.
     #[verifier::external_body]
@@ -519,36 +558,26 @@ impl PageTableMem {
         ensures
             #[trigger] self.dealloc_table(base).invariants(),
     {
-    }
-
-    /// Lemma. `dealloc_table` does not affect tables with different base addresses.
-    pub broadcast proof fn lemma_dealloc_table_not_affect_other_tables(
-        self,
-        base: PAddr,
-        base2: PAddr,
-    )
-        requires
-            self.invariants(),
-            self.contains_table(base),
-            base != self.root(),
-            self.contains_table(base2),
-            base != base2,
-        ensures
-            #[trigger] self.dealloc_table(base).contains_table(base2),
-            #[trigger] self.dealloc_table(base).table(base2) == self.table(base2),
-    {
         let s2 = self.dealloc_table(base);
-        let i = choose|i| 0 <= i < self.tables.len() && #[trigger] self.tables[i].base == base;
-        let j = choose|j| 0 <= j < self.tables.len() && #[trigger] self.tables[j].base == base2;
-        self.lemma_table_base_unique();
-        assert(i != j);
-        assert(s2.tables.len() == self.tables.len() - 1);
-        if j < i {
-            assert(s2.tables[j] == self.tables[j]);
+        self.dealloc_table_facts(base);
+        self.lemma_contains_root();
+        assert forall|i| 0 <= i < s2.tables.len() implies #[trigger] s2.tables[i].level
+            < s2.arch.level_count() by {
+            assert(s2.tables.contains(s2.tables[i]));
+        }
+        assert forall|i| 0 <= i < s2.tables.len() implies #[trigger] s2.tables[i].size.as_nat()
+            == s2.arch.table_size(s2.tables[i].level) by {
+            assert(s2.tables.contains(s2.tables[i]));
+        }
+        assert forall|i, j| 0 <= i < s2.tables.len() && 0 <= j < s2.tables.len() implies i == j
+            || !PAddr::overlap(
+            s2.tables[i].base,
+            s2.tables[i].size.as_nat(),
+            s2.tables[j].base,
+            s2.tables[j].size.as_nat(),
+        ) by {
+            assert(s2.tables.contains(s2.tables[i]));
             assert(s2.tables.contains(s2.tables[j]));
-        } else {
-            assert(s2.tables[j - 1] == self.tables[j]);
-            assert(s2.tables.contains(s2.tables[j - 1]));
         }
     }
 
@@ -573,6 +602,7 @@ impl PageTableMem {
 pub broadcast group group_pt_mem_lemmas {
     PageTableMem::table_view_facts,
     PageTableMem::alloc_table_facts,
+    PageTableMem::dealloc_table_facts,
     PageTableMem::write_facts,
     PageTableMem::lemma_table_base_unique,
     PageTableMem::lemma_contains_root,
@@ -583,7 +613,6 @@ pub broadcast group group_pt_mem_lemmas {
     PageTableMem::lemma_allocated_is_superset,
     PageTableMem::lemma_alloc_table_preserves_accessibility,
     PageTableMem::lemma_dealloc_table_preserves_invariants,
-    PageTableMem::lemma_dealloc_table_not_affect_other_tables,
     PageTableMem::lemma_write_preserves_invariants,
 }
 
@@ -712,10 +741,7 @@ impl PageTableMemExec {
             self@ == old(self)@.write(base@, index as nat, value),
     {
         unsafe { (base.0 as *mut u64).offset(index as isize).write_volatile(value) }
-    }  // /
-    // Lemma.
-    // pub broadcast proof fn lemma_exec_equal_implies_spec_equal(self, base: PAddrExec)
-
+    }
 }
 
 } // verus!
