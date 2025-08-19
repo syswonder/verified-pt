@@ -114,8 +114,10 @@ pub trait GenericPTE: Sized + Clone {
 
     /// `pte1.spec_to_u64() == pte2.spec_to_u64()` implies `pte1 == pte2`.
     broadcast proof fn lemma_eq_by_u64(pte1: Self, pte2: Self)
+        requires
+            #[trigger] pte1.spec_to_u64() == #[trigger] pte2.spec_to_u64(),
         ensures
-            #[trigger] pte1.spec_to_u64() == #[trigger] pte2.spec_to_u64() ==> pte1 == pte2,
+            pte1 == pte2,
     ;
 
     /// `from_u64` and `to_u64` are inverses.

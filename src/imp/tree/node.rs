@@ -102,23 +102,20 @@ impl PTTreeNode {
     }
 
     /// If all entries are empty.
-    pub open spec fn empty(self) -> bool
-        recommends
-            self.invariants(),
-    {
+    pub open spec fn empty(self) -> bool {
         forall|entry: NodeEntry| #[trigger] self.entries.contains(entry) ==> entry is Empty
     }
 
     /// Creates an empty node.
-    pub open spec fn new(config: PTConstants, level: nat) -> Self
+    pub open spec fn new(constants: PTConstants, level: nat) -> Self
         recommends
-            level < config.arch.level_count(),
-            config.arch.valid(),
+            level < constants.arch.level_count(),
+            constants.arch.valid(),
     {
         Self {
-            constants: config,
+            constants,
             level,
-            entries: seq![NodeEntry::Empty; config.arch.entry_count(level)],
+            entries: seq![NodeEntry::Empty; constants.arch.entry_count(level)],
         }
     }
 
@@ -283,12 +280,12 @@ impl PTTreeNode {
     }
 
     /// Lemma. `new` implies invariants.
-    pub proof fn lemma_new_implies_invariants(config: PTConstants, level: nat)
+    pub proof fn lemma_new_implies_invariants(constants: PTConstants, level: nat)
         requires
-            level < config.arch.level_count(),
-            config.arch.valid(),
+            level < constants.arch.level_count(),
+            constants.arch.valid(),
         ensures
-            Self::new(config, level).invariants(),
+            Self::new(constants, level).invariants(),
     {
     }
 

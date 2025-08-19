@@ -61,8 +61,33 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
         pt
     }
 
-    pub open spec fn spec_new(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> Self {
-        Self { pt_mem, constants, _phantom: PhantomData }
+    /// If all pte in a table are invalid.
+    pub fn is_table_empty(&self, base: PAddrExec, level: usize) -> (res: bool)
+        requires
+            self@.invariants(),
+            self@.pt_mem.contains_table(base@),
+            self@.pt_mem.table(base@).level == level,
+        ensures
+            self@.is_table_empty(base@) == res,
+    {
+        let entry_count = self.constants.arch.entry_count(level);
+        for i in 0..entry_count
+            invariant
+                self@.invariants(),
+                self.constants.arch@.entry_count(level as nat) == entry_count,
+                self@.pt_mem.contains_table(base@),
+                self@.pt_mem.table(base@).level == level,
+                forall|j: nat|
+                    #![auto]
+                    j < i ==> !PTE::spec_from_u64(self@.pt_mem.read(base@, j)).spec_valid(),
+        {
+            assert(self@.pt_mem.accessible(base@, i as nat));
+            let pte = PTE::from_u64(self.pt_mem.read(base, i));
+            if pte.valid() {
+                return false;
+            }
+        }
+        true
     }
 
     /// Traverse the page table for the given virtual address and return the matching
@@ -102,7 +127,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             level <= target_level < old(self).spec_arch().level_count(),
             old(self).pt_mem@.contains_table(base@),
             old(self).pt_mem@.table(base@).level == level,
-            old(self)@.pte_points_to_frame(new_pte, target_level as nat),
+            old(self)@.pte_valid_frame(new_pte, target_level as nat),
         ensures
             (self@, res) == old(self)@.insert(
                 vbase@,
@@ -215,7 +240,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
         assert(self.pt_mem@.accessible(base@, idx as nat));
         let pte = PTE::from_u64(self.pt_mem.read(base, idx));
         if level < self.constants.arch.level_count() - 1 && pte.valid() && !pte.huge() {
-            // Recycle from subtable
+            // Prune from subtable
             proof {
                 // Invariants satisfied after recycling from subtable
                 self.view().lemma_prune_preserves_invariants(
@@ -241,14 +266,8 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             assert(self.pt_mem@.accessible(base@, idx as nat));
             assert(self.pt_mem@.contains_table(pte.spec_addr()));
 
-            if self.pt_mem.is_table_empty(pte.addr()) {
+            if self.is_table_empty(pte.addr(), level + 1) {
                 // If subtable is empty, deallocate the table, and mark the entry as invalid
-                proof {
-                    self.pt_mem.view().lemma_dealloc_table_not_affect_other_tables(
-                        pte.spec_addr(),
-                        base@,
-                    );
-                }
                 self.pt_mem.dealloc_table(pte.addr());
                 assert(self.pt_mem@.accessible(base@, idx as nat));
                 self.pt_mem.write(base, idx, PTE::empty().to_u64());
@@ -268,11 +287,14 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
     {
         let (pte, level) = self.walk(vaddr, self.pt_mem.root(), 0);
         proof {
+            let root = self.pt_mem@.root();
+            self@.construct_node_facts(root, 0);
+
             // spec `get_pte` == node `visit`
             self.pt_mem@.lemma_contains_root();
-            self@.lemma_construct_node_implies_invariants(self.pt_mem@.root(), 0);
-            let node = self@.construct_node(self.pt_mem@.root(), 0);
-            self@.lemma_walk_consistent_with_model(vaddr@, self.pt_mem@.root(), 0);
+            self@.lemma_construct_node_implies_invariants(root, 0);
+            let node = self@.construct_node(root, 0);
+            self@.lemma_walk_consistent_with_model(vaddr@, root, 0);
             node.lemma_visit_length_bounds(
                 PTTreePath::from_vaddr_root(
                     vaddr@,
@@ -335,6 +357,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
 
         proof {
             let root = self.pt_mem@.root();
+            self.view().construct_node_facts(root, 0);
             // Ensures #1
             self.view().lemma_insert_preserves_invariants(
                 vbase@,
@@ -370,6 +393,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
     {
         let ghost root = self.pt_mem@.root();
         proof {
+            self@.construct_node_facts(root, 0);
             // Ensures #1
             self@.lemma_remove_preserves_invariants(vbase@, root, 0);
             // Ensures #2
@@ -378,11 +402,12 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
         }
         let res = self.remove(vbase, self.pt_mem.root(), 0);
         proof {
+            self@.construct_node_facts(root, 0);
             // Ensures #1
             self@.lemma_prune_preserves_invariants(vbase@, root, 0);
             // Ensures #2
             self@.lemma_prune_consistent_with_model(vbase@, root, 0);
-            self@.lemma_prune_preserves_lower_tables(vbase@, root, 0, root);
+            self@.lemma_prune_preserves_root(vbase@, root, 0);
         }
         if res.is_ok() {
             self.prune(vbase, self.pt_mem.root(), 0);
