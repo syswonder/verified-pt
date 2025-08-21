@@ -100,9 +100,12 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let pt_mem = self.pt_mem;
                 let table = pt_mem.table(base);
                 let pte = PTE::spec_from_u64(pt_mem.read(base, idx));
-                // If `pte` is valid and points to a table, then `pt_mem` contains the table,
-                // and the table level is one level higher than `base`
+                // If `pte` is valid and points to a table
                 &&& self.pte_points_to_table(pte, table.level) ==> {
+                    // The table is not root
+                    &&& pte.spec_addr()
+                        != self.pt_mem.root()
+                    // `pt_mem` contains the table, and the table level is one level higher than `base`
                     &&& pt_mem.contains_table(pte.spec_addr())
                     &&& pt_mem.table(pte.spec_addr()).level == table.level + 1
                 }
@@ -522,6 +525,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             let table2 = pt_mem.table(base2);
             let pte = PTE::spec_from_u64(pt_mem.read(base2, idx2));
             &&& self.pte_points_to_table(pte, table2.level) ==> {
+                &&& pte.spec_addr() != pt_mem.root()
                 &&& pt_mem.contains_table(pte.spec_addr())
                 &&& pt_mem.table(pte.spec_addr()).level == table2.level + 1
             }
@@ -547,6 +551,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     assert(self.pt_mem.accessible(base2, idx2));
                     assert(val == self.pt_mem.read(base2, idx2));
                     if self.pte_points_to_table(pte, table2.level) {
+                        assert(pte.spec_addr() != pt_mem.root());
                         assert(pt_mem.contains_table(pte.spec_addr()));
                         assert(pt_mem.table(pte.spec_addr()).level == table2.level + 1);
                     }
@@ -923,8 +928,22 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         } else {
                             // Other entries are unchanged
                             // TODO: pte equality not implies entry equality
-                            assume(node2.entries[i] == node.entries[i]);
+                            let pte_i = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
+                            assert(self.pt_mem.accessible(base, i as nat));
+                            assert(self.pt_mem.contains_table(pte_i.spec_addr()));
+                            self.lemma_other_index_not_in_chain(vbase, base, level, i as nat);
+                            self.lemma_insert_preserves_unrelated_node(
+                                vbase,
+                                base,
+                                level,
+                                target_level,
+                                new_pte,
+                                pte_i.spec_addr(),
+                                level + 1,
+                            );
+                            assert(node2.entries[i] == node.entries[i]);
                         }
+                        assert(node2.entries == right.entries);
                     }
                 }
             } else {
@@ -974,6 +993,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         assert(node2.entries[i] == node.entries[i]);
                     }
                 }
+                assert(node2.entries == right.entries);
             }
         }
     }
@@ -1162,6 +1182,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             let table2 = pt_mem.table(base2);
             let pte2 = PTE::spec_from_u64(pt_mem.read(base2, idx2));
             &&& self.pte_points_to_table(pte2, table2.level) ==> {
+                &&& pte.spec_addr() != pt_mem.root()
                 &&& pt_mem.contains_table(pte2.spec_addr())
                 &&& pt_mem.table(pte2.spec_addr()).level == table2.level + 1
             }
@@ -1225,7 +1246,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
-        if level < self.constants.arch.level_count() - 1 && pte.spec_valid() && !pte.spec_huge() {
+        if self.pte_points_to_table(pte, level) {
             self.lemma_prune_preserves_invariants(vaddr, pte.spec_addr(), level + 1);
             self.lemma_prune_preserves_lower_tables(vaddr, pte.spec_addr(), level + 1, base);
             self.lemma_prune_preserves_lower_tables(
@@ -1379,7 +1400,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             assert(s3.pt_mem.table_view(base) == self.pt_mem.table_view(base));
 
             s3.lemma_empty_table_constructs_empty_node(pte.spec_addr());
-            if s3.is_table_empty(pte.spec_addr()) {
+            if s3.is_table_empty(subtable_base) {
                 // Lemma shows `new_subnode` is empty
                 assert(right == node.update(idx, NodeEntry::Empty));
                 assert(s2.pt_mem == s3.pt_mem.dealloc_table(subtable_base).write(
@@ -1397,6 +1418,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         );
                         assert(node2.entries[i] is Empty);
                     } else {
+                        // Other entries are unchanged
                         PTE::lemma_eq_by_u64(
                             PTE::spec_from_u64(s3.pt_mem.read(base, i as nat)),
                             PTE::spec_from_u64(self.pt_mem.read(base, i as nat)),
@@ -1405,9 +1427,20 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                             PTE::spec_from_u64(s2.pt_mem.read(base, i as nat)),
                             PTE::spec_from_u64(s3.pt_mem.read(base, i as nat)),
                         );
-                        // Other entries are unchanged
-                        // TODO: Only ensure pte equality, not entry equality
-                        assume(node2.entries[i] == node.entries[i]);
+                        let pte_i = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
+                        assert(self.pt_mem.accessible(base, i as nat));
+                        if self.pte_points_to_table(pte_i, level) {
+                            assert(self.pt_mem.contains_table(pte_i.spec_addr()));
+                            self.lemma_other_index_not_in_chain(vaddr, base, level, i as nat);
+                            self.lemma_prune_preserves_unrelated_node(
+                                vaddr,
+                                base,
+                                level,
+                                pte_i.spec_addr(),
+                                level + 1,
+                            );
+                        }
+                        assert(node2.entries[i] == node.entries[i]);
                     }
                 }
                 assert(node2.entries == right.entries);
@@ -1427,13 +1460,535 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         assert(node2.entries[i] == NodeEntry::Node(new_subnode));
                     } else {
                         // Other entries are unchanged
-                        // TODO: Only ensure pte equality, not entry equality
-                        assume(node2.entries[i] == node.entries[i]);
+                        let pte_i = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
+                        assert(self.pt_mem.accessible(base, i as nat));
+                        if self.pte_points_to_table(pte_i, level) {
+                            self.lemma_other_index_not_in_chain(vaddr, base, level, i as nat);
+                            self.lemma_prune_preserves_unrelated_node(
+                                vaddr,
+                                base,
+                                level,
+                                pte_i.spec_addr(),
+                                level + 1,
+                            );
+                        }
+                        assert(node2.entries[i] == node.entries[i]);
                     }
                 }
                 assert(node2.entries == right.entries);
             }
         }
+    }
+
+    /// Return the sequence of page-table base addresses visited when walking the
+    /// page-table path for `vaddr` starting at table `base` on level `level`.
+    pub open spec fn collect_table_chain(self, vaddr: VAddr, base: PAddr, level: nat) -> Seq<PAddr>
+        recommends
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            level < self.constants.arch.level_count(),
+        decreases self.constants.arch.level_count() - level,
+    {
+        let pte = PTE::spec_from_u64(
+            self.pt_mem.read(base, self.constants.arch.pte_index(vaddr, level)),
+        );
+        if self.pte_points_to_table(pte, level) {
+            // PTE points to a child table: continue walk into the child table
+            seq![base].add(self.collect_table_chain(vaddr, pte.spec_addr(), level + 1))
+        } else {
+            // PTE does not point to another table: chain ends here
+            seq![base]
+        }
+    }
+
+    /// Lemma. The chain returned by `collect_table_chain` is well-formed: each address
+    /// corresponds to a valid table, table levels increase by one, and consecutive
+    /// tables are linked via the PTE at the corresponding index.
+    pub proof fn lemma_table_chain_entries_valid(self, vaddr: VAddr, base: PAddr, level: nat)
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            level < self.constants.arch.level_count(),
+        ensures
+            ({
+                let tables = self.collect_table_chain(vaddr, base, level);
+                &&& forall|i|
+                    #![auto]
+                    0 <= i < tables.len() ==> self.pt_mem.contains_table(tables[i])
+                        && self.pt_mem.table(tables[i]).level == level + i
+                &&& forall|i|
+                    0 <= i < tables.len() - 1 ==> {
+                        let idx = self.constants.arch.pte_index(vaddr, level + i as nat);
+                        let pte = PTE::spec_from_u64(self.pt_mem.read(#[trigger] tables[i], idx));
+                        self.pte_points_to_table(pte, level + i as nat) && pte.spec_addr()
+                            == tables[i + 1]
+                    }
+            }),
+        decreases self.constants.arch.level_count() - level,
+    {
+        let idx = self.constants.arch.pte_index(vaddr, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        assert(self.pt_mem.accessible(base, idx));
+        if self.pte_points_to_table(pte, level) {
+            // PTE points to a child table: continue walk into the child table
+            self.lemma_table_chain_entries_valid(vaddr, pte.spec_addr(), level + 1);
+        }
+    }
+
+    /// Lemma. An entry at `idx2` in `base` that points to a table but is not the index
+    /// chosen by `vaddr` cannot appear in the chain collected for `vaddr`.
+    pub proof fn lemma_other_index_not_in_chain(
+        self,
+        vaddr: VAddr,
+        base: PAddr,
+        level: nat,
+        idx2: nat,
+    )
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            level < self.constants.arch.level_count(),
+            self.pt_mem.accessible(base, idx2),
+            idx2 != self.constants.arch.pte_index(vaddr, level),
+            self.pte_points_to_table(PTE::spec_from_u64(self.pt_mem.read(base, idx2)), level),
+        ensures
+            !self.collect_table_chain(vaddr, base, level).contains(
+                PTE::spec_from_u64(self.pt_mem.read(base, idx2)).spec_addr(),
+            ),
+    {
+        let idx = self.constants.arch.pte_index(vaddr, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte2 = PTE::spec_from_u64(self.pt_mem.read(base, idx2));
+        let tables = self.collect_table_chain(vaddr, base, level);
+        self.lemma_table_chain_entries_valid(vaddr, base, level);
+
+        if tables.contains(pte2.spec_addr()) {
+            // Assume pte2's address in the collected chain
+            assert(pte2.spec_addr() != base);
+            assert(tables[0] == base);
+            let i = choose|i| 0 <= i < tables.len() && tables[i] == pte2.spec_addr();
+            assert(i > 0);
+
+            let idx3 = self.constants.arch.pte_index(vaddr, (level + i - 1) as nat);
+            assert(self.pt_mem.accessible(tables[i - 1], idx3));
+            let pte3 = PTE::spec_from_u64(self.pt_mem.read(tables[i - 1], idx3));
+            assert(self.pte_points_to_table(pte3, (level + i - 1) as nat));
+            // Found 2 pte points to the same table — derive contradiction
+            assert(pte3.spec_addr() == pte2.spec_addr());
+            assert(false);
+        }
+    }
+
+    /// Lemma. If `base2` is not in the chain collected for `vaddr` starting at `base`, then
+    /// the child table addressed by the PTE at `base2[idx2]` is also not in that chain.
+    pub proof fn lemma_table_not_in_chain_implies_child_not_in_chain(
+        self,
+        vaddr: VAddr,
+        base: PAddr,
+        level: nat,
+        base2: PAddr,
+        idx2: nat,
+    )
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            level < self.constants.arch.level_count(),
+            self.pt_mem.accessible(base2, idx2),
+            self.pt_mem.table(base2).level >= level,
+            self.pte_points_to_table(
+                PTE::spec_from_u64(self.pt_mem.read(base2, idx2)),
+                self.pt_mem.table(base2).level,
+            ),
+            !self.collect_table_chain(vaddr, base, level).contains(base2),
+        ensures
+            !self.collect_table_chain(vaddr, base, level).contains(
+                PTE::spec_from_u64(self.pt_mem.read(base2, idx2)).spec_addr(),
+            ),
+    {
+        let tables = self.collect_table_chain(vaddr, base, level);
+        self.lemma_table_chain_entries_valid(vaddr, base, level);
+
+        let pte2 = PTE::spec_from_u64(self.pt_mem.read(base2, idx2));
+        if tables.contains(pte2.spec_addr()) {
+            // Assume pte2's address in the collected chain
+            assert(pte2.spec_addr() != base);
+            assert(tables[0] == base);
+            let i = choose|i| 0 <= i < tables.len() && tables[i] == pte2.spec_addr();
+            let base3 = tables[i - 1];
+            assert(tables.contains(base3));
+            assert(self.pt_mem.contains_table(base3));
+
+            let level3 = self.pt_mem.table(base3).level;
+            let idx3 = self.constants.arch.pte_index(vaddr, level3);
+            assert(self.pt_mem.accessible(base3, idx3));
+            let pte3 = PTE::spec_from_u64(self.pt_mem.read(base3, idx3));
+            assert(self.pte_points_to_table(pte3, level3));
+            // Found 2 pte points to the same table — derive contradiction
+            assert(pte3.spec_addr() != pte2.spec_addr());
+            assert(false);
+        }
+    }
+
+    /// Lemma. `prune` only modifies tables that lie on the collected table chain for the
+    /// provided `vaddr` — all tables outside that chain are preserved unchanged.
+    pub proof fn lemma_prune_preserves_tables_outside_chain(
+        self,
+        vaddr: VAddr,
+        base: PAddr,
+        level: nat,
+        base2: PAddr,
+    )
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            level < self.constants.arch.level_count(),
+            self.pt_mem.contains_table(base2),
+            !self.collect_table_chain(vaddr, base, level).contains(base2),
+        ensures
+            self.prune(vaddr, base, level).pt_mem.contains_table(base2),
+            self.prune(vaddr, base, level).pt_mem.table(base2) == self.pt_mem.table(base2),
+            self.prune(vaddr, base, level).pt_mem.table_view(base2) == self.pt_mem.table_view(
+                base2,
+            ),
+        decreases self.constants.arch.level_count() - level,
+    {
+        let tables = self.collect_table_chain(vaddr, base, level);
+
+        let idx = self.constants.arch.pte_index(vaddr, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        assert(self.pt_mem.accessible(base, idx));
+
+        if self.pte_points_to_table(pte, level) {
+            // PTE points to a child table: continue walk into the child table
+            let s2 = self.prune(vaddr, pte.spec_addr(), level + 1);
+            self.lemma_prune_preserves_invariants(vaddr, pte.spec_addr(), level + 1);
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.spec_addr(), level + 1, base);
+            self.lemma_prune_preserves_lower_tables(
+                vaddr,
+                pte.spec_addr(),
+                level + 1,
+                pte.spec_addr(),
+            );
+            let tables2 = self.collect_table_chain(vaddr, pte.spec_addr(), level + 1);
+            assert(tables == seq![base].add(tables2));
+            assert(tables2[0] == pte.spec_addr());
+            assert(tables2.contains(pte.spec_addr()));
+            if tables2.contains(base2) {
+                // Subchain contains base2: extract its index for the contradiction
+                let idx = choose|i| 0 <= i < tables2.len() && tables2[i] == base2;
+                assert(tables[idx + 1] == base2);
+                assert(tables.contains(base2));
+            }
+            assert(!tables2.contains(base2));
+            self.lemma_prune_preserves_tables_outside_chain(
+                vaddr,
+                pte.spec_addr(),
+                level + 1,
+                base2,
+            );
+
+            assert(s2.pt_mem.table_view(base2) == self.pt_mem.table_view(base2));
+            if s2.is_table_empty(pte.spec_addr()) {
+                // Child table became empty after prune: deallocate it and update the parent PTE
+                assert(self.prune(vaddr, base, level).pt_mem == s2.pt_mem.dealloc_table(
+                    pte.spec_addr(),
+                ).write(base, idx, PTE::spec_empty().spec_to_u64()));
+                s2.lemma_dealloc_intermediate_table_preserves_invariants(base, level, idx);
+                assert(s2.pt_mem.dealloc_table(pte.spec_addr()).accessible(base, idx));
+                assert(base2 != pte.spec_addr());
+                assert(base2 != base);
+
+                assert(self.prune(vaddr, base, level).pt_mem.table_view(base2)
+                    == self.pt_mem.table_view(base2));
+            }
+        }
+    }
+
+    /// Lemma. `prune` does not change the constructed node representation for any
+    /// node that is not on the pruned path — nodes outside the collected chain remain
+    /// structurally identical after pruning.
+    pub proof fn lemma_prune_preserves_unrelated_node(
+        self,
+        vaddr: VAddr,
+        base: PAddr,
+        level: nat,
+        base2: PAddr,
+        level2: nat,
+    )
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            self.pt_mem.contains_table(base2),
+            self.pt_mem.table(base2).level == level2,
+            level <= level2 < self.constants.arch.level_count(),
+            !self.collect_table_chain(vaddr, base, level).contains(base2),
+        ensures
+            self.construct_node(base2, level2) == self.prune(vaddr, base, level).construct_node(
+                base2,
+                level2,
+            ),
+        decreases self.constants.arch.level_count() - level2,
+    {
+        let s2 = self.prune(vaddr, base, level);
+        self.lemma_prune_preserves_invariants(vaddr, base, level);
+        self.lemma_prune_preserves_tables_outside_chain(vaddr, base, level, base2);
+
+        assert(self.pt_mem.table_view(base2) == s2.pt_mem.table_view(base2));
+
+        let node = self.construct_node(base2, level2);
+        self.construct_node_facts(base2, level2);
+        let node2 = s2.construct_node(base2, level2);
+        s2.construct_node_facts(base2, level2);
+
+        assert(node.constants == node2.constants);
+        assert(node.level == node2.level);
+        assert(node.entries.len() == node2.entries.len());
+        assert forall|i: int| 0 <= i < self.constants.arch.entry_count(level2) implies {
+            node.entries[i] == node2.entries[i]
+        } by {
+            let entry = node.entries[i];
+            let entry2 = node2.entries[i];
+            let pte = PTE::spec_from_u64(self.pt_mem.read(base2, i as nat));
+            assert(self.pt_mem.accessible(base2, i as nat));
+            let pte2 = PTE::spec_from_u64(s2.pt_mem.read(base2, i as nat));
+            PTE::lemma_eq_by_u64(pte, pte2);
+
+            match entry {
+                NodeEntry::Node(node) => {
+                    assert(self.pte_points_to_table(pte, level2));
+                    assert(self.pt_mem.contains_table(pte.spec_addr()));
+                    self.lemma_table_not_in_chain_implies_child_not_in_chain(
+                        vaddr,
+                        base,
+                        level,
+                        base2,
+                        i as nat,
+                    );
+                    self.lemma_prune_preserves_unrelated_node(
+                        vaddr,
+                        base,
+                        level,
+                        pte.spec_addr(),
+                        level2 + 1,
+                    );
+                },
+                NodeEntry::Frame(frame) => {
+                    assert(self.pte_points_to_frame(pte, level2));
+                },
+                NodeEntry::Empty => {
+                    assert(!pte.spec_valid());
+                },
+            }
+        }
+        assert(node.entries == node2.entries);
+    }
+
+    /// Lemma. `insert` only modifies tables that lie on the insert path for `vbase`.
+    /// Tables outside the path are preserved unchanged.
+    pub proof fn lemma_insert_preserves_tables_outside_chain(
+        self,
+        vbase: VAddr,
+        base: PAddr,
+        level: nat,
+        target_level: nat,
+        new_pte: PTE,
+        base2: PAddr,
+    )
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            level <= target_level < self.constants.arch.level_count(),
+            self.pte_valid_frame(new_pte, target_level),
+            self.pt_mem.contains_table(base2),
+            !self.collect_table_chain(vbase, base, level).contains(base2),
+        ensures
+            self.insert(vbase, base, level, target_level, new_pte).0.pt_mem.contains_table(base2),
+            self.insert(vbase, base, level, target_level, new_pte).0.pt_mem.table(base2)
+                == self.pt_mem.table(base2),
+            self.insert(vbase, base, level, target_level, new_pte).0.pt_mem.table_view(base2)
+                == self.pt_mem.table_view(base2),
+        decreases target_level - level,
+    {
+        broadcast use super::pte::group_pte_lemmas;
+
+        let idx = self.constants.arch.pte_index(vbase, level);
+        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        assert(self.pt_mem.accessible(base, idx));
+
+        if level < target_level {
+            if pte.spec_valid() {
+                // PTE is present: either a huge mapping or a pointer to a next-level table
+                if !pte.spec_huge() {
+                    // Not a huge mapping: descend into the next-level table
+                    assert(self.pt_mem.contains_table(pte.spec_addr()));
+                    let tables = self.collect_table_chain(vbase, base, level);
+                    let tables2 = self.collect_table_chain(vbase, pte.spec_addr(), level + 1);
+                    assert(tables == seq![base].add(tables2));
+                    assert(tables[0] == base);
+                    assert(tables2[0] == pte.spec_addr());
+                    assert(tables2.contains(pte.spec_addr()));
+                    if tables2.contains(base2) {
+                        // Subchain contains base2: extract its index for the contradiction
+                        let idx = choose|i| 0 <= i < tables2.len() && tables2[i] == base2;
+                        assert(tables[idx + 1] == base2);
+                        assert(tables.contains(base2));
+                    }
+                    assert(!tables2.contains(base2));
+
+                    self.lemma_insert_preserves_tables_outside_chain(
+                        vbase,
+                        pte.spec_addr(),
+                        level + 1,
+                        target_level,
+                        new_pte,
+                        base2,
+                    )
+                }
+            } else {
+                // Allocate intermediate table — create a new table and link it from `base` via the PTE
+                let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
+                let pt_mem = pt_mem.write(
+                    base,
+                    idx,
+                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                );
+                // `s2` is the state after allocating an intermediate table
+                let s2 = Self::new(pt_mem, self.constants);
+                self.lemma_alloc_intermediate_table_preserves_invariants(base, level, idx);
+                assert(s2.invariants());
+
+                let pte = PTE::spec_new(table.base, MemAttr::spec_default(), false);
+                let tables = s2.collect_table_chain(vbase, base, level);
+                let tables2 = s2.collect_table_chain(vbase, pte.spec_addr(), level + 1);
+                assert(s2.pt_mem.read(base, idx) == pte.spec_to_u64());
+                PTE::lemma_eq_by_u64(PTE::spec_from_u64(s2.pt_mem.read(base, idx)), pte);
+                assert(s2.pte_points_to_table(pte, level));
+                assert(!tables.contains(base2));
+                assert(tables == seq![base].add(tables2));
+                assert(tables[0] == base);
+                assert(tables2[0] == pte.spec_addr());
+                assert(tables2.contains(pte.spec_addr()));
+                if tables2.contains(base2) {
+                    // Subchain contains base2: extract its index for the contradiction
+                    let idx = choose|i| 0 <= i < tables2.len() && tables2[i] == base2;
+                    assert(tables[idx + 1] == base2);
+                    assert(tables.contains(base2));
+                }
+                assert(!tables2.contains(base2));
+
+                s2.lemma_insert_preserves_tables_outside_chain(
+                    vbase,
+                    table.base,
+                    level + 1,
+                    target_level,
+                    new_pte,
+                    base2,
+                );
+            }
+        }
+    }
+
+    /// Lemma. `insert` does not change the constructed node for nodes outside the
+    /// insertion path — structural node representations remain equal for nodes not
+    /// on the path.
+    pub proof fn lemma_insert_preserves_unrelated_node(
+        self,
+        vbase: VAddr,
+        base: PAddr,
+        level: nat,
+        target_level: nat,
+        new_pte: PTE,
+        base2: PAddr,
+        level2: nat,
+    )
+        requires
+            self.invariants(),
+            self.pt_mem.contains_table(base),
+            self.pt_mem.table(base).level == level,
+            self.pt_mem.contains_table(base2),
+            self.pt_mem.table(base2).level == level2,
+            level <= target_level < self.constants.arch.level_count(),
+            level <= level2 < self.constants.arch.level_count(),
+            self.pte_valid_frame(new_pte, target_level),
+            !self.collect_table_chain(vbase, base, level).contains(base2),
+        ensures
+            self.construct_node(base2, level2) == self.insert(
+                vbase,
+                base,
+                level,
+                target_level,
+                new_pte,
+            ).0.construct_node(base2, level2),
+        decreases self.constants.arch.level_count() - level2,
+    {
+        let s2 = self.insert(vbase, base, level, target_level, new_pte).0;
+        self.lemma_insert_preserves_invariants(vbase, base, level, target_level, new_pte);
+        self.lemma_insert_preserves_tables_outside_chain(
+            vbase,
+            base,
+            level,
+            target_level,
+            new_pte,
+            base2,
+        );
+
+        assert(self.pt_mem.table_view(base2) == s2.pt_mem.table_view(base2));
+
+        let node = self.construct_node(base2, level2);
+        self.construct_node_facts(base2, level2);
+        let node2 = s2.construct_node(base2, level2);
+        s2.construct_node_facts(base2, level2);
+
+        assert(node.constants == node2.constants);
+        assert(node.level == node2.level);
+        assert(node.entries.len() == node2.entries.len());
+        assert forall|i: int| 0 <= i < self.constants.arch.entry_count(level2) implies {
+            node.entries[i] == node2.entries[i]
+        } by {
+            let entry = node.entries[i];
+            let entry2 = node2.entries[i];
+            let pte = PTE::spec_from_u64(self.pt_mem.read(base2, i as nat));
+            assert(self.pt_mem.accessible(base2, i as nat));
+            let pte2 = PTE::spec_from_u64(s2.pt_mem.read(base2, i as nat));
+            PTE::lemma_eq_by_u64(pte, pte2);
+
+            match entry {
+                NodeEntry::Node(node) => {
+                    assert(self.pte_points_to_table(pte, level2));
+                    assert(self.pt_mem.contains_table(pte.spec_addr()));
+                    self.lemma_table_not_in_chain_implies_child_not_in_chain(
+                        vbase,
+                        base,
+                        level,
+                        base2,
+                        i as nat,
+                    );
+                    self.lemma_insert_preserves_unrelated_node(
+                        vbase,
+                        base,
+                        level,
+                        target_level,
+                        new_pte,
+                        pte.spec_addr(),
+                        level2 + 1,
+                    );
+                },
+                NodeEntry::Frame(frame) => {
+                    assert(self.pte_points_to_frame(pte, level2));
+                },
+                NodeEntry::Empty => {
+                    assert(!pte.spec_valid());
+                },
+            }
+        }
+        assert(node.entries == node2.entries);
     }
 
     /// Axiom. The interpreted view of the page table memory is consistent with the view derived
