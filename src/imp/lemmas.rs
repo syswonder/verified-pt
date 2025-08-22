@@ -107,4 +107,27 @@ pub proof fn lemma_sum_align_word_size(a: nat, b: nat)
 {
 }
 
+/// Lemma. If a seqence does not contain a value, then its subsequence does not contain it either.
+pub proof fn lemma_not_in_seq_implies_not_in_subseq<T>(
+    seq1: Seq<T>,
+    seq2: Seq<T>,
+    start: T,
+    needle: T,
+)
+    requires
+        seq1 == seq![start].add(seq2),
+        !seq1.contains(needle),
+    ensures
+        start != needle,
+        !seq2.contains(needle),
+{
+    assert(seq1[0] == start);
+    assert(seq1.contains(seq1[0]));
+    if seq2.contains(needle) {
+        let i = choose|i| 0 <= i < seq2.len() && seq2[i] == needle;
+        assert(seq1[i + 1] == needle);
+        assert(seq1.contains(needle));
+    }
+}
+
 } // verus!
