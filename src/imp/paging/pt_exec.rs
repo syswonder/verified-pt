@@ -47,18 +47,14 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
     /// Construct a new page table.
     pub fn new(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> (res: Self)
         requires
+            PageTable::<PTE>::new(pt_mem@, constants@).invariants(),
             pt_mem@.arch == constants.arch@,
         ensures
             res@.invariants(),
             res.pt_mem == pt_mem,
             res.constants == constants,
     {
-        let pt = Self { pt_mem, constants, _phantom: PhantomData };
-        proof {
-            // This is not true
-            assume(pt@.invariants());
-        }
-        pt
+        Self { pt_mem, constants, _phantom: PhantomData }
     }
 
     /// If all pte in a table are invalid.
