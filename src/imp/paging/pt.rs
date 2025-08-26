@@ -101,18 +101,27 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let pt_mem = self.pt_mem;
                 let table = pt_mem.table(base);
                 let pte = PTE::spec_from_u64(pt_mem.read(base, idx));
-                // If `pte` is valid and points to a table
-                &&& self.pte_points_to_table(pte, table.level) ==> {
-                    // The table is not root
-                    &&& pte.spec_addr()
-                        != self.pt_mem.root()
-                    // `pt_mem` contains the table, and the table level is one level higher than `base`
-                    &&& pt_mem.contains_table(pte.spec_addr())
-                    &&& pt_mem.table(pte.spec_addr()).level == table.level + 1
-                }
+                let addr = pte.spec_addr();
                 // If `table` is a leaf table, `pte` is either invalid or points to a frame
                 &&& (table.level == self.constants.arch.level_count() - 1 && pte.spec_valid())
                     ==> !pte.spec_huge()
+                // If `pte` is valid and points to a subtable
+                &&& self.pte_points_to_table(pte, table.level) ==> {
+                    // The subtable is not root
+                    &&& addr
+                        != self.pt_mem.root()
+                    // `pt_mem` contains the subtable, and the table level is one level higher than `base`
+                    &&& pt_mem.contains_table(addr)
+                    &&& pt_mem.table(addr).level == table.level + 1
+                }
+                // If `pte` is valid and points to a frame
+                &&& self.pte_points_to_frame(pte, table.level) ==> {
+                    // The frame is valid
+                    &&& addr.aligned(self.constants.arch.frame_size(table.level).as_nat())
+                    &&& self.constants.pmem_lb.0 <= addr.0
+                    &&& addr.0 + self.constants.arch.frame_size(table.level).as_nat()
+                        <= self.constants.pmem_ub.0
+                }
             }
             // For each 2 page table entries that can be accessed
         &&& forall|base1: PAddr, idx1: nat, base2: PAddr, idx2: nat|
@@ -391,8 +400,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             assert(self.pt_mem.accessible(base, i as nat));
             match node.entries[i] {
                 NodeEntry::Frame(frame) => {
-                    // TODO: add more assumptions for GenericPTE
-                    assume({
+                    assert({
                         &&& frame.base.aligned(frame.size.as_nat())
                         &&& frame.base.0 >= node.constants.pmem_lb.0
                         &&& frame.base.0 + frame.size.as_nat() <= node.constants.pmem_ub.0
@@ -677,13 +685,20 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         assert forall|base2: PAddr, idx2: nat| pt_mem.accessible(base2, idx2) implies {
             let table2 = pt_mem.table(base2);
             let pte = PTE::spec_from_u64(pt_mem.read(base2, idx2));
-            &&& self.pte_points_to_table(pte, table2.level) ==> {
-                &&& pte.spec_addr() != pt_mem.root()
-                &&& pt_mem.contains_table(pte.spec_addr())
-                &&& pt_mem.table(pte.spec_addr()).level == table2.level + 1
-            }
-            &&& (table2.level == self.constants.arch.level_count() - 1 && pte.spec_valid())
+            let addr = pte.spec_addr();
+            &&& (table2.level == s2.constants.arch.level_count() - 1 && pte.spec_valid())
                 ==> !pte.spec_huge()
+            &&& s2.pte_points_to_table(pte, table2.level) ==> {
+                &&& addr != pt_mem.root()
+                &&& pt_mem.contains_table(addr)
+                &&& pt_mem.table(addr).level == table2.level + 1
+            }
+            &&& s2.pte_points_to_frame(pte, table2.level) ==> {
+                &&& addr.aligned(s2.constants.arch.frame_size(table2.level).as_nat())
+                &&& s2.constants.pmem_lb.0 <= addr.0
+                &&& addr.0 + s2.constants.arch.frame_size(table2.level).as_nat()
+                    <= s2.constants.pmem_ub.0
+            }
         } by {
             let table2 = pt_mem.table(base2);
             let val = pt_mem.read(base2, idx2);
@@ -1272,7 +1287,6 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                             ));
                         } else {
                             // Other entries are unchanged
-                            // TODO: pte equality not implies entry equality
                             let pte_i = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
                             assert(self.pt_mem.accessible(base, i as nat));
                             assert(self.pt_mem.contains_table(pte_i.spec_addr()));
@@ -1480,6 +1494,12 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 },
                 NodeEntry::Frame(frame) => {
                     if path.has_zero_tail(level) {
+                        assert(s2.pt_mem == self.pt_mem.write(
+                            base,
+                            idx,
+                            PTE::spec_empty().spec_to_u64(),
+                        ));
+                        PTE::lemma_eq_by_u64(pte2, PTE::spec_empty());
                         assert(entry2 == NodeEntry::Empty);
                     }
                 },
@@ -1526,13 +1546,20 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         assert forall|base2: PAddr, idx2: nat| pt_mem.accessible(base2, idx2) implies {
             let table2 = pt_mem.table(base2);
             let pte2 = PTE::spec_from_u64(pt_mem.read(base2, idx2));
-            &&& self.pte_points_to_table(pte2, table2.level) ==> {
-                &&& pte.spec_addr() != pt_mem.root()
-                &&& pt_mem.contains_table(pte2.spec_addr())
-                &&& pt_mem.table(pte2.spec_addr()).level == table2.level + 1
-            }
-            &&& (table2.level == self.constants.arch.level_count() - 1 && pte2.spec_valid())
+            let addr = pte2.spec_addr();
+            &&& (table2.level == s2.constants.arch.level_count() - 1 && pte2.spec_valid())
                 ==> !pte2.spec_huge()
+            &&& s2.pte_points_to_table(pte2, table2.level) ==> {
+                &&& addr != pt_mem.root()
+                &&& pt_mem.contains_table(addr)
+                &&& pt_mem.table(addr).level == table2.level + 1
+            }
+            &&& s2.pte_points_to_frame(pte2, table2.level) ==> {
+                &&& addr.aligned(s2.constants.arch.frame_size(table2.level).as_nat())
+                &&& s2.constants.pmem_lb.0 <= addr.0
+                &&& addr.0 + s2.constants.arch.frame_size(table2.level).as_nat()
+                    <= s2.constants.pmem_ub.0
+            }
         } by {
             let table2 = pt_mem.table(base2);
             let val = pt_mem.read(base2, idx2);
@@ -1544,7 +1571,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             } else {
                 assert(self.pt_mem.accessible(base2, idx2));
                 PTE::lemma_eq_by_u64(pte2, PTE::spec_from_u64(self.pt_mem.read(base2, idx2)));
-                if self.pte_points_to_table(pte2, table2.level) {
+                if s2.pte_points_to_table(pte2, table2.level) {
                     // Invariants ensures no double reference
                     assert(pte2.spec_addr() != pte.spec_addr());
                 }
