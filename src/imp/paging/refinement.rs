@@ -12,9 +12,9 @@ use crate::{
         frame::FrameExec,
         PagingResult,
     },
-    spec::{
+    imp::{
         interface::{PTConstantsExec, PageTableInterface},
-        memory::PageTableMemExec,
+        pt_mem::PageTableMemExec,
     },
 };
 

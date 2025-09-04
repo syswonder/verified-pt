@@ -1,18 +1,17 @@
 //! Page table interface.
 //!
-//! Concrete page table must implement this interface to satisfy the specification.
+//! Concrete page table must implement this interface to satisfy the page table specification
+//! defined in `spec::page_table`.
 use vstd::prelude::*;
 
-use super::{
-    memory::PageTableMemExec,
-    page_table::{PTConstants, PageTableState},
-};
+use super::pt_mem::PageTableMemExec;
 use crate::common::{
     addr::{PAddrExec, VAddrExec},
     arch::PTArchExec,
     frame::FrameExec,
     PagingResult,
 };
+use crate::spec::page_table::{PTConstants, PageTableState};
 
 verus! {
 

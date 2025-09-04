@@ -13,8 +13,7 @@ use crate::{
         frame::{Frame, FrameExec, MemAttr},
         PagingResult,
     },
-    imp::tree::path::PTTreePath,
-    spec::{interface::PTConstantsExec, memory::PageTableMemExec},
+    imp::{interface::PTConstantsExec, pt_mem::PageTableMemExec, tree::path::PTTreePath},
 };
 
 verus! {
@@ -76,9 +75,7 @@ impl<G, E> PageTableExec<G, E> where G: GhostPTE, E: ExecPTE<G> {
                 self.constants.arch@.entry_count(level as nat) == entry_count,
                 self@.pt_mem.contains_table(base@),
                 self@.pt_mem.table(base@).level == level,
-                forall|j: nat|
-                    #![auto]
-                    j < i ==> !G::from_u64(self@.pt_mem.read(base@, j)).valid(),
+                forall|j: nat| #![auto] j < i ==> !G::from_u64(self@.pt_mem.read(base@, j)).valid(),
         {
             assert(self@.pt_mem.accessible(base@, i as nat));
             let pte = E::from_u64(self.pt_mem.read(base, i));
