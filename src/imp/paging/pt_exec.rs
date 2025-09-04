@@ -2,7 +2,10 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::{pt::PageTable, pte::GenericPTE};
+use super::{
+    pt::PageTable,
+    pte::{ExecPTE, GhostPTE},
+};
 use crate::{
     common::{
         addr::{PAddrExec, VAddr, VAddrExec},
@@ -24,30 +27,30 @@ broadcast use crate::spec::memory::group_pt_mem_lemmas;
 /// `PageTable` wraps a `PageTableMemExec` and a `PTConstantsExec` to provide a convenient interface for
 /// manipulating the page table. Refinement proof is provided by implementing trait `PageTableInterface`
 /// to ensure `PageTableMemExec` is manipulated correctly.
-pub struct PageTableExec<PTE: GenericPTE> {
+pub struct PageTableExec<G: GhostPTE, E: ExecPTE<G>> {
     /// Page table memory.
     pub pt_mem: PageTableMemExec,
     /// Page table config constants.
     pub constants: PTConstantsExec,
     /// Phantom data.
-    pub _phantom: PhantomData<PTE>,
+    pub _phantom: PhantomData<(G, E)>,
 }
 
-impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
+impl<G, E> PageTableExec<G, E> where G: GhostPTE, E: ExecPTE<G> {
     /// View as a specification-level page table.
-    pub open spec fn view(self) -> PageTable<PTE> {
+    pub open spec fn view(self) -> PageTable<G> {
         PageTable { pt_mem: self.pt_mem@, constants: self.constants@, _phantom: PhantomData }
     }
 
     /// Page table architecture specification.
-    pub open spec fn spec_arch(self) -> PTArch {
+    pub open spec fn arch(self) -> PTArch {
         self.constants.arch@
     }
 
     /// Construct a new page table.
     pub fn new(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> (res: Self)
         requires
-            PageTable::<PTE>::new(pt_mem@, constants@).invariants(),
+            PageTable::<G>::new(pt_mem@, constants@).invariants(),
             pt_mem@.arch == constants.arch@,
         ensures
             res@.invariants(),
@@ -75,10 +78,10 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                 self@.pt_mem.table(base@).level == level,
                 forall|j: nat|
                     #![auto]
-                    j < i ==> !PTE::spec_from_u64(self@.pt_mem.read(base@, j)).spec_valid(),
+                    j < i ==> !G::from_u64(self@.pt_mem.read(base@, j)).valid(),
         {
             assert(self@.pt_mem.accessible(base@, i as nat));
-            let pte = PTE::from_u64(self.pt_mem.read(base, i));
+            let pte = E::from_u64(self.pt_mem.read(base, i));
             if pte.valid() {
                 return false;
             }
@@ -88,17 +91,17 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
 
     /// Traverse the page table for the given virtual address and return the matching
     /// entry and level. Proven consistent with the specification-level walk.
-    pub fn walk(&self, vaddr: VAddrExec, base: PAddrExec, level: usize) -> (res: (PTE, usize))
+    pub fn walk(&self, vaddr: VAddrExec, base: PAddrExec, level: usize) -> (res: (E, usize))
         requires
             self@.invariants(),
             self.pt_mem@.contains_table(base@),
             self.pt_mem@.table(base@).level == level,
         ensures
-            (res.0, res.1 as nat) == self@.walk(vaddr@, base@, level as nat),
+            (res.0@, res.1 as nat) == self@.walk(vaddr@, base@, level as nat),
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
         assert(self.pt_mem@.accessible(base@, idx as nat));
-        let pte = PTE::from_u64(self.pt_mem.read(base, idx));
+        let pte = E::from_u64(self.pt_mem.read(base, idx));
         if level < self.constants.arch.level_count() - 1 && pte.valid() && !pte.huge() {
             self.walk(vaddr, pte.addr(), level + 1)
         } else {
@@ -116,27 +119,27 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
         base: PAddrExec,
         level: usize,
         target_level: usize,
-        new_pte: PTE,
+        new_pte: E,
     ) -> (res: PagingResult)
         requires
             old(self)@.invariants(),
-            level <= target_level < old(self).spec_arch().level_count(),
+            level <= target_level < old(self).arch().level_count(),
             old(self).pt_mem@.contains_table(base@),
             old(self).pt_mem@.table(base@).level == level,
-            old(self)@.pte_valid_frame(new_pte, target_level as nat),
+            old(self)@.pte_valid_frame(new_pte@, target_level as nat),
         ensures
             (self@, res) == old(self)@.insert(
                 vbase@,
                 base@,
                 level as nat,
                 target_level as nat,
-                new_pte,
+                new_pte@,
             ),
             res is Err ==> old(self) == self,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
         assert(self.pt_mem@.accessible(base@, idx as nat));
-        let pte = PTE::from_u64(self.pt_mem.read(base, idx));
+        let pte = E::from_u64(self.pt_mem.read(base, idx));
         if level >= target_level {
             // Insert at current level
             if pte.valid() {
@@ -166,13 +169,13 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                         base@,
                         level as nat,
                         target_level as nat,
-                        new_pte,
+                        new_pte@,
                     );
                 }
                 // Allocate intermediate table
                 let table = self.pt_mem.alloc_table(level + 1);
                 // Write entry
-                let pte = PTE::new(table.base, MemAttr::default(), false);
+                let pte = E::new(table.base, MemAttr::default(), false);
                 self.pt_mem.write(base, idx, pte.to_u64());
 
                 // Insert at next level
@@ -185,7 +188,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
     pub fn remove(&mut self, vbase: VAddrExec, base: PAddrExec, level: usize) -> (res: PagingResult)
         requires
             old(self)@.invariants(),
-            level < old(self).spec_arch().level_count(),
+            level < old(self).arch().level_count(),
             old(self).pt_mem@.contains_table(base@),
             old(self).pt_mem@.table(base@).level == level,
         ensures
@@ -194,12 +197,12 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
     {
         let idx = self.constants.arch.pte_index(vbase, level);
         assert(self.pt_mem@.accessible(base@, idx as nat));
-        let pte = PTE::from_u64(self.pt_mem.read(base, idx));
+        let pte = E::from_u64(self.pt_mem.read(base, idx));
         if pte.valid() {
             if level >= self.constants.arch.level_count() - 1 {
                 // Leaf node
                 if vbase.aligned(self.constants.arch.frame_size(level).as_usize()) {
-                    self.pt_mem.write(base, idx, PTE::empty().to_u64());
+                    self.pt_mem.write(base, idx, E::empty().to_u64());
                     PagingResult::Ok(())
                 } else {
                     PagingResult::Err(())
@@ -208,7 +211,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                 // Intermediate node
                 if pte.huge() {
                     if vbase.aligned(self.constants.arch.frame_size(level).as_usize()) {
-                        self.pt_mem.write(base, idx, PTE::empty().to_u64());
+                        self.pt_mem.write(base, idx, E::empty().to_u64());
                         PagingResult::Ok(())
                     } else {
                         PagingResult::Err(())
@@ -226,7 +229,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
     pub fn prune(&mut self, vaddr: VAddrExec, base: PAddrExec, level: usize)
         requires
             old(self)@.invariants(),
-            level < old(self).spec_arch().level_count(),
+            level < old(self).arch().level_count(),
             old(self).pt_mem@.contains_table(base@),
             old(self).pt_mem@.table(base@).level == level,
         ensures
@@ -234,39 +237,35 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
         assert(self.pt_mem@.accessible(base@, idx as nat));
-        let pte = PTE::from_u64(self.pt_mem.read(base, idx));
+        let pte = E::from_u64(self.pt_mem.read(base, idx));
         if level < self.constants.arch.level_count() - 1 && pte.valid() && !pte.huge() {
             // Prune from subtable
             proof {
                 // Invariants satisfied after recycling from subtable
-                self.view().lemma_prune_preserves_invariants(
-                    vaddr@,
-                    pte.spec_addr(),
-                    level as nat + 1,
-                );
+                self.view().lemma_prune_preserves_invariants(vaddr@, pte@.addr(), level as nat + 1);
                 // Current table and subtable are accessible after recycling from subtable
                 self.view().lemma_prune_preserves_lower_tables(
                     vaddr@,
-                    pte.spec_addr(),
+                    pte@.addr(),
                     level as nat + 1,
                     base@,
                 );
                 self.view().lemma_prune_preserves_lower_tables(
                     vaddr@,
-                    pte.spec_addr(),
+                    pte@.addr(),
                     level as nat + 1,
-                    pte.spec_addr(),
+                    pte@.addr(),
                 );
             }
             self.prune(vaddr, pte.addr(), level + 1);
             assert(self.pt_mem@.accessible(base@, idx as nat));
-            assert(self.pt_mem@.contains_table(pte.spec_addr()));
+            assert(self.pt_mem@.contains_table(pte@.addr()));
 
             if self.is_table_empty(pte.addr(), level + 1) {
                 // If subtable is empty, deallocate the table, and mark the entry as invalid
                 self.pt_mem.dealloc_table(pte.addr());
                 assert(self.pt_mem@.accessible(base@, idx as nat));
-                self.pt_mem.write(base, idx, PTE::empty().to_u64());
+                self.pt_mem.write(base, idx, E::empty().to_u64());
             }
         }
     }
@@ -294,20 +293,20 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
             node.lemma_visit_length_bounds(
                 PTTreePath::from_vaddr_root(
                     vaddr@,
-                    self.spec_arch(),
-                    (self.spec_arch().level_count() - 1) as nat,
+                    self.arch(),
+                    (self.arch().level_count() - 1) as nat,
                 ),
             );
-            assert(level < self.spec_arch().level_count());
+            assert(level < self.arch().level_count());
             // exec `query` consistent with model `query`
-            if pte.spec_valid() {
+            if pte@.valid() {
                 assert(self@@.query(vaddr@) == PagingResult::Ok(
                     (
-                        self.spec_arch().vbase(vaddr@, level as nat),
+                        self.arch().vbase(vaddr@, level as nat),
                         Frame {
-                            base: pte.spec_addr(),
-                            size: self.spec_arch().frame_size(level as nat),
-                            attr: pte.spec_attr(),
+                            base: pte@.addr(),
+                            size: self.arch().frame_size(level as nat),
+                            attr: pte@.attr(),
                         },
                     ),
                 ));
@@ -347,9 +346,11 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                 r is Ok == res is Ok && s2 == self@@
             }),
     {
+        broadcast use super::pte::group_pte_lemmas;
+
         let target_level = self.constants.arch.level_of_frame_size(frame.size);
         let huge = target_level < self.constants.arch.level_count() - 1;
-        let new_pte = PTE::new(frame.base, frame.attr, huge);
+        let new_pte = E::new(frame.base, frame.attr, huge);
 
         proof {
             let root = self.pt_mem@.root();
@@ -360,7 +361,7 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                 root,
                 0,
                 target_level as nat,
-                new_pte,
+                new_pte@,
             );
             // Ensures #2
             self.view().lemma_insert_consistent_with_model(
@@ -368,9 +369,9 @@ impl<PTE> PageTableExec<PTE> where PTE: GenericPTE {
                 root,
                 0,
                 target_level as nat,
-                new_pte,
+                new_pte@,
             );
-            self.view().lemma_insert_preserves_root(vbase@, root, 0, target_level as nat, new_pte);
+            self.view().lemma_insert_preserves_root(vbase@, root, 0, target_level as nat, new_pte@);
         }
 
         self.insert(vbase, self.pt_mem.root(), 0, target_level, new_pte)

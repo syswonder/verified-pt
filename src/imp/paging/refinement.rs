@@ -2,7 +2,10 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::{pt_exec::PageTableExec, pte::GenericPTE};
+use super::{
+    pt_exec::PageTableExec,
+    pte::{ExecPTE, GhostPTE},
+};
 use crate::{
     common::{
         addr::{PAddr, VAddrExec},
@@ -22,23 +25,23 @@ verus! {
 /// Implementing `PageTableInterface` ensures the page table implementation satisfies the
 /// interface specifications, along with the assumptions made about the hardware and the
 /// remaining system, we can complete the proof of the paging system.
-pub struct PageTableImpl<PTE: GenericPTE>(PhantomData<PTE>);
+pub struct PageTableImpl<G: GhostPTE, E: ExecPTE<G>>(PhantomData<(G, E)>);
 
-impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
+impl<G, E> PageTableInterface for PageTableImpl<G, E> where G: GhostPTE, E: ExecPTE<G> {
     open spec fn invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> bool {
-        PageTableExec::<PTE> { pt_mem, constants, _phantom: PhantomData }@.invariants()
+        PageTableExec::<G, E> { pt_mem, constants, _phantom: PhantomData }@.invariants()
     }
 
     proof fn init_implies_invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) {
         broadcast use super::pte::group_pte_lemmas;
 
         pt_mem.view().lemma_init_implies_invariants();
-        let pt = PageTableExec::<PTE> { pt_mem, constants, _phantom: PhantomData };
+        let pt = PageTableExec::<G, E> { pt_mem, constants, _phantom: PhantomData };
         assert forall|base: PAddr, idx: nat| pt.pt_mem@.accessible(base, idx) implies {
             let pt_mem = pt.pt_mem@;
             let table = pt_mem.table(base);
-            let pte = PTE::spec_from_u64(pt_mem.read(base, idx));
-            !pte.spec_valid()
+            let pte = G::from_u64(pt_mem.read(base, idx));
+            !pte.valid()
         } by {
             assert(base == pt_mem@.root());
             assert(pt_mem@.table_view(base) == seq![0u64; pt_mem@.arch.entry_count(0)]);
@@ -52,7 +55,7 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
         vbase: VAddrExec,
         frame: FrameExec,
     ) -> (res: (PagingResult, PageTableMemExec)) {
-        let mut pt = PageTableExec::<PTE>::new(pt_mem, constants);
+        let mut pt = PageTableExec::<G, E>::new(pt_mem, constants);
         proof {
             assert(pt@.invariants());
             pt@.model_consistent_with_hardware();
@@ -71,7 +74,7 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
         PagingResult,
         PageTableMemExec,
     )) {
-        let mut pt = PageTableExec::<PTE>::new(pt_mem, constants);
+        let mut pt = PageTableExec::<G, E>::new(pt_mem, constants);
         proof {
             assert(pt@.invariants());
             pt@.model_consistent_with_hardware();
@@ -90,7 +93,7 @@ impl<PTE> PageTableInterface for PageTableImpl<PTE> where PTE: GenericPTE {
         PagingResult<(VAddrExec, FrameExec)>,
         PageTableMemExec,
     )) {
-        let mut pt = PageTableExec::<PTE>::new(pt_mem, constants);
+        let mut pt = PageTableExec::<G, E>::new(pt_mem, constants);
         proof {
             assert(pt@.invariants());
             pt@.model_consistent_with_hardware();

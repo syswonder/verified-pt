@@ -2,7 +2,7 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::pte::GenericPTE;
+use super::pte::GhostPTE;
 use crate::{
     common::{
         addr::{PAddr, VAddr},
@@ -27,51 +27,47 @@ verus! {
 broadcast use crate::spec::memory::group_pt_mem_lemmas;
 
 /// Spec-mode page table implementation.
-pub struct PageTable<PTE: GenericPTE> {
+pub struct PageTable<G: GhostPTE> {
     /// Page table memory.
     pub pt_mem: PageTableMem,
     /// Page table config constants.
     pub constants: PTConstants,
     /// Phantom data.
-    pub _phantom: PhantomData<PTE>,
+    pub _phantom: PhantomData<G>,
 }
 
-impl<PTE> PageTable<PTE> where PTE: GenericPTE {
+impl<G> PageTable<G> where G: GhostPTE {
     /// Wrap a page table memory and constants into a spec-mode page table.
     pub open spec fn new(pt_mem: PageTableMem, constants: PTConstants) -> Self {
         Self { pt_mem, constants, _phantom: PhantomData }
     }
 
     /// If `pte` points to a frame.
-    pub open spec fn pte_points_to_frame(self, pte: PTE, level: nat) -> bool {
-        pte.spec_valid() && if level < self.constants.arch.level_count() - 1 {
-            pte.spec_huge()
+    pub open spec fn pte_points_to_frame(self, pte: G, level: nat) -> bool {
+        pte.valid() && if level < self.constants.arch.level_count() - 1 {
+            pte.huge()
         } else {
-            !pte.spec_huge()
+            !pte.huge()
         }
     }
 
     /// If `pte` points to a table.
-    pub open spec fn pte_points_to_table(self, pte: PTE, level: nat) -> bool {
-        pte.spec_valid() && level < self.constants.arch.level_count() - 1 && !pte.spec_huge()
+    pub open spec fn pte_points_to_table(self, pte: G, level: nat) -> bool {
+        pte.valid() && level < self.constants.arch.level_count() - 1 && !pte.huge()
     }
 
     /// If `pte` points to a frame with valid address and size.
-    pub open spec fn pte_valid_frame(self, pte: PTE, level: nat) -> bool {
+    pub open spec fn pte_valid_frame(self, pte: G, level: nat) -> bool {
         let frame_size = self.constants.arch.frame_size(level);
         &&& self.pte_points_to_frame(pte, level)
-        &&& pte.spec_addr().aligned(frame_size.as_nat())
-        &&& self.constants.pmem_lb.0 <= pte.spec_addr().0
-        &&& pte.spec_addr().0 + frame_size.as_nat() <= self.constants.pmem_ub.0
+        &&& pte.addr().aligned(frame_size.as_nat())
+        &&& self.constants.pmem_lb.0 <= pte.addr().0
+        &&& pte.addr().0 + frame_size.as_nat() <= self.constants.pmem_ub.0
     }
 
     /// Construct a `Frame` from a `PTE`.
-    pub open spec fn pte_to_frame(self, pte: PTE, level: nat) -> Frame {
-        Frame {
-            base: pte.spec_addr(),
-            attr: pte.spec_attr(),
-            size: self.constants.arch.frame_size(level),
-        }
+    pub open spec fn pte_to_frame(self, pte: G, level: nat) -> Frame {
+        Frame { base: pte.addr(), attr: pte.attr(), size: self.constants.arch.frame_size(level) }
     }
 
     /// If all pte in a table are invalid.
@@ -83,9 +79,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let level = self.pt_mem.table(base).level;
         forall|idx: nat|
             #![auto]
-            idx < self.constants.arch.entry_count(level) ==> !PTE::spec_from_u64(
+            idx < self.constants.arch.entry_count(level) ==> !G::from_u64(
                 self.pt_mem.read(base, idx),
-            ).spec_valid()
+            ).valid()
     }
 
     /// Invariants that ensure the page table is well-formed.
@@ -100,11 +96,11 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pt_mem.accessible(base, idx) ==> {
                 let pt_mem = self.pt_mem;
                 let table = pt_mem.table(base);
-                let pte = PTE::spec_from_u64(pt_mem.read(base, idx));
-                let addr = pte.spec_addr();
+                let pte = G::from_u64(pt_mem.read(base, idx));
+                let addr = pte.addr();
                 // If `table` is a leaf table, `pte` is either invalid or points to a frame
-                &&& (table.level == self.constants.arch.level_count() - 1 && pte.spec_valid())
-                    ==> !pte.spec_huge()
+                &&& (table.level == self.constants.arch.level_count() - 1 && pte.valid())
+                    ==> !pte.huge()
                 // If `pte` is valid and points to a subtable
                 &&& self.pte_points_to_table(pte, table.level) ==> {
                     // The subtable is not root
@@ -126,15 +122,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             // For each 2 page table entries that can be accessed
         &&& forall|base1: PAddr, idx1: nat, base2: PAddr, idx2: nat|
             self.pt_mem.accessible(base1, idx1) && self.pt_mem.accessible(base2, idx2) ==> {
-                let pte1 = PTE::spec_from_u64(self.pt_mem.read(base1, idx1));
-                let pte2 = PTE::spec_from_u64(self.pt_mem.read(base2, idx2));
+                let pte1 = G::from_u64(self.pt_mem.read(base1, idx1));
+                let pte2 = G::from_u64(self.pt_mem.read(base2, idx2));
                 // If two pte points to the same table, they must be equal
                 ({
                     &&& self.pte_points_to_table(pte1, self.pt_mem.table(base1).level)
                     &&& self.pte_points_to_table(pte2, self.pt_mem.table(base2).level)
                 }) ==> {
                     ||| base1 == base2 && idx1 == idx2
-                    ||| (pte1.spec_addr() != pte2.spec_addr())
+                    ||| (pte1.addr() != pte2.addr())
                 }
             }
     }
@@ -164,20 +160,20 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 &&& node.entries.len() == self.constants.arch.entry_count(level)
                 &&& forall|idx: nat|
                     idx < self.constants.arch.entry_count(level) ==> {
-                        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+                        let pte = G::from_u64(self.pt_mem.read(base, idx));
                         let entry = #[trigger] node.entries[idx as int];
                         match entry {
                             NodeEntry::Frame(frame) => {
                                 &&& self.pte_points_to_frame(pte, level)
-                                &&& frame.base == pte.spec_addr()
-                                &&& frame.attr == pte.spec_attr()
+                                &&& frame.base == pte.addr()
+                                &&& frame.attr == pte.attr()
                                 &&& frame.size == self.constants.arch.frame_size(level)
                             },
                             NodeEntry::Node(subnode) => {
                                 &&& self.pte_points_to_table(pte, level)
-                                &&& subnode == self.construct_node(pte.spec_addr(), level + 1)
+                                &&& subnode == self.construct_node(pte.addr(), level + 1)
                             },
-                            NodeEntry::Empty => !pte.spec_valid(),
+                            NodeEntry::Empty => !pte.valid(),
                         }
                     }
             }),
@@ -195,7 +191,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
     /// Perform a recursive specification-level page table walk starting from a given base.
     ///
     /// Terminate upon reaching an invalid or block entry, or reaching the leaf level.
-    pub open spec fn walk(self, vaddr: VAddr, base: PAddr, level: nat) -> (PTE, nat)
+    pub open spec fn walk(self, vaddr: VAddr, base: PAddr, level: nat) -> (G, nat)
         recommends
             self.invariants(),
             self.pt_mem.contains_table(base),
@@ -203,11 +199,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level < self.constants.arch.level_count(),
         decreases self.constants.arch.level_count() - level,
     {
-        let pte = PTE::spec_from_u64(
-            self.pt_mem.read(base, self.constants.arch.pte_index(vaddr, level)),
-        );
+        let pte = G::from_u64(self.pt_mem.read(base, self.constants.arch.pte_index(vaddr, level)));
         if self.pte_points_to_table(pte, level) {
-            self.walk(vaddr, pte.spec_addr(), level + 1)
+            self.walk(vaddr, pte.addr(), level + 1)
         } else {
             (pte, level)
         }
@@ -220,7 +214,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         base: PAddr,
         level: nat,
         target_level: nat,
-        new_pte: PTE,
+        new_pte: G,
     ) -> (Self, PagingResult)
         recommends
             self.invariants(),
@@ -231,24 +225,21 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases target_level - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         if level >= target_level {
             // Insert at current level
-            if pte.spec_valid() {
+            if pte.valid() {
                 (self, Err(()))
             } else {
-                (
-                    Self::new(self.pt_mem.write(base, idx, new_pte.spec_to_u64()), self.constants),
-                    Ok(()),
-                )
+                (Self::new(self.pt_mem.write(base, idx, new_pte.to_u64()), self.constants), Ok(()))
             }
         } else {
-            if pte.spec_valid() {
-                if pte.spec_huge() {
+            if pte.valid() {
+                if pte.huge() {
                     (self, Err(()))
                 } else {
                     // Insert at next level
-                    self.insert(vbase, pte.spec_addr(), level + 1, target_level, new_pte)
+                    self.insert(vbase, pte.addr(), level + 1, target_level, new_pte)
                 }
             } else {
                 // Insert intermediate table
@@ -258,7 +249,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let pt_mem = pt_mem.write(
                     base,
                     idx,
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                    G::new(table.base, MemAttr::spec_default(), false).to_u64(),
                 );
                 Self::new(pt_mem, self.constants).insert(
                     vbase,
@@ -281,14 +272,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
-        if pte.spec_valid() {
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
+        if pte.valid() {
             if level >= self.constants.arch.level_count() - 1 {
                 // Leaf node
                 if vbase.aligned(self.constants.arch.frame_size(level).as_nat()) {
                     (
                         Self::new(
-                            self.pt_mem.write(base, idx, PTE::spec_empty().spec_to_u64()),
+                            self.pt_mem.write(base, idx, G::empty().to_u64()),
                             self.constants,
                         ),
                         Ok(()),
@@ -298,11 +289,11 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 }
             } else {
                 // Intermediate node
-                if pte.spec_huge() {
+                if pte.huge() {
                     if vbase.aligned(self.constants.arch.frame_size(level).as_nat()) {
                         (
                             Self::new(
-                                self.pt_mem.write(base, idx, PTE::spec_empty().spec_to_u64()),
+                                self.pt_mem.write(base, idx, G::empty().to_u64()),
                                 self.constants,
                             ),
                             Ok(()),
@@ -311,7 +302,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         (self, Err(()))
                     }
                 } else {
-                    self.remove(vbase, pte.spec_addr(), level + 1)
+                    self.remove(vbase, pte.addr(), level + 1)
                 }
             }
         } else {
@@ -329,22 +320,18 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         if level >= self.constants.arch.level_count() - 1 {
             // Leaf table
             self
         } else {
-            if pte.spec_valid() && !pte.spec_huge() {
+            if pte.valid() && !pte.huge() {
                 // Recycle from subtable
-                let s2 = self.prune(vaddr, pte.spec_addr(), level + 1);
-                if s2.is_table_empty(pte.spec_addr()) {
+                let s2 = self.prune(vaddr, pte.addr(), level + 1);
+                if s2.is_table_empty(pte.addr()) {
                     // If subtable is empty, deallocate it and mark the entry as invalid
                     Self::new(
-                        s2.pt_mem.dealloc_table(pte.spec_addr()).write(
-                            base,
-                            idx,
-                            PTE::spec_empty().spec_to_u64(),
-                        ),
+                        s2.pt_mem.dealloc_table(pte.addr()).write(base, idx, G::empty().to_u64()),
                         self.constants,
                     )
                 } else {
@@ -366,12 +353,10 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level < self.constants.arch.level_count(),
         decreases self.constants.arch.level_count() - level,
     {
-        let pte = PTE::spec_from_u64(
-            self.pt_mem.read(base, self.constants.arch.pte_index(vaddr, level)),
-        );
+        let pte = G::from_u64(self.pt_mem.read(base, self.constants.arch.pte_index(vaddr, level)));
         if self.pte_points_to_table(pte, level) {
             // PTE points to a child table: continue walk into the child table
-            seq![base].add(self.collect_table_chain(vaddr, pte.spec_addr(), level + 1))
+            seq![base].add(self.collect_table_chain(vaddr, pte.addr(), level + 1))
         } else {
             // PTE does not point to another table: chain ends here
             seq![base]
@@ -407,13 +392,13 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     });
                 },
                 NodeEntry::Node(subnode) => {
-                    let pte = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
+                    let pte = G::from_u64(self.pt_mem.read(base, i as nat));
                     assert(self.pt_mem.accessible(base, i as nat));
                     // Invariants ensures this
-                    assert(self.pt_mem.contains_table(pte.spec_addr()));
-                    assert(self.pt_mem.table(pte.spec_addr()).level == level + 1);
-                    self.construct_node_facts(pte.spec_addr(), level + 1);
-                    self.lemma_construct_node_implies_invariants(pte.spec_addr(), level + 1);
+                    assert(self.pt_mem.contains_table(pte.addr()));
+                    assert(self.pt_mem.table(pte.addr()).level == level + 1);
+                    self.construct_node_facts(pte.addr(), level + 1);
+                    self.lemma_construct_node_implies_invariants(pte.addr(), level + 1);
                 },
                 NodeEntry::Empty => (),
             }
@@ -451,9 +436,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         if node.empty() {
             assert forall|idx: nat|
                 #![auto]
-                idx < self.constants.arch.entry_count(level) implies !PTE::spec_from_u64(
+                idx < self.constants.arch.entry_count(level) implies !G::from_u64(
                 self.pt_mem.read(base, idx),
-            ).spec_valid() by {
+            ).valid() by {
                 assert(node.entries.contains(node.entries[idx as int]));
             }
         }
@@ -478,19 +463,19 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 &&& forall|i|
                     0 <= i < tables.len() - 1 ==> {
                         let idx = self.constants.arch.pte_index(vaddr, level + i as nat);
-                        let pte = PTE::spec_from_u64(self.pt_mem.read(#[trigger] tables[i], idx));
-                        self.pte_points_to_table(pte, level + i as nat) && pte.spec_addr()
-                            == tables[i + 1]
+                        let pte = G::from_u64(self.pt_mem.read(#[trigger] tables[i], idx));
+                        self.pte_points_to_table(pte, level + i as nat) && pte.addr() == tables[i
+                            + 1]
                     }
             }),
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
         if self.pte_points_to_table(pte, level) {
             // PTE points to a child table: continue walk into the child table
-            self.lemma_table_chain_entries_valid(vaddr, pte.spec_addr(), level + 1);
+            self.lemma_table_chain_entries_valid(vaddr, pte.addr(), level + 1);
         }
     }
 
@@ -510,31 +495,31 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level < self.constants.arch.level_count(),
             self.pt_mem.accessible(base, idx2),
             idx2 != self.constants.arch.pte_index(vaddr, level),
-            self.pte_points_to_table(PTE::spec_from_u64(self.pt_mem.read(base, idx2)), level),
+            self.pte_points_to_table(G::from_u64(self.pt_mem.read(base, idx2)), level),
         ensures
             !self.collect_table_chain(vaddr, base, level).contains(
-                PTE::spec_from_u64(self.pt_mem.read(base, idx2)).spec_addr(),
+                G::from_u64(self.pt_mem.read(base, idx2)).addr(),
             ),
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
-        let pte2 = PTE::spec_from_u64(self.pt_mem.read(base, idx2));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
+        let pte2 = G::from_u64(self.pt_mem.read(base, idx2));
         let tables = self.collect_table_chain(vaddr, base, level);
         self.lemma_table_chain_entries_valid(vaddr, base, level);
 
-        if tables.contains(pte2.spec_addr()) {
+        if tables.contains(pte2.addr()) {
             // Assume pte2's address in the collected chain
-            assert(pte2.spec_addr() != base);
+            assert(pte2.addr() != base);
             assert(tables[0] == base);
-            let i = choose|i| 0 <= i < tables.len() && tables[i] == pte2.spec_addr();
+            let i = choose|i| 0 <= i < tables.len() && tables[i] == pte2.addr();
             assert(i > 0);
 
             let idx3 = self.constants.arch.pte_index(vaddr, (level + i - 1) as nat);
             assert(self.pt_mem.accessible(tables[i - 1], idx3));
-            let pte3 = PTE::spec_from_u64(self.pt_mem.read(tables[i - 1], idx3));
+            let pte3 = G::from_u64(self.pt_mem.read(tables[i - 1], idx3));
             assert(self.pte_points_to_table(pte3, (level + i - 1) as nat));
             // Found 2 pte points to the same table — derive contradiction
-            assert(pte3.spec_addr() == pte2.spec_addr());
+            assert(pte3.addr() == pte2.addr());
             assert(false);
         }
     }
@@ -557,34 +542,34 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             self.pt_mem.accessible(base2, idx2),
             self.pt_mem.table(base2).level >= level,
             self.pte_points_to_table(
-                PTE::spec_from_u64(self.pt_mem.read(base2, idx2)),
+                G::from_u64(self.pt_mem.read(base2, idx2)),
                 self.pt_mem.table(base2).level,
             ),
             !self.collect_table_chain(vaddr, base, level).contains(base2),
         ensures
             !self.collect_table_chain(vaddr, base, level).contains(
-                PTE::spec_from_u64(self.pt_mem.read(base2, idx2)).spec_addr(),
+                G::from_u64(self.pt_mem.read(base2, idx2)).addr(),
             ),
     {
         let tables = self.collect_table_chain(vaddr, base, level);
         self.lemma_table_chain_entries_valid(vaddr, base, level);
 
-        let pte2 = PTE::spec_from_u64(self.pt_mem.read(base2, idx2));
-        if tables.contains(pte2.spec_addr()) {
+        let pte2 = G::from_u64(self.pt_mem.read(base2, idx2));
+        if tables.contains(pte2.addr()) {
             // Assume pte2's address in the collected chain
-            assert(pte2.spec_addr() != base);
+            assert(pte2.addr() != base);
             assert(tables[0] == base);
-            let i = choose|i| 0 <= i < tables.len() && tables[i] == pte2.spec_addr();
+            let i = choose|i| 0 <= i < tables.len() && tables[i] == pte2.addr();
             let base3 = tables[i - 1];
             assert(tables.contains(base3));
             let level3 = self.pt_mem.table(base3).level;
             let idx3 = self.constants.arch.pte_index(vaddr, level3);
             assert(self.pt_mem.accessible(base3, idx3));
 
-            let pte3 = PTE::spec_from_u64(self.pt_mem.read(base3, idx3));
+            let pte3 = G::from_u64(self.pt_mem.read(base3, idx3));
             assert(self.pte_points_to_table(pte3, level3));
             // Found 2 pte points to the same table — derive contradiction
-            assert(pte3.spec_addr() != pte2.spec_addr());
+            assert(pte3.addr() != pte2.addr());
             assert(false);
         }
     }
@@ -609,8 +594,8 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 );
                 let visited = node.visit(path);
                 // This last entry returned by `visit` is consistent with
-                // the page table entry returned by `spec_walk`.
-                level2 == level + visited.len() - 1 && visited.last() == if pte.spec_valid() {
+                // the page table entry returned by `walk`.
+                level2 == level + visited.len() - 1 && visited.last() == if pte.valid() {
                     NodeEntry::Frame(self.pte_to_frame(pte, level2))
                 } else {
                     NodeEntry::Empty
@@ -637,9 +622,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             assert(visited == seq![entry]);
         } else {
             if let NodeEntry::Node(subnode) = entry {
-                let pte2 = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+                let pte2 = G::from_u64(self.pt_mem.read(base, idx));
                 // `pte2` points to a subtable
-                let subtable_base = pte2.spec_addr();
+                let subtable_base = pte2.addr();
                 // Recursive visit from the subtable
                 self.lemma_walk_consistent_with_model(vaddr, subtable_base, level + 1);
                 PTTreePath::lemma_from_vaddr_step(vaddr, arch, level, end);
@@ -660,14 +645,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level == self.pt_mem.table(base).level,
             level + 1 < self.constants.arch.level_count(),
             self.pt_mem.accessible(base, idx),
-            !PTE::spec_from_u64(self.pt_mem.read(base, idx)).spec_valid(),
+            !G::from_u64(self.pt_mem.read(base, idx)).valid(),
         ensures
             ({
                 let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
                 let pt_mem = pt_mem.write(
                     base,
                     idx,
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                    G::new(table.base, MemAttr::spec_default(), false).to_u64(),
                 );
                 Self::new(pt_mem, self.constants).invariants()
             }),
@@ -678,16 +663,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let pt_mem = pt_mem.write(
             base,
             idx,
-            PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+            G::new(table.base, MemAttr::spec_default(), false).to_u64(),
         );
         let s2 = Self::new(pt_mem, self.constants);
 
         assert forall|base2: PAddr, idx2: nat| pt_mem.accessible(base2, idx2) implies {
             let table2 = pt_mem.table(base2);
-            let pte = PTE::spec_from_u64(pt_mem.read(base2, idx2));
-            let addr = pte.spec_addr();
-            &&& (table2.level == s2.constants.arch.level_count() - 1 && pte.spec_valid())
-                ==> !pte.spec_huge()
+            let pte = G::from_u64(pt_mem.read(base2, idx2));
+            let addr = pte.addr();
+            &&& (table2.level == s2.constants.arch.level_count() - 1 && pte.valid()) ==> !pte.huge()
             &&& s2.pte_points_to_table(pte, table2.level) ==> {
                 &&& addr != pt_mem.root()
                 &&& pt_mem.contains_table(addr)
@@ -702,47 +686,44 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         } by {
             let table2 = pt_mem.table(base2);
             let val = pt_mem.read(base2, idx2);
-            let pte = PTE::spec_from_u64(val);
+            let pte = G::from_u64(val);
 
             if base2 == base && idx2 == idx {
                 // `(base2, idx2)` is the entry just inserted
-                PTE::lemma_eq_by_u64(
-                    pte,
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false),
-                );
+                G::lemma_eq_by_u64(pte, G::new(table.base, MemAttr::spec_default(), false));
             } else {
                 if base2 == table.base {
                     // `base2` is the newly allocated table
-                    assert(pte == PTE::spec_from_u64(0));
+                    assert(pte == G::from_u64(0));
                 } else {
                     // Entry at `(base2, idx2)` is not updated
                     assert(self.pt_mem.accessible(base2, idx2));
                     assert(val == self.pt_mem.read(base2, idx2));
                     if self.pte_points_to_table(pte, table2.level) {
-                        assert(pte.spec_addr() != pt_mem.root());
-                        assert(pt_mem.contains_table(pte.spec_addr()));
-                        assert(pt_mem.table(pte.spec_addr()).level == table2.level + 1);
+                        assert(pte.addr() != pt_mem.root());
+                        assert(pt_mem.contains_table(pte.addr()));
+                        assert(pt_mem.table(pte.addr()).level == table2.level + 1);
                     }
-                    if table2.level == self.constants.arch.level_count() - 1 && pte.spec_valid() {
-                        assert(!pte.spec_huge());
+                    if table2.level == self.constants.arch.level_count() - 1 && pte.valid() {
+                        assert(!pte.huge());
                     }
                 }
             }
         }
         assert forall|base1: PAddr, idx1: nat, base2: PAddr, idx2: nat|
             pt_mem.accessible(base1, idx1) && pt_mem.accessible(base2, idx2) implies {
-            let pte1 = PTE::spec_from_u64(pt_mem.read(base1, idx1));
-            let pte2 = PTE::spec_from_u64(pt_mem.read(base2, idx2));
+            let pte1 = G::from_u64(pt_mem.read(base1, idx1));
+            let pte2 = G::from_u64(pt_mem.read(base2, idx2));
             ({
                 &&& s2.pte_points_to_table(pte1, pt_mem.table(base1).level)
                 &&& s2.pte_points_to_table(pte2, pt_mem.table(base2).level)
             }) ==> {
                 ||| base1 == base2 && idx1 == idx2
-                ||| (pte1.spec_addr() != pte2.spec_addr())
+                ||| (pte1.addr() != pte2.addr())
             }
         } by {
-            let pte1 = PTE::spec_from_u64(pt_mem.read(base1, idx1));
-            let pte2 = PTE::spec_from_u64(pt_mem.read(base2, idx2));
+            let pte1 = G::from_u64(pt_mem.read(base1, idx1));
+            let pte2 = G::from_u64(pt_mem.read(base2, idx2));
             if s2.pte_points_to_table(pte1, pt_mem.table(base1).level) && s2.pte_points_to_table(
                 pte2,
                 pt_mem.table(base2).level,
@@ -761,7 +742,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         base: PAddr,
         level: nat,
         target_level: nat,
-        new_pte: PTE,
+        new_pte: G,
         base2: PAddr,
     )
         requires
@@ -778,22 +759,22 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases target_level - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
         if level < target_level {
-            if pte.spec_valid() {
-                if !pte.spec_huge() {
+            if pte.valid() {
+                if !pte.huge() {
                     self.lemma_insert_preserves_invariants(
                         vbase,
-                        pte.spec_addr(),
+                        pte.addr(),
                         level + 1,
                         target_level,
                         new_pte,
                     );
                     self.lemma_insert_preserves_old_tables(
                         vbase,
-                        pte.spec_addr(),
+                        pte.addr(),
                         level + 1,
                         target_level,
                         new_pte,
@@ -805,7 +786,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let pt_mem = pt_mem.write(
                     base,
                     idx,
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                    G::new(table.base, MemAttr::spec_default(), false).to_u64(),
                 );
                 self.lemma_alloc_intermediate_table_preserves_invariants(base, level, idx);
                 // Ensures `pt_mem` after `alloc_table` satisfies the invariants
@@ -828,7 +809,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         base: PAddr,
         level: nat,
         target_level: nat,
-        new_pte: PTE,
+        new_pte: G,
     )
         requires
             self.invariants(),
@@ -842,16 +823,16 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases target_level - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
         if level < target_level {
-            if pte.spec_valid() {
-                if !pte.spec_huge() {
+            if pte.valid() {
+                if !pte.huge() {
                     // Recursively insert into the next table
                     self.lemma_insert_preserves_root(
                         vbase,
-                        pte.spec_addr(),
+                        pte.addr(),
                         level + 1,
                         target_level,
                         new_pte,
@@ -863,7 +844,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let pt_mem = pt_mem.write(
                     base,
                     idx,
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                    G::new(table.base, MemAttr::spec_default(), false).to_u64(),
                 );
                 // `s2` is the state after allocating an intermediate table
                 let s2 = Self::new(pt_mem, self.constants);
@@ -882,7 +863,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         base: PAddr,
         level: nat,
         target_level: nat,
-        new_pte: PTE,
+        new_pte: G,
     )
         requires
             self.invariants(),
@@ -896,16 +877,16 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases target_level - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
         if level < target_level {
-            if pte.spec_valid() {
-                if !pte.spec_huge() {
+            if pte.valid() {
+                if !pte.huge() {
                     // Recursively insert into the next table
                     self.lemma_insert_preserves_invariants(
                         vbase,
-                        pte.spec_addr(),
+                        pte.addr(),
                         level + 1,
                         target_level,
                         new_pte,
@@ -917,7 +898,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let pt_mem = pt_mem.write(
                     base,
                     idx,
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                    G::new(table.base, MemAttr::spec_default(), false).to_u64(),
                 );
                 // `s2` is the state after allocating an intermediate table
                 let s2 = Self::new(pt_mem, self.constants);
@@ -942,7 +923,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         base: PAddr,
         level: nat,
         target_level: nat,
-        new_pte: PTE,
+        new_pte: G,
     )
         requires
             self.invariants(),
@@ -953,8 +934,8 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         ensures
             ({
                 let idx = self.constants.arch.pte_index(vbase, level);
-                let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
-                level < target_level && !pte.spec_valid() ==> self.insert(
+                let pte = G::from_u64(self.pt_mem.read(base, idx));
+                level < target_level && !pte.valid() ==> self.insert(
                     vbase,
                     base,
                     level,
@@ -965,14 +946,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases target_level - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
-        if level < target_level && !pte.spec_valid() {
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
+        if level < target_level && !pte.valid() {
             // Allocate intermediate table
             let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
             let pt_mem = pt_mem.write(
                 base,
                 idx,
-                PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                G::new(table.base, MemAttr::spec_default(), false).to_u64(),
             );
             // `s2` is the state after allocating an intermediate table
             let s2 = Self::new(pt_mem, self.constants);
@@ -981,10 +962,10 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
 
             let (_, insert_res) = s2.insert(vbase, table.base, level + 1, target_level, new_pte);
             let idx = s2.constants.arch.pte_index(vbase, level + 1);
-            let pte = PTE::spec_from_u64(s2.pt_mem.read(table.base, idx));
+            let pte = G::from_u64(s2.pt_mem.read(table.base, idx));
             // New table is empty
             assert(s2.pt_mem.read(table.base, idx) == 0);
-            assert(!pte.spec_valid());
+            assert(!pte.valid());
 
             // Recursive proof for the next level
             s2.lemma_insert_intermediate_node_results_ok(
@@ -1005,7 +986,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         base: PAddr,
         level: nat,
         target_level: nat,
-        new_pte: PTE,
+        new_pte: G,
         base2: PAddr,
     )
         requires
@@ -1027,24 +1008,24 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         broadcast use super::pte::group_pte_lemmas;
 
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
         if level < target_level {
-            if pte.spec_valid() {
+            if pte.valid() {
                 // PTE is present: either a huge mapping or a pointer to a next-level table
-                if !pte.spec_huge() {
+                if !pte.huge() {
                     // Not a huge mapping: descend into the next-level table
-                    assert(self.pt_mem.contains_table(pte.spec_addr()));
+                    assert(self.pt_mem.contains_table(pte.addr()));
                     let tables = self.collect_table_chain(vbase, base, level);
-                    let tables2 = self.collect_table_chain(vbase, pte.spec_addr(), level + 1);
+                    let tables2 = self.collect_table_chain(vbase, pte.addr(), level + 1);
 
                     assert(tables == seq![base].add(tables2));
                     lemma_not_in_seq_implies_not_in_subseq(tables, tables2, base, base2);
                     assert(!tables2.contains(base2));
                     self.lemma_insert_preserves_tables_outside_chain(
                         vbase,
-                        pte.spec_addr(),
+                        pte.addr(),
                         level + 1,
                         target_level,
                         new_pte,
@@ -1057,18 +1038,18 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let pt_mem = pt_mem.write(
                     base,
                     idx,
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                    G::new(table.base, MemAttr::spec_default(), false).to_u64(),
                 );
                 // `s2` is the state after allocating an intermediate table
                 let s2 = Self::new(pt_mem, self.constants);
                 self.lemma_alloc_intermediate_table_preserves_invariants(base, level, idx);
                 assert(s2.invariants());
 
-                let pte = PTE::spec_new(table.base, MemAttr::spec_default(), false);
+                let pte = G::new(table.base, MemAttr::spec_default(), false);
                 let tables = s2.collect_table_chain(vbase, base, level);
-                let tables2 = s2.collect_table_chain(vbase, pte.spec_addr(), level + 1);
-                assert(s2.pt_mem.read(base, idx) == pte.spec_to_u64());
-                PTE::lemma_eq_by_u64(PTE::spec_from_u64(s2.pt_mem.read(base, idx)), pte);
+                let tables2 = s2.collect_table_chain(vbase, pte.addr(), level + 1);
+                assert(s2.pt_mem.read(base, idx) == pte.to_u64());
+                G::lemma_eq_by_u64(G::from_u64(s2.pt_mem.read(base, idx)), pte);
                 assert(s2.pte_points_to_table(pte, level));
 
                 assert(tables == seq![base].add(tables2));
@@ -1095,7 +1076,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         base: PAddr,
         level: nat,
         target_level: nat,
-        new_pte: PTE,
+        new_pte: G,
         base2: PAddr,
         level2: nat,
     )
@@ -1142,15 +1123,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         } by {
             let entry = node.entries[i];
             let entry2 = node2.entries[i];
-            let pte = PTE::spec_from_u64(self.pt_mem.read(base2, i as nat));
+            let pte = G::from_u64(self.pt_mem.read(base2, i as nat));
             assert(self.pt_mem.accessible(base2, i as nat));
-            let pte2 = PTE::spec_from_u64(s2.pt_mem.read(base2, i as nat));
-            PTE::lemma_eq_by_u64(pte, pte2);
+            let pte2 = G::from_u64(s2.pt_mem.read(base2, i as nat));
+            G::lemma_eq_by_u64(pte, pte2);
 
             match entry {
                 NodeEntry::Node(node) => {
                     assert(self.pte_points_to_table(pte, level2));
-                    assert(self.pt_mem.contains_table(pte.spec_addr()));
+                    assert(self.pt_mem.contains_table(pte.addr()));
                     self.lemma_table_not_in_chain_implies_child_not_in_chain(
                         vbase,
                         base,
@@ -1164,7 +1145,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         level,
                         target_level,
                         new_pte,
-                        pte.spec_addr(),
+                        pte.addr(),
                         level2 + 1,
                     );
                 },
@@ -1172,7 +1153,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     assert(self.pte_points_to_frame(pte, level2));
                 },
                 NodeEntry::Empty => {
-                    assert(!pte.spec_valid());
+                    assert(!pte.valid());
                 },
             }
         }
@@ -1186,7 +1167,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         base: PAddr,
         level: nat,
         target_level: nat,
-        new_pte: PTE,
+        new_pte: G,
     )
         requires
             self.invariants(),
@@ -1224,22 +1205,22 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let (idx, remain) = path.step();
         let entry = node.entries[idx as int];
         assert(self.pt_mem.accessible(base, idx));
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
 
         let right = node.insert(path, new_frame).0;
         node.lemma_insert_preserves_invariants(path, new_frame);
 
         if level >= target_level {
-            if !pte.spec_valid() {
-                PTE::lemma_eq_by_u64(PTE::spec_from_u64(s2.pt_mem.read(base, idx)), new_pte);
+            if !pte.valid() {
+                G::lemma_eq_by_u64(G::from_u64(s2.pt_mem.read(base, idx)), new_pte);
                 // Update `pte` to `new_pte`, empty entry to frame
                 assert(right == node.update(idx, NodeEntry::Frame(new_frame)));
             }
         } else {
-            if pte.spec_valid() {
-                if !pte.spec_huge() {
+            if pte.valid() {
+                if !pte.huge() {
                     // `pte` points to a subtable
-                    let subtable_base = pte.spec_addr();
+                    let subtable_base = pte.addr();
                     let subnode: PTTreeNode = entry->Node_0;
 
                     let new_subnode = subnode.insert(remain, new_frame).0;
@@ -1276,9 +1257,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
 
                     assert forall|i| 0 <= i < node2.entries.len() implies node2.entries[i]
                         == right.entries[i] by {
-                        PTE::lemma_eq_by_u64(
-                            PTE::spec_from_u64(s2.pt_mem.read(base, i as nat)),
-                            PTE::spec_from_u64(self.pt_mem.read(base, i as nat)),
+                        G::lemma_eq_by_u64(
+                            G::from_u64(s2.pt_mem.read(base, i as nat)),
+                            G::from_u64(self.pt_mem.read(base, i as nat)),
                         );
                         if i == idx {
                             // Entry `i` is the subtree constructed from `subtable_base`
@@ -1287,9 +1268,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                             ));
                         } else {
                             // Other entries are unchanged
-                            let pte_i = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
+                            let pte_i = G::from_u64(self.pt_mem.read(base, i as nat));
                             assert(self.pt_mem.accessible(base, i as nat));
-                            assert(self.pt_mem.contains_table(pte_i.spec_addr()));
+                            assert(self.pt_mem.contains_table(pte_i.addr()));
                             self.lemma_other_index_not_in_chain(vbase, base, level, i as nat);
                             self.lemma_insert_preserves_unrelated_node(
                                 vbase,
@@ -1297,7 +1278,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                                 level,
                                 target_level,
                                 new_pte,
-                                pte_i.spec_addr(),
+                                pte_i.addr(),
                                 level + 1,
                             );
                             assert(node2.entries[i] == node.entries[i]);
@@ -1310,7 +1291,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 let written = allocated.write(
                     base,
                     idx,
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false).spec_to_u64(),
+                    G::new(table.base, MemAttr::spec_default(), false).to_u64(),
                 );
                 let subtable_base = table.base;
                 self.lemma_alloc_intermediate_table_preserves_invariants(base, level, idx);
@@ -1318,9 +1299,9 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                 // s3 is the state after allocating a new intermediate table
                 let s3 = Self::new(written, self.constants);
                 let subnode = PTTreeNode::new(self.constants, level + 1);
-                PTE::lemma_eq_by_u64(
-                    PTE::spec_from_u64(s3.pt_mem.read(base, idx)),
-                    PTE::spec_new(table.base, MemAttr::spec_default(), false),
+                G::lemma_eq_by_u64(
+                    G::from_u64(s3.pt_mem.read(base, idx)),
+                    G::new(table.base, MemAttr::spec_default(), false),
                 );
                 assert(s3.construct_node(base, level).entries[idx as int] == NodeEntry::Node(
                     subnode,
@@ -1369,10 +1350,10 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
         if self.pte_points_to_table(pte, level) {
-            self.lemma_remove_preserves_invariants(vbase, pte.spec_addr(), level + 1)
+            self.lemma_remove_preserves_invariants(vbase, pte.addr(), level + 1)
         }
     }
 
@@ -1396,10 +1377,10 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
         if self.pte_points_to_table(pte, level) {
-            self.lemma_remove_preserves_old_tables(vbase, pte.spec_addr(), level + 1, base2)
+            self.lemma_remove_preserves_old_tables(vbase, pte.addr(), level + 1, base2)
         }
     }
 
@@ -1415,10 +1396,10 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vbase, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
         if self.pte_points_to_table(pte, level) {
-            self.lemma_remove_preserves_root(vbase, pte.spec_addr(), level + 1)
+            self.lemma_remove_preserves_root(vbase, pte.addr(), level + 1)
         }
     }
 
@@ -1466,19 +1447,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let entry = node.entries[idx as int];
         let entry2 = node2.entries[idx as int];
         assert(self.pt_mem.accessible(base, idx));
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
-        let pte2 = PTE::spec_from_u64(s2.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
+        let pte2 = G::from_u64(s2.pt_mem.read(base, idx));
 
         if path.len() <= 1 {
             match entry {
                 NodeEntry::Frame(_) => {
                     // Update frame entry to empty
-                    assert(s2.pt_mem == self.pt_mem.write(
-                        base,
-                        idx,
-                        PTE::spec_empty().spec_to_u64(),
-                    ));
-                    PTE::lemma_eq_by_u64(pte2, PTE::spec_empty());
+                    assert(s2.pt_mem == self.pt_mem.write(base, idx, G::empty().to_u64()));
+                    G::lemma_eq_by_u64(pte2, G::empty());
                     assert(entry2 == NodeEntry::Empty);
                 },
                 _ => (),
@@ -1487,19 +1464,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             match entry {
                 NodeEntry::Node(subnode) => {
                     // `pte` points to a subtable
-                    let subtable_base = pte.spec_addr();
+                    let subtable_base = pte.addr();
                     // Recursive remove from the subtable
                     self.lemma_remove_consistent_with_model(vbase, subtable_base, level + 1);
                     PTTreePath::lemma_from_vaddr_step(vbase, arch, level, end);
                 },
                 NodeEntry::Frame(frame) => {
                     if path.has_zero_tail(level) {
-                        assert(s2.pt_mem == self.pt_mem.write(
-                            base,
-                            idx,
-                            PTE::spec_empty().spec_to_u64(),
-                        ));
-                        PTE::lemma_eq_by_u64(pte2, PTE::spec_empty());
+                        assert(s2.pt_mem == self.pt_mem.write(base, idx, G::empty().to_u64()));
+                        G::lemma_eq_by_u64(pte2, G::empty());
                         assert(entry2 == NodeEntry::Empty);
                     }
                 },
@@ -1522,33 +1495,29 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             level < self.constants.arch.level_count() - 1,
             self.pt_mem.accessible(base, idx),
             ({
-                let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
-                pte.spec_valid() && !pte.spec_huge() && self.is_table_empty(pte.spec_addr())
+                let pte = G::from_u64(self.pt_mem.read(base, idx));
+                pte.valid() && !pte.huge() && self.is_table_empty(pte.addr())
             }),
         ensures
             ({
-                let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
-                let pt_mem = self.pt_mem.dealloc_table(pte.spec_addr());
-                let pt_mem = pt_mem.write(base, idx, PTE::spec_empty().spec_to_u64());
+                let pte = G::from_u64(self.pt_mem.read(base, idx));
+                let pt_mem = self.pt_mem.dealloc_table(pte.addr());
+                let pt_mem = pt_mem.write(base, idx, G::empty().to_u64());
                 Self::new(pt_mem, self.constants).invariants()
             }),
     {
         broadcast use super::pte::group_pte_lemmas;
 
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
-        let pt_mem = self.pt_mem.dealloc_table(pte.spec_addr()).write(
-            base,
-            idx,
-            PTE::spec_empty().spec_to_u64(),
-        );
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
+        let pt_mem = self.pt_mem.dealloc_table(pte.addr()).write(base, idx, G::empty().to_u64());
         let s2 = Self::new(pt_mem, self.constants);
 
         assert forall|base2: PAddr, idx2: nat| pt_mem.accessible(base2, idx2) implies {
             let table2 = pt_mem.table(base2);
-            let pte2 = PTE::spec_from_u64(pt_mem.read(base2, idx2));
-            let addr = pte2.spec_addr();
-            &&& (table2.level == s2.constants.arch.level_count() - 1 && pte2.spec_valid())
-                ==> !pte2.spec_huge()
+            let pte2 = G::from_u64(pt_mem.read(base2, idx2));
+            let addr = pte2.addr();
+            &&& (table2.level == s2.constants.arch.level_count() - 1 && pte2.valid())
+                ==> !pte2.huge()
             &&& s2.pte_points_to_table(pte2, table2.level) ==> {
                 &&& addr != pt_mem.root()
                 &&& pt_mem.contains_table(addr)
@@ -1563,39 +1532,39 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         } by {
             let table2 = pt_mem.table(base2);
             let val = pt_mem.read(base2, idx2);
-            let pte2 = PTE::spec_from_u64(val);
+            let pte2 = G::from_u64(val);
 
             if base2 == base && idx2 == idx {
                 // `(base2, idx2)` is the entry we just inserted
-                PTE::lemma_eq_by_u64(pte2, PTE::spec_empty());
+                G::lemma_eq_by_u64(pte2, G::empty());
             } else {
                 assert(self.pt_mem.accessible(base2, idx2));
-                PTE::lemma_eq_by_u64(pte2, PTE::spec_from_u64(self.pt_mem.read(base2, idx2)));
+                G::lemma_eq_by_u64(pte2, G::from_u64(self.pt_mem.read(base2, idx2)));
                 if s2.pte_points_to_table(pte2, table2.level) {
                     // Invariants ensures no double reference
-                    assert(pte2.spec_addr() != pte.spec_addr());
+                    assert(pte2.addr() != pte.addr());
                 }
             }
         }
         assert forall|base1: PAddr, idx1: nat, base2: PAddr, idx2: nat|
             pt_mem.accessible(base1, idx1) && pt_mem.accessible(base2, idx2) implies {
-            let pte1 = PTE::spec_from_u64(pt_mem.read(base1, idx1));
-            let pte2 = PTE::spec_from_u64(pt_mem.read(base2, idx2));
+            let pte1 = G::from_u64(pt_mem.read(base1, idx1));
+            let pte2 = G::from_u64(pt_mem.read(base2, idx2));
             ({
                 &&& s2.pte_points_to_table(pte1, pt_mem.table(base1).level)
                 &&& s2.pte_points_to_table(pte2, pt_mem.table(base2).level)
             }) ==> {
                 ||| base1 == base2 && idx1 == idx2
-                ||| (pte1.spec_addr() != pte2.spec_addr())
+                ||| (pte1.addr() != pte2.addr())
             }
         } by {
-            let pte1 = PTE::spec_from_u64(pt_mem.read(base1, idx1));
-            let pte2 = PTE::spec_from_u64(pt_mem.read(base2, idx2));
+            let pte1 = G::from_u64(pt_mem.read(base1, idx1));
+            let pte2 = G::from_u64(pt_mem.read(base2, idx2));
             if s2.pte_points_to_table(pte1, pt_mem.table(base1).level) && s2.pte_points_to_table(
                 pte2,
                 pt_mem.table(base2).level,
             ) {
-                assert(base1 != pte.spec_addr() && base2 != pte.spec_addr());
+                assert(base1 != pte.addr() && base2 != pte.addr());
                 assert(self.pt_mem.accessible(base1, idx1));
                 assert(self.pt_mem.accessible(base2, idx2));
             }
@@ -1615,20 +1584,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
         if self.pte_points_to_table(pte, level) {
-            self.lemma_prune_preserves_invariants(vaddr, pte.spec_addr(), level + 1);
-            self.lemma_prune_preserves_lower_tables(vaddr, pte.spec_addr(), level + 1, base);
-            self.lemma_prune_preserves_lower_tables(
-                vaddr,
-                pte.spec_addr(),
-                level + 1,
-                pte.spec_addr(),
-            );
-            let s2 = self.prune(vaddr, pte.spec_addr(), level + 1);
-            if s2.is_table_empty(pte.spec_addr()) {
+            self.lemma_prune_preserves_invariants(vaddr, pte.addr(), level + 1);
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, base);
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, pte.addr());
+            let s2 = self.prune(vaddr, pte.addr(), level + 1);
+            if s2.is_table_empty(pte.addr()) {
                 s2.lemma_dealloc_intermediate_table_preserves_invariants(base, level, idx);
             }
         }
@@ -1660,20 +1624,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
         if self.pte_points_to_table(pte, level) {
-            self.lemma_prune_preserves_invariants(vaddr, pte.spec_addr(), level + 1);
-            // `base`, `pte.spec_addr()`, `base2` are not affected after `prune`
-            self.lemma_prune_preserves_lower_tables(vaddr, pte.spec_addr(), level + 1, base);
-            self.lemma_prune_preserves_lower_tables(
-                vaddr,
-                pte.spec_addr(),
-                level + 1,
-                pte.spec_addr(),
-            );
-            self.lemma_prune_preserves_lower_tables(vaddr, pte.spec_addr(), level + 1, base2);
+            self.lemma_prune_preserves_invariants(vaddr, pte.addr(), level + 1);
+            // `base`, `pte.addr()`, `base2` are not affected after `prune`
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, base);
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, pte.addr());
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, base2);
         }
     }
 
@@ -1689,19 +1648,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         decreases self.constants.arch.level_count() - level,
     {
         let idx = self.constants.arch.pte_index(vaddr, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
         if self.pte_points_to_table(pte, level) {
-            self.lemma_prune_preserves_invariants(vaddr, pte.spec_addr(), level + 1);
-            self.lemma_prune_preserves_root(vaddr, pte.spec_addr(), level + 1);
-            self.lemma_prune_preserves_lower_tables(vaddr, pte.spec_addr(), level + 1, base);
-            self.lemma_prune_preserves_lower_tables(
-                vaddr,
-                pte.spec_addr(),
-                level + 1,
-                pte.spec_addr(),
-            );
+            self.lemma_prune_preserves_invariants(vaddr, pte.addr(), level + 1);
+            self.lemma_prune_preserves_root(vaddr, pte.addr(), level + 1);
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, base);
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, pte.addr());
         }
     }
 
@@ -1732,38 +1686,28 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let tables = self.collect_table_chain(vaddr, base, level);
 
         let idx = self.constants.arch.pte_index(vaddr, level);
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
         assert(self.pt_mem.accessible(base, idx));
 
         if self.pte_points_to_table(pte, level) {
             // PTE points to a child table: continue walk into the child table
-            let s2 = self.prune(vaddr, pte.spec_addr(), level + 1);
-            self.lemma_prune_preserves_invariants(vaddr, pte.spec_addr(), level + 1);
-            self.lemma_prune_preserves_lower_tables(vaddr, pte.spec_addr(), level + 1, base);
-            self.lemma_prune_preserves_lower_tables(
-                vaddr,
-                pte.spec_addr(),
-                level + 1,
-                pte.spec_addr(),
-            );
-            let tables2 = self.collect_table_chain(vaddr, pte.spec_addr(), level + 1);
+            let s2 = self.prune(vaddr, pte.addr(), level + 1);
+            self.lemma_prune_preserves_invariants(vaddr, pte.addr(), level + 1);
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, base);
+            self.lemma_prune_preserves_lower_tables(vaddr, pte.addr(), level + 1, pte.addr());
+            let tables2 = self.collect_table_chain(vaddr, pte.addr(), level + 1);
 
             assert(tables == seq![base].add(tables2));
             lemma_not_in_seq_implies_not_in_subseq(tables, tables2, base, base2);
             assert(!tables2.contains(base2));
-            self.lemma_prune_preserves_tables_outside_chain(
-                vaddr,
-                pte.spec_addr(),
-                level + 1,
-                base2,
-            );
+            self.lemma_prune_preserves_tables_outside_chain(vaddr, pte.addr(), level + 1, base2);
 
             assert(s2.pt_mem.table_view(base2) == self.pt_mem.table_view(base2));
-            if s2.is_table_empty(pte.spec_addr()) {
+            if s2.is_table_empty(pte.addr()) {
                 // Child table became empty after prune: deallocate it and update the parent PTE
                 s2.lemma_dealloc_intermediate_table_preserves_invariants(base, level, idx);
-                assert(s2.pt_mem.dealloc_table(pte.spec_addr()).accessible(base, idx));
-                assert(base2 != pte.spec_addr() && base2 != base);
+                assert(s2.pt_mem.dealloc_table(pte.addr()).accessible(base, idx));
+                assert(base2 != pte.addr() && base2 != base);
 
                 assert(self.prune(vaddr, base, level).pt_mem.table_view(base2)
                     == self.pt_mem.table_view(base2));
@@ -1812,15 +1756,15 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             node.entries[i] == node2.entries[i]
         } by {
             let entry = node.entries[i];
-            let pte = PTE::spec_from_u64(self.pt_mem.read(base2, i as nat));
+            let pte = G::from_u64(self.pt_mem.read(base2, i as nat));
             assert(self.pt_mem.accessible(base2, i as nat));
-            let pte2 = PTE::spec_from_u64(s2.pt_mem.read(base2, i as nat));
-            PTE::lemma_eq_by_u64(pte, pte2);
+            let pte2 = G::from_u64(s2.pt_mem.read(base2, i as nat));
+            G::lemma_eq_by_u64(pte, pte2);
 
             match entry {
                 NodeEntry::Node(node) => {
                     assert(self.pte_points_to_table(pte, level2));
-                    assert(self.pt_mem.contains_table(pte.spec_addr()));
+                    assert(self.pt_mem.contains_table(pte.addr()));
                     self.lemma_table_not_in_chain_implies_child_not_in_chain(
                         vaddr,
                         base,
@@ -1832,7 +1776,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                         vaddr,
                         base,
                         level,
-                        pte.spec_addr(),
+                        pte.addr(),
                         level2 + 1,
                     );
                 },
@@ -1840,7 +1784,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                     assert(self.pte_points_to_frame(pte, level2));
                 },
                 NodeEntry::Empty => {
-                    assert(!pte.spec_valid());
+                    assert(!pte.valid());
                 },
             }
         }
@@ -1889,14 +1833,14 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
         let (idx, remain) = path.step();
         let entry = node.entries[idx as int];
         assert(self.pt_mem.accessible(base, idx));
-        let pte = PTE::spec_from_u64(self.pt_mem.read(base, idx));
+        let pte = G::from_u64(self.pt_mem.read(base, idx));
 
         let right = node.prune(path);
         node.lemma_prune_preserves_invariants(path);
 
         if self.pte_points_to_table(pte, level) {
             // `pte` points to a subtable
-            let subtable_base = pte.spec_addr();
+            let subtable_base = pte.addr();
             let subnode: PTTreeNode = entry->Node_0;
 
             let s3 = self.prune(vaddr, subtable_base, level + 1);
@@ -1907,50 +1851,47 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
             PTTreePath::lemma_from_vaddr_step(vaddr, arch, level, end);
             assert(s3.construct_node(subtable_base, level + 1) == new_subnode);
 
-            // `base`, `pte.spec_addr()`, `base2` are not affected after `prune`
+            // `base`, `pte.addr()`, `base2` are not affected after `prune`
             self.lemma_prune_preserves_lower_tables(vaddr, subtable_base, level + 1, base);
             self.lemma_prune_preserves_lower_tables(vaddr, subtable_base, level + 1, subtable_base);
             // The content of table `base` is not affected after `prune`
             assert(s3.pt_mem.table_view(base) == self.pt_mem.table_view(base));
 
-            s3.lemma_empty_table_constructs_empty_node(pte.spec_addr());
+            s3.lemma_empty_table_constructs_empty_node(pte.addr());
             if s3.is_table_empty(subtable_base) {
                 // Lemma shows `new_subnode` is empty
                 assert(right == node.update(idx, NodeEntry::Empty));
                 assert(s2.pt_mem == s3.pt_mem.dealloc_table(subtable_base).write(
                     base,
                     idx,
-                    PTE::spec_empty().spec_to_u64(),
+                    G::empty().to_u64(),
                 ));
                 assert forall|i| 0 <= i < node2.entries.len() implies node2.entries[i]
                     == right.entries[i] by {
                     if i == idx {
                         // Entry `i` is empty (removed)
-                        PTE::lemma_eq_by_u64(
-                            PTE::spec_from_u64(s2.pt_mem.read(base, idx)),
-                            PTE::spec_empty(),
-                        );
+                        G::lemma_eq_by_u64(G::from_u64(s2.pt_mem.read(base, idx)), G::empty());
                         assert(node2.entries[i] is Empty);
                     } else {
                         // Other entries are unchanged
-                        PTE::lemma_eq_by_u64(
-                            PTE::spec_from_u64(s3.pt_mem.read(base, i as nat)),
-                            PTE::spec_from_u64(self.pt_mem.read(base, i as nat)),
+                        G::lemma_eq_by_u64(
+                            G::from_u64(s3.pt_mem.read(base, i as nat)),
+                            G::from_u64(self.pt_mem.read(base, i as nat)),
                         );
-                        PTE::lemma_eq_by_u64(
-                            PTE::spec_from_u64(s2.pt_mem.read(base, i as nat)),
-                            PTE::spec_from_u64(s3.pt_mem.read(base, i as nat)),
+                        G::lemma_eq_by_u64(
+                            G::from_u64(s2.pt_mem.read(base, i as nat)),
+                            G::from_u64(s3.pt_mem.read(base, i as nat)),
                         );
-                        let pte_i = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
+                        let pte_i = G::from_u64(self.pt_mem.read(base, i as nat));
                         assert(self.pt_mem.accessible(base, i as nat));
                         if self.pte_points_to_table(pte_i, level) {
-                            assert(self.pt_mem.contains_table(pte_i.spec_addr()));
+                            assert(self.pt_mem.contains_table(pte_i.addr()));
                             self.lemma_other_index_not_in_chain(vaddr, base, level, i as nat);
                             self.lemma_prune_preserves_unrelated_node(
                                 vaddr,
                                 base,
                                 level,
-                                pte_i.spec_addr(),
+                                pte_i.addr(),
                                 level + 1,
                             );
                         }
@@ -1965,16 +1906,16 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
 
                 assert forall|i| 0 <= i < node2.entries.len() implies node2.entries[i]
                     == right.entries[i] by {
-                    PTE::lemma_eq_by_u64(
-                        PTE::spec_from_u64(s2.pt_mem.read(base, i as nat)),
-                        PTE::spec_from_u64(self.pt_mem.read(base, i as nat)),
+                    G::lemma_eq_by_u64(
+                        G::from_u64(s2.pt_mem.read(base, i as nat)),
+                        G::from_u64(self.pt_mem.read(base, i as nat)),
                     );
                     if i == idx {
                         // Entry `i` is the subtree constructed from `subtable_base`
                         assert(node2.entries[i] == NodeEntry::Node(new_subnode));
                     } else {
                         // Other entries are unchanged
-                        let pte_i = PTE::spec_from_u64(self.pt_mem.read(base, i as nat));
+                        let pte_i = G::from_u64(self.pt_mem.read(base, i as nat));
                         assert(self.pt_mem.accessible(base, i as nat));
                         if self.pte_points_to_table(pte_i, level) {
                             self.lemma_other_index_not_in_chain(vaddr, base, level, i as nat);
@@ -1982,7 +1923,7 @@ impl<PTE> PageTable<PTE> where PTE: GenericPTE {
                                 vaddr,
                                 base,
                                 level,
-                                pte_i.spec_addr(),
+                                pte_i.addr(),
                                 level + 1,
                             );
                         }
