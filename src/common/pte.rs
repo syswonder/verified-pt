@@ -1,3 +1,4 @@
+//! Page table entry specification defined by Rust trait.
 use crate::common::{
     addr::{PAddr, PAddrExec},
     frame::{FrameSize, MemAttr},
@@ -7,7 +8,7 @@ use vstd::prelude::*;
 verus! {
 
 /// Generic specification and properties of Page Table Entry.
-pub trait GhostPTE: Sized + Clone {
+pub trait GhostPTE: Sized {
     /// Construct from address and attributes.
     spec fn new(addr: PAddr, attr: MemAttr, huge: bool) -> Self;
 
@@ -70,14 +71,6 @@ pub trait GhostPTE: Sized + Clone {
     ;
 }
 
-pub broadcast group group_pte_lemmas {
-    GhostPTE::lemma_from_0_invalid,
-    GhostPTE::lemma_empty_invalid,
-    GhostPTE::lemma_eq_by_u64,
-    GhostPTE::lemma_from_to_u64_inverse,
-    GhostPTE::lemma_new_keeps_value,
-}
-
 /// Executable Page Table Entry interface.
 pub trait ExecPTE<G>: Sized + Clone where G: GhostPTE {
     /// View as a ghost PTE.
@@ -136,12 +129,13 @@ pub trait ExecPTE<G>: Sized + Clone where G: GhostPTE {
     ;
 }
 
-/// An easy GhostPTE example.
-pub struct EasyGhostPTE {
-    addr: PAddr,
-    attr: MemAttr,
-    huge: bool,
-    valid: bool,
+/// Broadcasted lemmas for GhostPTE.
+pub broadcast group group_pte_lemmas {
+    GhostPTE::lemma_from_0_invalid,
+    GhostPTE::lemma_empty_invalid,
+    GhostPTE::lemma_eq_by_u64,
+    GhostPTE::lemma_from_to_u64_inverse,
+    GhostPTE::lemma_new_keeps_value,
 }
 
 } // verus!

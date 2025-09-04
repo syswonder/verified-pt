@@ -1,6 +1,6 @@
 //! Executable page table memory implementation.
-//! 
-//! Page Table Memory is a collection of page tables, and provides read/write, alloc/dealloc functionality. 
+//!
+//! Page Table Memory is a collection of page tables, and provides read/write, alloc/dealloc functionality.
 //! The implementation should refine the specification defined in `spec::memory::PageTableMem`.
 use vstd::prelude::*;
 

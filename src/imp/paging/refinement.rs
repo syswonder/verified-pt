@@ -2,14 +2,12 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::{
-    pt_exec::PageTableExec,
-    pte::{ExecPTE, GhostPTE},
-};
+use super::pt_exec::PageTableExec;
 use crate::{
     common::{
         addr::{PAddr, VAddrExec},
         frame::FrameExec,
+        pte::{ExecPTE, GhostPTE},
         PagingResult,
     },
     imp::{
@@ -33,7 +31,7 @@ impl<G, E> PageTableInterface for PageTableImpl<G, E> where G: GhostPTE, E: Exec
     }
 
     proof fn init_implies_invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) {
-        broadcast use super::pte::group_pte_lemmas;
+        broadcast use crate::common::pte::group_pte_lemmas;
 
         pt_mem.view().lemma_init_implies_invariants();
         let pt = PageTableExec::<G, E> { pt_mem, constants, _phantom: PhantomData };

@@ -2,11 +2,11 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::pte::GhostPTE;
 use crate::{
     common::{
         addr::{PAddr, VAddr},
         frame::{Frame, MemAttr},
+        pte::GhostPTE,
         PagingResult,
     },
     imp::lemmas::lemma_not_in_seq_implies_not_in_subseq,
@@ -657,7 +657,7 @@ impl<G> PageTable<G> where G: GhostPTE {
                 Self::new(pt_mem, self.constants).invariants()
             }),
     {
-        broadcast use super::pte::group_pte_lemmas;
+        broadcast use crate::common::pte::group_pte_lemmas;
 
         let (pt_mem, table) = self.pt_mem.alloc_table(level + 1);
         let pt_mem = pt_mem.write(
@@ -1005,7 +1005,7 @@ impl<G> PageTable<G> where G: GhostPTE {
                 == self.pt_mem.table_view(base2),
         decreases target_level - level,
     {
-        broadcast use super::pte::group_pte_lemmas;
+        broadcast use crate::common::pte::group_pte_lemmas;
 
         let idx = self.constants.arch.pte_index(vbase, level);
         let pte = G::from_u64(self.pt_mem.read(base, idx));
@@ -1185,7 +1185,7 @@ impl<G> PageTable<G> where G: GhostPTE {
             }),
         decreases target_level - level,
     {
-        broadcast use super::pte::group_pte_lemmas;
+        broadcast use crate::common::pte::group_pte_lemmas;
 
         let new_frame = self.pte_to_frame(new_pte, target_level);
         let (s2, res) = self.insert(vbase, base, level, target_level, new_pte);
@@ -1425,7 +1425,7 @@ impl<G> PageTable<G> where G: GhostPTE {
             }),
         decreases self.constants.arch.level_count() - level,
     {
-        broadcast use super::pte::group_pte_lemmas;
+        broadcast use crate::common::pte::group_pte_lemmas;
 
         let s2 = self.remove(vbase, base, level).0;
         self.lemma_remove_preserves_invariants(vbase, base, level);
@@ -1506,7 +1506,7 @@ impl<G> PageTable<G> where G: GhostPTE {
                 Self::new(pt_mem, self.constants).invariants()
             }),
     {
-        broadcast use super::pte::group_pte_lemmas;
+        broadcast use crate::common::pte::group_pte_lemmas;
 
         let pte = G::from_u64(self.pt_mem.read(base, idx));
         let pt_mem = self.pt_mem.dealloc_table(pte.addr()).write(base, idx, G::empty().to_u64());
@@ -1813,7 +1813,7 @@ impl<G> PageTable<G> where G: GhostPTE {
             }),
         decreases self.constants.arch.level_count() - level,
     {
-        broadcast use super::pte::group_pte_lemmas;
+        broadcast use crate::common::pte::group_pte_lemmas;
 
         let s2 = self.prune(vaddr, base, level);
         self.lemma_prune_preserves_invariants(vaddr, base, level);

@@ -59,7 +59,7 @@ impl FrameSize {
 }
 
 /// Frame attributes. Defination consistent with `hvisor::memory::MemFlags`.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub struct MemAttr {
     /// Whether the memory is readable.
     pub readable: bool,

@@ -2,15 +2,13 @@
 use std::marker::PhantomData;
 use vstd::prelude::*;
 
-use super::{
-    pt::PageTable,
-    pte::{ExecPTE, GhostPTE},
-};
+use super::pt::PageTable;
 use crate::{
     common::{
         addr::{PAddrExec, VAddr, VAddrExec},
         arch::PTArch,
         frame::{Frame, FrameExec, MemAttr},
+        pte::{ExecPTE, GhostPTE},
         PagingResult,
     },
     imp::{interface::PTConstantsExec, pt_mem::PageTableMemExec, tree::path::PTTreePath},
@@ -343,7 +341,7 @@ impl<G, E> PageTableExec<G, E> where G: GhostPTE, E: ExecPTE<G> {
                 r is Ok == res is Ok && s2 == self@@
             }),
     {
-        broadcast use super::pte::group_pte_lemmas;
+        broadcast use crate::common::pte::group_pte_lemmas;
 
         let target_level = self.constants.arch.level_of_frame_size(frame.size);
         let huge = target_level < self.constants.arch.level_count() - 1;
