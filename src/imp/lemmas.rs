@@ -130,4 +130,133 @@ pub proof fn lemma_not_in_seq_implies_not_in_subseq<T>(
     }
 }
 
+/// Lemma. If a sequence is a zero sequence, then its sum is zero.
+pub proof fn lemma_zero_seq_sum_is_zero(s: Seq<nat>)
+    requires
+        s == seq![0nat; s.len()],
+    ensures
+        s.fold_right(|part: nat, sum: nat| part + sum, 0nat) == 0,
+    decreases s.len(),
+{
+    let f = |part: nat, sum: nat| part + sum;
+    let sum = s.fold_right(f, 0nat);
+    if s.len() == 0 {
+        assert(sum == 0);
+    } else {
+        let sub = s.subrange(0, s.len() - 1);
+        assert(sub == seq![0nat; sub.len()]);
+        assert(sum == sub.fold_right(f, s.last()));
+        lemma_zero_seq_sum_is_zero(sub);
+    }
+}
+
+/// Lemma. Left sum is equal to right sum (fold_right_alt).
+proof fn lemma_left_sum_eq_right_sum_alt(s: Seq<nat>)
+    ensures
+        s.fold_left(0nat, |sum: nat, part: nat| sum + part) == s.fold_right_alt(
+            |part: nat, sum: nat| part + sum,
+            0nat,
+        ),
+    decreases s.len(),
+{
+    let lsum = s.fold_left(0nat, |sum: nat, part: nat| sum + part);
+    let rsum = s.fold_right_alt(|part: nat, sum: nat| part + sum, 0nat);
+    if s.len() > 0 {
+        let lsub = s.subrange(0, s.len() - 1);
+        let lsub_lsum = lsub.fold_left(0nat, |sum: nat, part: nat| sum + part);
+        let lsub_rsum = lsub.fold_right_alt(|part: nat, sum: nat| part + sum, 0nat);
+        assert(lsum == lsub_lsum + s.last());
+
+        let rsub = s.subrange(1, s.len() as int);
+        let rsub_lsum = rsub.fold_left(0nat, |sum: nat, part: nat| sum + part);
+        let rsub_rsum = rsub.fold_right_alt(|part: nat, sum: nat| part + sum, 0nat);
+
+        assert(rsum == s[0] + rsub.fold_right_alt(|part: nat, sum: nat| part + sum, 0nat));
+
+        lemma_left_sum_eq_right_sum_alt(lsub);
+        lemma_left_sum_eq_right_sum_alt(rsub);
+        assert(lsub_lsum == lsub_rsum);
+
+        if lsub.len() > 0 {
+            let lsub_rsub = lsub.subrange(1, lsub.len() as int);
+            assert(lsub_rsum == lsub.first() + lsub_rsub.fold_right_alt(
+                |part: nat, sum: nat| part + sum,
+                0nat,
+            ));
+            let rsub_lsub = rsub.subrange(0, rsub.len() - 1);
+            assert(rsub_lsum == rsub.last() + rsub_lsub.fold_left(
+                0nat,
+                |sum: nat, part: nat| sum + part,
+            ));
+            assert(lsub_rsub == rsub_lsub);
+
+            lemma_left_sum_eq_right_sum_alt(lsub_rsub);
+            let sub_sub_sum = lsub_rsub.fold_right_alt(|part: nat, sum: nat| part + sum, 0nat);
+
+            assert(lsum == s.last() + s.first() + sub_sub_sum);
+            assert(rsum == s.first() + s.last() + sub_sub_sum);
+
+            assert(lsum == rsum);
+        }
+    }
+}
+
+/// Lemma. Left sum is equal to right sum.
+pub proof fn lemma_left_sum_eq_right_sum(s: Seq<nat>)
+    ensures
+        s.fold_left(0nat, |sum: nat, part: nat| sum + part) == s.fold_right(
+            |part: nat, sum: nat| part + sum,
+            0nat,
+        ),
+{
+    lemma_left_sum_eq_right_sum_alt(s);
+    s.lemma_fold_right_alt(|part: nat, sum: nat| part + sum, 0nat);
+}
+
+/// Lemma. If all parts align to a value, then the sum of the parts aligns to the same value.
+pub proof fn lemma_parts_align_implies_sum_align(s: Seq<nat>, align: nat)
+    by (nonlinear_arith)
+    requires
+        align > 0,
+        forall|i| 0 <= i < s.len() ==> s[i] % align == 0,
+    ensures
+        s.fold_left(0nat, |sum: nat, part: nat| sum + part) % align == 0,
+    decreases s.len(),
+{
+    let sum = s.fold_left(0nat, |sum: nat, part: nat| sum + part);
+    if s.len() > 0 {
+        let sub = s.subrange(0, s.len() - 1);
+        let sub_sum = sub.fold_left(0nat, |sum: nat, part: nat| sum + part);
+        lemma_parts_align_implies_sum_align(sub, align);
+        assert(sum == sub_sum + s.last());
+        vstd::arithmetic::div_mod::lemma_add_mod_noop(
+            sub_sum as int,
+            s.last() as int,
+            align as int,
+        );
+    }
+}
+
+/// Lemma. If two ranges are aligned, then their start and end are equal.
+pub proof fn lemma_aligned_range_eq(a: nat, b: nat, m: nat, align: nat)
+    by (nonlinear_arith)
+    requires
+        a <= m < a + align,
+        b <= m < b + align,
+        align > 0,
+        a % align == b % align,
+    ensures
+        a == b,
+{
+    let x = a / align;
+    let y = b / align;
+    let z = a % align;
+    assert(z < align);
+    assert(a == x * align + z);
+    assert(b == y * align + z);
+    assert(x * align + z <= m < (x + 1) * align + z);
+    assert(y * align + z <= m < (y + 1) * align + z);
+    assert(x == y);
+}
+
 } // verus!

@@ -157,6 +157,44 @@ impl PTArch {
             self.lemma_frame_size_monotonic(level, level2);
         }
     }
+
+    /// Lemma. For all `level2 < level`, frame_size(level2) divides frame_size(level).
+    pub proof fn lemma_frame_size_aligned(self, level: nat, level2: nat)
+        requires
+            self.valid(),
+            level2 <= level < self.level_count(),
+        ensures
+            self.frame_size(level2).as_nat() % self.frame_size(level).as_nat() == 0,
+        decreases level - level2,
+    {
+        if level2 < level {
+            let size = self.frame_size(level).as_nat();
+            let size2 = self.frame_size(level2).as_nat();
+            let size3 = self.frame_size(level2 + 1).as_nat();
+            assert(size2 == size3 * self.entry_count(level2 + 1));
+
+            self.lemma_frame_size_aligned(level, level2 + 1);
+            vstd::arithmetic::div_mod::lemma_mul_mod_noop(
+                size3 as int,
+                self.entry_count(level2 + 1) as int,
+                size as int,
+            );
+        }
+    }
+
+    /// Lemma. `vbase` has fixed range and alignment.
+    pub proof fn lemma_vbase_range_and_alignment(self, vaddr: VAddr, level: nat)
+        by (nonlinear_arith)
+        requires
+            self.valid(),
+            level < self.level_count(),
+        ensures
+            self.vbase(vaddr, level).0 <= vaddr.0 < self.vbase(vaddr, level).0 + self.frame_size(
+                level,
+            ).as_nat(),
+            self.vbase(vaddr, level).aligned(self.frame_size(level).as_nat()),
+    {
+    }
 }
 
 /// **EXEC MODE** Represents a single level in a hierarchical page table structure.

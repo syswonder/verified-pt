@@ -1,7 +1,13 @@
 //! The visit path of the abstract page table tree.
 use vstd::prelude::*;
 
-use crate::common::{addr::VAddr, arch::PTArch};
+use crate::{
+    common::{addr::VAddr, arch::PTArch},
+    imp::lemmas::{
+        lemma_left_sum_eq_right_sum, lemma_parts_align_implies_sum_align,
+        lemma_zero_seq_sum_is_zero,
+    },
+};
 
 verus! {
 
@@ -286,17 +292,14 @@ impl PTTreePath {
             self.len(),
             |i: int| self.0[i] * arch.frame_size(i as nat).as_nat(),
         );
-        // TODO: This is true by arch.valid(). Recursive proof is needed.
-        assume(forall|i|
-            0 <= i < self.len() ==> #[trigger] arch.frame_size(i).as_nat() % arch.frame_size(
-                (self.len() - 1) as nat,
-            ).as_nat() == 0);
-        assert(forall|i|
-            0 <= i < self.len() ==> parts[i] % arch.frame_size((self.len() - 1) as nat).as_nat()
-                == 0);
-        let sum = parts.fold_left(0nat, |sum: nat, part| sum + part);
-        // TODO: All parts align to the frame size of the last level, prove that sum does too.
-        assume(sum % arch.frame_size((self.len() - 1) as nat).as_nat() == 0);
+        let fsize = arch.frame_size((self.len() - 1) as nat).as_nat();
+        assert forall|i| 0 <= i < self.len() implies #[trigger] arch.frame_size(i).as_nat() % fsize
+            == 0 by {
+            arch.lemma_frame_size_aligned((self.len() - 1) as nat, i);
+        }
+        assert(forall|i| 0 <= i < self.len() ==> parts[i] % fsize == 0);
+        // All parts align to the frame size of the last level, prove that sum does too.
+        lemma_parts_align_implies_sum_align(parts, fsize);
     }
 
     /// Lemma. If `path` has a prefix `pref`, then `path.to_vaddr()` has a lower bound.
@@ -515,8 +518,37 @@ impl PTTreePath {
         ensures
             a.to_vaddr(arch) == b.to_vaddr(arch),
     {
-        // TODO
-        assume(false);
+        let a_parts: Seq<nat> = Seq::new(
+            a.len(),
+            |i: int| a.0[i] * arch.frame_size(i as nat).as_nat(),
+        );
+        let b_parts: Seq<nat> = Seq::new(
+            b.len(),
+            |i: int| b.0[i] * arch.frame_size(i as nat).as_nat(),
+        );
+        assert(a_parts.take(b.len() as int) == b_parts);
+        let a_sum = a_parts.fold_right(|part: nat, sum: nat| part + sum, 0nat);
+        let b_sum = b_parts.fold_right(|part: nat, sum: nat| part + sum, 0nat);
+        let seq2 = a_parts.skip(b.len() as int);
+
+        a_parts.lemma_fold_right_split(|part: nat, sum: nat| part + sum, 0nat, b.len() as int);
+        assert(a_sum == b_parts.fold_right(
+            |part: nat, sum: nat| part + sum,
+            seq2.fold_right(|part: nat, sum: nat| part + sum, 0nat),
+        ));
+
+        assert(seq2 == seq![0nat; (a.len() - b.len()) as nat]);
+        lemma_zero_seq_sum_is_zero(seq2);
+        assert(seq2.fold_right(|part: nat, sum: nat| part + sum, 0nat) == 0);
+        assert(a_sum == b_sum);
+
+        lemma_left_sum_eq_right_sum(a_parts);
+        lemma_left_sum_eq_right_sum(b_parts);
+
+        assert(a.to_vaddr(arch).0 == a_parts.fold_left(0, |sum: nat, part| sum + part));
+        assert(b.to_vaddr(arch).0 == b_parts.fold_left(0, |sum: nat, part| sum + part));
+        assert(a.to_vaddr(arch).0 == a_sum);
+        assert(b.to_vaddr(arch).0 == b_sum);
     }
 
     /// Lemma. The computed base virtual address of a path and the frame size guarantee that
@@ -553,8 +585,18 @@ impl PTTreePath {
         ensures
             path.to_vaddr(arch) == vaddr,
     {
-        // TODO: prove by the above lemma
-        assume(false);
+        let fsize = arch.frame_size((path.len() - 1) as nat).as_nat();
+        Self::lemma_vaddr_range_from_path(arch, vaddr, path);
+
+        assert(vaddr.0 - fsize < path.to_vaddr(arch).0 <= vaddr.0);
+        path.lemma_to_vaddr_frame_alignment(arch);
+
+        assert(vaddr.0 % fsize == 0);
+        assert((vaddr.0 - fsize) / fsize as int == vaddr.0 / fsize - 1);
+        assert(vaddr.0 / fsize - 1 < path.to_vaddr(arch).0 / fsize <= vaddr.0 / fsize);
+
+        assert(path.to_vaddr(arch).0 / fsize == vaddr.0 / fsize);
+        assert(path.to_vaddr(arch).0 == vaddr.0);
     }
 }
 

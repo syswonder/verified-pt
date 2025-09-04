@@ -12,7 +12,7 @@ use crate::{
         frame::Frame,
         PagingResult,
     },
-    imp::lemmas::lemma_map_eq_pair,
+    imp::lemmas::{lemma_aligned_range_eq, lemma_map_eq_pair},
     spec::page_table::{PTConstants, PageTableState},
 };
 
@@ -747,10 +747,29 @@ impl PTTreeModel {
         assert(self.root.real_path(path2) == path);
 
         let visited = self.root.visit(path2);
+        let level = (visited.len() - 1) as nat;
+        assert(level == path.len() - 1);
         assert(visited.last() == NodeEntry::Frame(frame));
 
         // TODO: add lemma to `PTTreePath`
-        assume(self.arch().vbase(vaddr, (visited.len() - 1) as nat) == vbase);
+        PTTreePath::lemma_vaddr_range_from_path(self.arch(), vaddr, path2);
+        assert(path2.to_vaddr(self.arch()).0 <= vaddr.0 < path2.to_vaddr(self.arch()).0
+            + self.arch().frame_size((path2.len() - 1) as nat).as_nat());
+        PTTreePath::lemma_to_vaddr_lower_bound(self.arch(), path2, path);
+        PTTreePath::lemma_to_vaddr_upper_bound(self.arch(), path2, path);
+        assert(path.to_vaddr(self.arch()).0 <= vaddr.0 < path.to_vaddr(self.arch()).0
+            + self.arch().frame_size((path.len() - 1) as nat).as_nat());
+        let fsize = self.arch().frame_size(level).as_nat();
+        assert(vbase.0 <= vaddr.0 < vbase.0 + fsize);
+
+        let vbase2 = self.arch().vbase(vaddr, level);
+        self.arch().lemma_vbase_range_and_alignment(vaddr, level);
+        assert(vbase2.0 <= vaddr.0 < vbase2.0 + fsize);
+
+        assert(vbase.aligned(fsize));
+        assert(vbase2.aligned(fsize));
+        lemma_aligned_range_eq(vbase.0, vbase2.0, vaddr.0, fsize);
+        assert(vbase2 == vbase);
     }
 
     /// Lemma. The address is within a mapped region if `query` succeeds.
