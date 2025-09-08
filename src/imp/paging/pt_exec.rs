@@ -11,7 +11,8 @@ use crate::{
         pte::{ExecPTE, GhostPTE},
         PagingResult,
     },
-    imp::{interface::PTConstantsExec, memory::PageTableMemExec, tree::path::PTTreePath},
+    imp::{interface::PTConstantsExec, tree::path::PTTreePath},
+    spec::memory::PageTableMemExec,
 };
 
 verus! {
@@ -24,16 +25,16 @@ broadcast use crate::spec::memory::group_pt_mem_lemmas;
 /// `PageTable` wraps a `PageTableMemExec` and a `PTConstantsExec` to provide a convenient interface for
 /// manipulating the page table. Refinement proof is provided by implementing trait `PageTableInterface`
 /// to ensure `PageTableMemExec` is manipulated correctly.
-pub struct PageTableExec<G: GhostPTE, E: ExecPTE<G>> {
+pub struct PageTableExec<M: PageTableMemExec, G: GhostPTE, E: ExecPTE<G>> {
     /// Page table memory.
-    pub pt_mem: PageTableMemExec,
+    pub pt_mem: M,
     /// Page table config constants.
     pub constants: PTConstantsExec,
     /// Phantom data.
     pub _phantom: PhantomData<(G, E)>,
 }
 
-impl<G, E> PageTableExec<G, E> where G: GhostPTE, E: ExecPTE<G> {
+impl<M, G, E> PageTableExec<M, G, E> where M: PageTableMemExec, G: GhostPTE, E: ExecPTE<G> {
     /// View as a specification-level page table.
     pub open spec fn view(self) -> PageTable<G> {
         PageTable { pt_mem: self.pt_mem@, constants: self.constants@, _phantom: PhantomData }
@@ -45,7 +46,7 @@ impl<G, E> PageTableExec<G, E> where G: GhostPTE, E: ExecPTE<G> {
     }
 
     /// Construct a new page table.
-    pub fn new(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> (res: Self)
+    pub fn new(pt_mem: M, constants: PTConstantsExec) -> (res: Self)
         requires
             PageTable::<G>::new(pt_mem@, constants@).invariants(),
             pt_mem@.arch == constants.arch@,

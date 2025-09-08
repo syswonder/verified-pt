@@ -1,4 +1,4 @@
-//! A toy architecture for testing.
+//! A toy page table implementation for testing.
 use vstd::prelude::*;
 
 use super::PageTableApi;
@@ -11,7 +11,8 @@ use crate::{
         pte::{ExecPTE, GhostPTE},
         PagingResult,
     },
-    imp::{interface::PTConstantsExec, memory::PageTableMemExec},
+    spec::memory::PageTableMemExec,
+    imp::interface::PTConstantsExec,
 };
 
 verus! {
@@ -249,14 +250,16 @@ fn easy_pt_arch() -> PTArchExec {
 const EASY_PMEM_LB: usize = 0b1000;
 const EASY_PMEM_UB: usize = 0b100000000;
 
-/// Easy Page Table.
-pub struct EasyPageTable(PageTableExec<EasyGhostPTE, EasyExecPTE>);
+/// Easy Page Table Implementation.
+/// 
+/// The underlying page table memory can be any type that implements `PageTableMemExec`.
+pub struct EasyPageTable<M: PageTableMemExec>(PageTableExec<M, EasyGhostPTE, EasyExecPTE>);
 
-impl PageTableApi for EasyPageTable {
+impl<M> PageTableApi for EasyPageTable<M> where M: PageTableMemExec {
     fn new() -> Self {
         let arch = easy_pt_arch();
         Self(PageTableExec::new(
-            PageTableMemExec::new_init(arch.clone()),
+            M::new_init(arch.clone()),
             PTConstantsExec {
                 arch,
                 pmem_lb: PAddrExec(EASY_PMEM_LB),

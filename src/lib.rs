@@ -2,15 +2,17 @@
 
 use vstd::prelude::*;
 
-mod imp;
-mod spec;
-mod common;
 mod arch;
+mod common;
+mod imp;
+mod memory;
+mod spec;
 
 verus! {
-    global layout usize is size == 8;
-}
+    
+global layout usize is size == 8;
 
+} // verus!
 /// Although the project is a library, Verus requires a main function to run the verification.
 fn main() {
     println!("Running Test...");
@@ -21,8 +23,9 @@ fn test() {
     use arch::easy::EasyPageTable;
     use arch::PageTableApi;
     use common::frame::MemAttr;
-
-    let mut pt = EasyPageTable::new();
+    use memory::PooledPageTableMem;
+    
+    let mut pt = EasyPageTable::<PooledPageTableMem>::new();
     println!("PageTable Inited");
     let r1 = pt.map(0x1000, 0x2000, 4096, MemAttr::default());
     assert!(r1.is_ok());

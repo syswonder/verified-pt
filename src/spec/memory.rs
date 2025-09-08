@@ -2,8 +2,8 @@
 use vstd::prelude::*;
 
 use crate::common::{
-    addr::{PAddr, PIdx, VAddr},
-    arch::PTArch,
+    addr::{PAddr, PAddrExec, PIdx, VAddr},
+    arch::{PTArch, PTArchExec},
     frame::{Frame, FrameSize},
 };
 
@@ -614,6 +614,91 @@ pub broadcast group group_pt_mem_lemmas {
     PageTableMem::lemma_alloc_table_preserves_accessibility,
     PageTableMem::lemma_dealloc_table_preserves_invariants,
     PageTableMem::lemma_write_preserves_invariants,
+}
+
+/// Describe a page table stored in physical memory.
+#[derive(Clone, Copy)]
+pub struct TableExec {
+    /// Base address of the table.
+    pub base: PAddrExec,
+    /// Size of the table.
+    pub size: FrameSize,
+    /// Level of the table.
+    pub level: usize,
+}
+
+impl TableExec {
+    /// View the concrete table as an abstract table.
+    pub open spec fn view(self) -> Table {
+        Table { base: self.base@, size: self.size, level: self.level as nat }
+    }
+}
+
+/// Specifiaction that executable page table memory should satisfy.
+pub trait PageTableMemExec: Sized {
+    /// View as an abstract page table memory.
+    spec fn view(self) -> PageTableMem;
+
+    /// Physical address of the root page table.
+    fn root(&self) -> (res: PAddrExec)
+        requires
+            self@.tables.len() > 0,
+        ensures
+            res@ == self@.root(),
+    ;
+
+    /// If a table is empty.
+    fn is_table_empty(&self, base: PAddrExec) -> (res: bool)
+        requires
+            self@.contains_table(base@),
+        ensures
+            res == self@.is_table_empty(base@),
+    ;
+
+    /// Construct a new page table memory and initialize the root table.
+    fn new_init(arch: PTArchExec) -> (res: Self)
+        requires
+            arch@.valid(),
+        ensures
+            res@.init(),
+    ;
+
+    /// Allocate a new table and returns the table descriptor.
+    fn alloc_table(&mut self, level: usize) -> (res: TableExec)
+        requires
+            old(self)@.invariants(),
+            level < old(self)@.arch.level_count(),
+        ensures
+            (self@, res@) == old(self)@.alloc_table(level as nat),
+    ;
+
+    /// Deallocate a table.
+    fn dealloc_table(&mut self, base: PAddrExec)
+        requires
+            old(self)@.invariants(),
+            old(self)@.contains_table(base@),
+            base@ != old(self)@.root(),
+        ensures
+            self@ == old(self)@.dealloc_table(base@),
+    ;
+
+    /// Get the value at the given index in the given table.
+    fn read(&self, base: PAddrExec, index: usize) -> (res: u64)
+        requires
+            self@.invariants(),
+            self@.accessible(base@, index as nat),
+        ensures
+            self@.read(base@, index as nat) == res,
+    ;
+
+    /// Write the value to the given index in the given table.
+    fn write(&mut self, base: PAddrExec, index: usize, value: u64)
+        requires
+            old(self)@.invariants(),
+            old(self)@.accessible(base@, index as nat),
+        ensures
+            self@ == old(self)@.write(base@, index as nat, value),
+    ;
 }
 
 } // verus!

@@ -10,10 +10,8 @@ use crate::{
         pte::{ExecPTE, GhostPTE},
         PagingResult,
     },
-    imp::{
-        interface::{PTConstantsExec, PageTableInterface},
-        memory::PageTableMemExec,
-    },
+    imp::interface::{PTConstantsExec, PageTableInterface},
+    spec::memory::PageTableMemExec,
 };
 
 verus! {
@@ -23,18 +21,22 @@ verus! {
 /// Implementing `PageTableInterface` ensures the page table implementation satisfies the
 /// interface specifications, along with the assumptions made about the hardware and the
 /// remaining system, we can complete the proof of the paging system.
-pub struct PageTableImpl<G: GhostPTE, E: ExecPTE<G>>(PhantomData<(G, E)>);
+pub struct PageTableImpl<M: PageTableMemExec, G: GhostPTE, E: ExecPTE<G>>(PhantomData<(M, G, E)>);
 
-impl<G, E> PageTableInterface for PageTableImpl<G, E> where G: GhostPTE, E: ExecPTE<G> {
-    open spec fn invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> bool {
-        PageTableExec::<G, E> { pt_mem, constants, _phantom: PhantomData }@.invariants()
+impl<M, G, E> PageTableInterface<M> for PageTableImpl<M, G, E> where
+    M: PageTableMemExec,
+    G: GhostPTE,
+    E: ExecPTE<G>,
+ {
+    open spec fn invariants(pt_mem: M, constants: PTConstantsExec) -> bool {
+        PageTableExec::<M, G, E> { pt_mem, constants, _phantom: PhantomData }@.invariants()
     }
 
-    proof fn init_implies_invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) {
+    proof fn init_implies_invariants(pt_mem: M, constants: PTConstantsExec) {
         broadcast use crate::common::pte::group_pte_lemmas;
 
         pt_mem.view().lemma_init_implies_invariants();
-        let pt = PageTableExec::<G, E> { pt_mem, constants, _phantom: PhantomData };
+        let pt = PageTableExec::<M, G, E> { pt_mem, constants, _phantom: PhantomData };
         assert forall|base: PAddr, idx: nat| pt.pt_mem@.accessible(base, idx) implies {
             let pt_mem = pt.pt_mem@;
             let table = pt_mem.table(base);
@@ -47,13 +49,11 @@ impl<G, E> PageTableInterface for PageTableImpl<G, E> where G: GhostPTE, E: Exec
         }
     }
 
-    fn map(
-        pt_mem: PageTableMemExec,
-        constants: PTConstantsExec,
-        vbase: VAddrExec,
-        frame: FrameExec,
-    ) -> (res: (PagingResult, PageTableMemExec)) {
-        let mut pt = PageTableExec::<G, E>::new(pt_mem, constants);
+    fn map(pt_mem: M, constants: PTConstantsExec, vbase: VAddrExec, frame: FrameExec) -> (res: (
+        PagingResult,
+        M,
+    )) {
+        let mut pt = PageTableExec::<M, G, E>::new(pt_mem, constants);
         proof {
             assert(pt@.invariants());
             pt@.model_consistent_with_hardware();
@@ -68,11 +68,8 @@ impl<G, E> PageTableInterface for PageTableImpl<G, E> where G: GhostPTE, E: Exec
         (res, pt.pt_mem)
     }
 
-    fn unmap(pt_mem: PageTableMemExec, constants: PTConstantsExec, vbase: VAddrExec) -> (res: (
-        PagingResult,
-        PageTableMemExec,
-    )) {
-        let mut pt = PageTableExec::<G, E>::new(pt_mem, constants);
+    fn unmap(pt_mem: M, constants: PTConstantsExec, vbase: VAddrExec) -> (res: (PagingResult, M)) {
+        let mut pt = PageTableExec::<M, G, E>::new(pt_mem, constants);
         proof {
             assert(pt@.invariants());
             pt@.model_consistent_with_hardware();
@@ -87,11 +84,11 @@ impl<G, E> PageTableInterface for PageTableImpl<G, E> where G: GhostPTE, E: Exec
         (res, pt.pt_mem)
     }
 
-    fn query(pt_mem: PageTableMemExec, constants: PTConstantsExec, vaddr: VAddrExec) -> (res: (
+    fn query(pt_mem: M, constants: PTConstantsExec, vaddr: VAddrExec) -> (res: (
         PagingResult<(VAddrExec, FrameExec)>,
-        PageTableMemExec,
+        M,
     )) {
-        let mut pt = PageTableExec::<G, E>::new(pt_mem, constants);
+        let mut pt = PageTableExec::<M, G, E>::new(pt_mem, constants);
         proof {
             assert(pt@.invariants());
             pt@.model_consistent_with_hardware();

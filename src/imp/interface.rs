@@ -4,14 +4,16 @@
 //! defined in `spec::page_table`.
 use vstd::prelude::*;
 
-use super::memory::PageTableMemExec;
 use crate::common::{
     addr::{PAddrExec, VAddrExec},
     arch::PTArchExec,
     frame::FrameExec,
     PagingResult,
 };
-use crate::spec::page_table::{PTConstants, PageTableState};
+use crate::spec::{
+    memory::PageTableMemExec,
+    page_table::{PTConstants, PageTableState},
+};
 
 verus! {
 
@@ -43,12 +45,12 @@ impl PTConstantsExec {
 /// along with the assumptions we make about the hardware and the remaining system, we can
 /// conclude that the whole system refines the low-level specification, thus refines the
 /// high-level specification.
-pub trait PageTableInterface where Self: Sized {
+pub trait PageTableInterface<M> where Self: Sized, M: PageTableMemExec {
     /// Invariants that must be implied at initial state and preseved after each operation.
-    spec fn invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec) -> bool;
+    spec fn invariants(pt_mem: M, constants: PTConstantsExec) -> bool;
 
     /// Prove invariants are satified at the initial state.
-    proof fn init_implies_invariants(pt_mem: PageTableMemExec, constants: PTConstantsExec)
+    proof fn init_implies_invariants(pt_mem: M, constants: PTConstantsExec)
         requires
             pt_mem@.init(),
             pt_mem@.arch == constants@.arch,
@@ -59,12 +61,10 @@ pub trait PageTableInterface where Self: Sized {
     /// Map a virtual address to a physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn map(
-        pt_mem: PageTableMemExec,
-        constants: PTConstantsExec,
-        vbase: VAddrExec,
-        frame: FrameExec,
-    ) -> (res: (PagingResult, PageTableMemExec))
+    fn map(pt_mem: M, constants: PTConstantsExec, vbase: VAddrExec, frame: FrameExec) -> (res: (
+        PagingResult,
+        M,
+    ))
         requires
             Self::invariants(pt_mem, constants),
             PageTableState::new(pt_mem@.interpret(), constants@).map_pre(vbase@, frame@),
@@ -82,10 +82,7 @@ pub trait PageTableInterface where Self: Sized {
     /// Unmap a virtual address.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn unmap(pt_mem: PageTableMemExec, constants: PTConstantsExec, vbase: VAddrExec) -> (res: (
-        PagingResult,
-        PageTableMemExec,
-    ))
+    fn unmap(pt_mem: M, constants: PTConstantsExec, vbase: VAddrExec) -> (res: (PagingResult, M))
         requires
             Self::invariants(pt_mem, constants),
             PageTableState::new(pt_mem@.interpret(), constants@).unmap_pre(vbase@),
@@ -102,9 +99,9 @@ pub trait PageTableInterface where Self: Sized {
     /// Query a virtual address, return the mapped physical frame.
     ///
     /// Implementation must ensure the postconditions are satisfied.
-    fn query(pt_mem: PageTableMemExec, constants: PTConstantsExec, vaddr: VAddrExec) -> (res: (
+    fn query(pt_mem: M, constants: PTConstantsExec, vaddr: VAddrExec) -> (res: (
         PagingResult<(VAddrExec, FrameExec)>,
-        PageTableMemExec,
+        M,
     ))
         requires
             Self::invariants(pt_mem, constants),
