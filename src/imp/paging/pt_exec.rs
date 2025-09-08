@@ -7,11 +7,11 @@ use crate::{
     common::{
         addr::{PAddrExec, VAddr, VAddrExec},
         arch::PTArch,
-        frame::{Frame, FrameExec, MemAttr},
+        frame::{Frame, FrameExec, FrameSize, MemAttr},
         pte::{ExecPTE, GhostPTE},
         PagingResult,
     },
-    imp::{interface::PTConstantsExec, pt_mem::PageTableMemExec, tree::path::PTTreePath},
+    imp::{interface::PTConstantsExec, memory::PageTableMemExec, tree::path::PTTreePath},
 };
 
 verus! {
@@ -169,6 +169,9 @@ impl<G, E> PageTableExec<G, E> where G: GhostPTE, E: ExecPTE<G> {
                 }
                 // Allocate intermediate table
                 let table = self.pt_mem.alloc_table(level + 1);
+                proof {
+                    assume(table.base@.aligned(FrameSize::Size4K.as_nat()));
+                }
                 // Write entry
                 let pte = E::new(table.base, MemAttr::default(), false);
                 self.pt_mem.write(base, idx, pte.to_u64());
@@ -345,6 +348,9 @@ impl<G, E> PageTableExec<G, E> where G: GhostPTE, E: ExecPTE<G> {
 
         let target_level = self.constants.arch.level_of_frame_size(frame.size);
         let huge = target_level < self.constants.arch.level_count() - 1;
+        proof {
+            assume(frame.base@.aligned(FrameSize::Size4K.as_nat()));
+        }
         let new_pte = E::new(frame.base, frame.attr, huge);
 
         proof {

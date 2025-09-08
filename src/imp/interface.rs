@@ -4,7 +4,7 @@
 //! defined in `spec::page_table`.
 use vstd::prelude::*;
 
-use super::pt_mem::PageTableMemExec;
+use super::memory::PageTableMemExec;
 use crate::common::{
     addr::{PAddrExec, VAddrExec},
     arch::PTArchExec,

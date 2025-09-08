@@ -1,6 +1,7 @@
-mod interface;
 mod lemmas;
 mod ll_refine_hl;
-mod paging;
-mod pt_mem;
 mod tree;
+
+pub mod interface;
+pub mod memory;
+pub mod paging;

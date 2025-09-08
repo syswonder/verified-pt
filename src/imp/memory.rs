@@ -10,6 +10,7 @@ use crate::spec::memory::{PageTableMem, Table};
 verus! {
 
 /// Describe a page table stored in physical memory.
+#[derive(Clone, Copy)]
 pub struct TableExec {
     /// Base address of the table.
     pub base: PAddrExec,
@@ -26,6 +27,9 @@ impl TableExec {
     }
 }
 
+#[verifier::external_type_specification]
+pub struct ExFramePool(FramePool);
+
 /// Concrete implementation of page table memory.
 ///
 /// Page table memory manages all frames allocated for the hierarchical page tables, and
@@ -35,6 +39,8 @@ pub struct PageTableMemExec {
     pub tables: Vec<TableExec>,
     /// Page table architecture.
     pub arch: PTArchExec,
+    /// Frame pool for allocating/deallocating frames.
+    pub pool: Box<FramePool>,
 }
 
 impl PageTableMemExec {
@@ -77,6 +83,21 @@ impl PageTableMemExec {
         true
     }
 
+    /// Construct a new page table memory and initialize the root table.
+    #[verifier::external_body]
+    pub fn new_init(arch: PTArchExec) -> (res: PageTableMemExec)
+        requires
+            arch@.valid(),
+        ensures
+            res@.init(),
+    {
+        // TODO: only support 4k frame size for now
+        let mut pool = Box::new(FramePool::new());
+        let base = pool.alloc();
+        let table = TableExec { base, size: FrameSize::Size4K, level: Ghost(0nat) };
+        PageTableMemExec { tables: vec![table], arch, pool }
+    }
+
     /// Allocate a new table and returns the table descriptor.
     ///
     /// Assumption: To satisfy the post-condition we need to assume the correctness of
@@ -89,7 +110,13 @@ impl PageTableMemExec {
         ensures
             (self@, res@) == old(self)@.alloc_table(level as nat),
     {
-        unreached()
+        let _size = self.arch.frame_size(level).as_usize();
+        // TODO: only support 4k frame size for now
+        let base = self.pool.alloc();
+        let table = TableExec { base, size: FrameSize::Size4K, level: Ghost(level as nat) };
+        self.tables.push(table);
+        println!("Allocate table at {:#x}", base.0);
+        table
     }
 
     /// Deallocate a table.
@@ -105,7 +132,9 @@ impl PageTableMemExec {
         ensures
             self@ == old(self)@.dealloc_table(base@),
     {
-        unreached()
+        self.tables.retain(|t| t.base != base);
+        self.pool.dealloc(base);
+        println!("Deallocate table at {:#x}", base.0);
     }
 
     /// Get the value at the given index in the given table.
@@ -119,7 +148,9 @@ impl PageTableMemExec {
         ensures
             self@.read(base@, index as nat) == res,
     {
-        unsafe { (base.0 as *const u64).offset(index as isize).read_volatile() }
+        let r = unsafe { (base.0 as *const u64).offset(index as isize).read_volatile() };
+        println!("read {:#x} from {:#x}", r, base.0 + index * 8);
+        r
     }
 
     /// Write the value to the given index in the given table.
@@ -133,8 +164,41 @@ impl PageTableMemExec {
         ensures
             self@ == old(self)@.write(base@, index as nat, value),
     {
+        println!("write {:#x} to {:#x}", value, base.0 + index * 8);
         unsafe { (base.0 as *mut u64).offset(index as isize).write_volatile(value) }
     }
 }
 
 } // verus!
+
+/// An easy memory pool that uses bitmap to track 4k physical frames.
+pub struct FramePool {
+    /// Memory region.
+    #[repr(C, align(4096))]
+    pub mem: [u8; 0x100000],
+    /// Bitmap of the physical frames.
+    pub bitmap: [bool; 0x100],
+}
+
+impl FramePool {
+    /// Create a new frame pool.
+    pub fn new() -> Self {
+        Self {
+            bitmap: [false; 0x100],
+            mem: [0; 0x100000],
+        }
+    }
+
+    /// Allocate a 4k physical frame.
+    fn alloc(&mut self) -> PAddrExec {
+        let idx = self.bitmap.iter().position(|b| !b).unwrap();
+        self.bitmap[idx] = true;
+        PAddrExec(self.mem.as_ptr() as usize + idx as usize * 4096)
+    }
+
+    /// Deallocate a 4k physical frame.
+    fn dealloc(&mut self, addr: PAddrExec) {
+        let idx = (addr.0 - self.mem.as_ptr() as usize) / 4096;
+        self.bitmap[idx] = false;
+    }
+}

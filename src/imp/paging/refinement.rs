@@ -12,7 +12,7 @@ use crate::{
     },
     imp::{
         interface::{PTConstantsExec, PageTableInterface},
-        pt_mem::PageTableMemExec,
+        memory::PageTableMemExec,
     },
 };
 

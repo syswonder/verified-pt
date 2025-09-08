@@ -198,6 +198,7 @@ impl PTArch {
 }
 
 /// **EXEC MODE** Represents a single level in a hierarchical page table structure.
+#[derive(Clone)]
 pub struct PTArchLevelExec {
     /// The number of entries at this level.
     pub entry_count: usize,
@@ -216,6 +217,7 @@ impl PTArchLevelExec {
 /// multiple hierarchical levels from root (lowest level) to leaf (highest level).
 ///
 /// Provides utilities to compute the page table entry index and the virtual address.
+#[derive(Clone)]
 pub struct PTArchExec(pub Vec<PTArchLevelExec>);
 
 impl PTArchExec {

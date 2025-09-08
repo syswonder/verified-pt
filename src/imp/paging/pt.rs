@@ -1270,21 +1270,23 @@ impl<G> PageTable<G> where G: GhostPTE {
                             // Other entries are unchanged
                             let pte_i = G::from_u64(self.pt_mem.read(base, i as nat));
                             assert(self.pt_mem.accessible(base, i as nat));
-                            assert(self.pt_mem.contains_table(pte_i.addr()));
-                            self.lemma_other_index_not_in_chain(vbase, base, level, i as nat);
-                            self.lemma_insert_preserves_unrelated_node(
-                                vbase,
-                                base,
-                                level,
-                                target_level,
-                                new_pte,
-                                pte_i.addr(),
-                                level + 1,
-                            );
+                            if self.pte_points_to_table(pte_i, level) {
+                                assert(self.pt_mem.contains_table(pte_i.addr()));
+                                self.lemma_other_index_not_in_chain(vbase, base, level, i as nat);
+                                self.lemma_insert_preserves_unrelated_node(
+                                    vbase,
+                                    base,
+                                    level,
+                                    target_level,
+                                    new_pte,
+                                    pte_i.addr(),
+                                    level + 1,
+                                );
+                            }
                             assert(node2.entries[i] == node.entries[i]);
                         }
-                        assert(node2.entries == right.entries);
                     }
+                    assert(node2.entries == right.entries);
                 }
             } else {
                 let (allocated, table) = self.pt_mem.alloc_table(level + 1);

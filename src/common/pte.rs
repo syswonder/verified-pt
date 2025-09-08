@@ -72,7 +72,7 @@ pub trait GhostPTE: Sized {
 }
 
 /// Executable Page Table Entry interface.
-pub trait ExecPTE<G>: Sized + Clone where G: GhostPTE {
+pub trait ExecPTE<G>: Sized where G: GhostPTE {
     /// View as a ghost PTE.
     spec fn view(self) -> G;
 
