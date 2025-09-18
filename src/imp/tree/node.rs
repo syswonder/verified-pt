@@ -4,7 +4,7 @@ use vstd::prelude::*;
 use super::path::PTTreePath;
 use crate::{
     common::{addr::VAddr, frame::Frame, PagingResult},
-    imp::lemmas::lemma_map_eq_pair,
+    imp::lemmas::*,
     spec::page_table::PTConstants,
 };
 

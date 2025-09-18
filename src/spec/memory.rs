@@ -616,24 +616,6 @@ pub broadcast group group_pt_mem_lemmas {
     PageTableMem::lemma_write_preserves_invariants,
 }
 
-/// Describe a page table stored in physical memory.
-#[derive(Clone, Copy)]
-pub struct TableExec {
-    /// Base address of the table.
-    pub base: PAddrExec,
-    /// Size of the table.
-    pub size: FrameSize,
-    /// Level of the table.
-    pub level: usize,
-}
-
-impl TableExec {
-    /// View the concrete table as an abstract table.
-    pub open spec fn view(self) -> Table {
-        Table { base: self.base@, size: self.size, level: self.level as nat }
-    }
-}
-
 /// Specifiaction that executable page table memory should satisfy.
 pub trait PageTableMemExec: Sized {
     /// View as an abstract page table memory.
@@ -660,16 +642,19 @@ pub trait PageTableMemExec: Sized {
         requires
             arch@.valid(),
         ensures
+            res@.arch == arch@,
             res@.init(),
     ;
 
-    /// Allocate a new table and returns the table descriptor.
-    fn alloc_table(&mut self, level: usize) -> (res: TableExec)
+    /// Allocate a new table and returns the table base address and size.
+    fn alloc_table(&mut self, level: usize) -> (res: (PAddrExec, FrameSize))
         requires
             old(self)@.invariants(),
             level < old(self)@.arch.level_count(),
         ensures
-            (self@, res@) == old(self)@.alloc_table(level as nat),
+            (self@, Table { base: res.0@, size: res.1, level: level as nat }) == old(
+                self,
+            )@.alloc_table(level as nat),
     ;
 
     /// Deallocate a table.

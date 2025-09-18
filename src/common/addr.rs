@@ -3,9 +3,6 @@ use vstd::prelude::*;
 
 verus! {
 
-/// Word size.
-pub spec const WORD_SIZE: nat = 8;
-
 /// Representing virtual address.
 pub struct VAddr(pub nat);
 
@@ -32,7 +29,7 @@ impl VAddr {
 
     /// Convert to word index.
     pub open spec fn idx(self) -> VIdx {
-        VIdx(self.0 / WORD_SIZE)
+        VIdx(self.0 / 8)
     }
 
     /// If virtual page base `vbase` maps to physical page base `pbase`, calculate the
@@ -71,7 +68,7 @@ impl PAddr {
 
     /// Convert to word index.
     pub open spec fn idx(self) -> PIdx {
-        PIdx(self.0 / WORD_SIZE)
+        PIdx(self.0 / 8)
     }
 }
 
@@ -81,7 +78,7 @@ pub struct VIdx(pub nat);
 impl VIdx {
     /// Convert to virtual address.
     pub open spec fn addr(self) -> VAddr {
-        VAddr(self.0 * WORD_SIZE)
+        VAddr(self.0 * 8)
     }
 
     /// Convert to int.
@@ -96,7 +93,7 @@ pub struct PIdx(pub nat);
 impl PIdx {
     /// Convert to physical address.
     pub open spec fn addr(self) -> PAddr {
-        PAddr(self.0 * WORD_SIZE)
+        PAddr(self.0 * 8)
     }
 
     /// Convert to int.

@@ -1,5 +1,5 @@
 //! Implementation refinement proof.
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 use vstd::prelude::*;
 
 use super::pt_exec::PageTableExec;
@@ -88,7 +88,7 @@ impl<M, G, E> PageTableInterface<M> for PageTableImpl<M, G, E> where
         PagingResult<(VAddrExec, FrameExec)>,
         M,
     )) {
-        let mut pt = PageTableExec::<M, G, E>::new(pt_mem, constants);
+        let pt = PageTableExec::<M, G, E>::new(pt_mem, constants);
         proof {
             assert(pt@.invariants());
             pt@.model_consistent_with_hardware();

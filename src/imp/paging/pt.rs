@@ -1,5 +1,5 @@
 //! Spec-mode page table implementation.
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 use vstd::prelude::*;
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
         pte::GhostPTE,
         PagingResult,
     },
-    imp::lemmas::lemma_not_in_seq_implies_not_in_subseq,
+    imp::lemmas::*,
     imp::tree::{
         model::PTTreeModel,
         node::{NodeEntry, PTTreeNode},

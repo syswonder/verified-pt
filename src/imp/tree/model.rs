@@ -12,7 +12,7 @@ use crate::{
         frame::Frame,
         PagingResult,
     },
-    imp::lemmas::{lemma_aligned_range_eq, lemma_map_eq_pair},
+    imp::lemmas::*,
     spec::page_table::{PTConstants, PageTableState},
 };
 

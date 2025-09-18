@@ -3,7 +3,7 @@ use vstd::prelude::*;
 
 use super::lemmas::*;
 use crate::common::{
-    addr::{PAddr, VAddr, VIdx, WORD_SIZE},
+    addr::{PAddr, VAddr, VIdx},
     frame::Frame,
     MemoryResult, PagingResult,
 };
@@ -155,8 +155,8 @@ proof fn lemma_different_pidxs_for_different_vidxs(st: LowLevelState, vidx1: VId
                     frame2.base,
                 ).idx()
             };
-        lemma_pa_align_frame_size_must_align_word_size(frame1.base, frame1.size);
-        lemma_pa_align_frame_size_must_align_word_size(frame2.base, frame2.size);
+        lemma_pa_align_frame_size_must_align_8(frame1.base, frame1.size);
+        lemma_pa_align_frame_size_must_align_8(frame2.base, frame2.size);
         assert(PAddr::overlap(
             frame1.base,
             frame1.size.as_nat(),
@@ -405,9 +405,9 @@ proof fn ll_write_refines_hl_write(
                     let pidx2 = paddr2.idx();
                     // Prove `pidx2` is within physical memory.
                     lemma_vaddr_in_vpage_implies_paddr_in_pframe(vidx2.addr(), vbase2, frame2);
-                    lemma_pa_align_frame_size_must_align_word_size(frame2.base, frame2.size);
-                    lemma_sum_align_word_size(frame2.base.0, frame2.size.as_nat());
-                    assert(frame2.base.offset(frame2.size.as_nat()).aligned(WORD_SIZE));
+                    lemma_pa_align_frame_size_must_align_8(frame2.base, frame2.size);
+                    lemma_sum_align_8(frame2.base.0, frame2.size.as_nat());
+                    assert(frame2.base.offset(frame2.size.as_nat()).aligned(8));
                     lemma_paddr_neq_implies_pidx_neq(
                         paddr2,
                         frame2.base.offset(frame2.size.as_nat()),

@@ -5,10 +5,13 @@
 //! with a block/page descriptor.
 use vstd::prelude::*;
 
+extern crate alloc;
+
 use super::{
     addr::{VAddr, VAddrExec},
     frame::FrameSize,
 };
+use alloc::{vec, vec::Vec};
 
 verus! {
 
@@ -293,45 +296,6 @@ impl PTArchExec {
     {
         self.0.as_slice().iter().position(|l| l.frame_size.as_usize() == size.as_usize()).unwrap()
     }
-}
-
-/// For VMSAv8-64 using 4K granule. The architecture is specified as follows:
-///
-/// | Level | Index into PT | Entry Num |  Entry Type  | Frame Size |
-/// |-------|---------------|-----------|--------------|------------|
-/// | 0     | 47:39         | 512       | Table        | 512G       |
-/// | 1     | 38:30         | 512       | Table/Block  | 1G         |
-/// | 2     | 29:21         | 512       | Table/Block  | 2M         |
-/// | 3     | 20:12         | 512       | Page         | 4K         |
-///
-/// *If effective value of TCR_ELx.DS is 0, level 0 allows Table descriptor only.
-pub spec const VMSAV8_4K_ARCH: PTArch = PTArch(
-    seq![
-        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size512G },
-        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size1G },
-        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size2M },
-        PTArchLevel { entry_count: 512, frame_size: FrameSize::Size4K },
-    ],
-);
-
-/// `VMSAV8_4K_ARCH` of execution mode.
-pub fn vmsav8_4k_arch_exec() -> PTArchExec {
-    PTArchExec(
-        vec![
-            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size512G },
-            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size1G },
-            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size2M },
-            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size4K },
-        ],
-    )
-}
-
-/// `VMSAV8_4K_ARCH` is a valid architecture.
-pub proof fn lemma_vmsav8_4k_arch_valid()
-    by (nonlinear_arith)
-    ensures
-        VMSAV8_4K_ARCH.valid(),
-{
 }
 
 } // verus!

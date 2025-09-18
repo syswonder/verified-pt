@@ -3,10 +3,7 @@ use vstd::prelude::*;
 
 use crate::{
     common::{addr::VAddr, arch::PTArch},
-    imp::lemmas::{
-        lemma_left_sum_eq_right_sum, lemma_parts_align_implies_sum_align,
-        lemma_zero_seq_sum_is_zero,
-    },
+    imp::lemmas::*,
 };
 
 verus! {

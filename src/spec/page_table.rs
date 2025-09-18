@@ -8,7 +8,7 @@
 use vstd::prelude::*;
 
 use crate::common::{
-    addr::{PAddr, VAddr, WORD_SIZE},
+    addr::{PAddr, VAddr},
     arch::PTArch,
     frame::Frame,
     PagingResult,
@@ -119,7 +119,7 @@ impl PageTableState {
     /// Query precondition.
     pub open spec fn query_pre(self, vaddr: VAddr) -> bool {
         // Base vaddr should align to 8 bytes
-        vaddr.aligned(WORD_SIZE)
+        vaddr.aligned(8)
     }
 
     /// State transition - page table query.

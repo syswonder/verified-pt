@@ -1,5 +1,5 @@
 //! Executable page table implementation.
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 use vstd::prelude::*;
 
 use super::pt::PageTable;
@@ -169,16 +169,16 @@ impl<M, G, E> PageTableExec<M, G, E> where M: PageTableMemExec, G: GhostPTE, E: 
                     );
                 }
                 // Allocate intermediate table
-                let table = self.pt_mem.alloc_table(level + 1);
+                let (table_base, _) = self.pt_mem.alloc_table(level + 1);
                 proof {
-                    assume(table.base@.aligned(FrameSize::Size4K.as_nat()));
+                    assume(table_base@.aligned(FrameSize::Size4K.as_nat()));
                 }
                 // Write entry
-                let pte = E::new(table.base, MemAttr::default(), false);
+                let pte = E::new(table_base, MemAttr::default(), false);
                 self.pt_mem.write(base, idx, pte.to_u64());
 
                 // Insert at next level
-                self.insert(vbase, table.base, level + 1, target_level, new_pte)
+                self.insert(vbase, table_base, level + 1, target_level, new_pte)
             }
         }
     }

@@ -18,6 +18,7 @@ use crate::spec::{
 verus! {
 
 /// Page table config constants (exec mode).
+#[derive(Clone)]
 pub struct PTConstantsExec {
     /// Page table architecture.
     pub arch: PTArchExec,

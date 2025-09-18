@@ -13,7 +13,7 @@
 use vstd::prelude::*;
 
 use crate::common::{
-    addr::{PAddr, PIdx, VAddr, VIdx, WORD_SIZE},
+    addr::{PAddr, PIdx, VAddr, VIdx},
     arch::PTArch,
     frame::Frame,
     MemoryResult, PagingResult,
@@ -60,9 +60,7 @@ impl HighLevelState {
     pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: MemoryResult<u64>) -> bool {
         &&& s1.constants === s2.constants
         // vaddr should align to 8 bytes
-        &&& vaddr.aligned(
-            WORD_SIZE,
-        )
+        &&& vaddr.aligned(8)
         // Memory and mappings should not be updated
         &&& s1.mappings === s2.mappings
         &&& s1.mem === s2.mem
@@ -93,7 +91,7 @@ impl HighLevelState {
     ) -> bool {
         &&& s1.constants === s2.constants
         // vaddr should align to 8 bytes
-        &&& vaddr.aligned(WORD_SIZE)
+        &&& vaddr.aligned(8)
         // Mappings should not be updated
         &&& s1.mappings === s2.mappings
         // Check mapping

@@ -15,11 +15,7 @@
 use vstd::prelude::*;
 
 use super::memory::{PageTableMem, PhysMem, TLB};
-use crate::common::{
-    addr::{VAddr, WORD_SIZE},
-    frame::Frame,
-    MemoryResult,
-};
+use crate::common::{addr::VAddr, frame::Frame, MemoryResult};
 
 verus! {
 
@@ -46,7 +42,7 @@ impl HardwareState {
     /// Hardware state transition - memory read.
     pub open spec fn read(s1: Self, s2: Self, vaddr: VAddr, res: MemoryResult<u64>) -> bool {
         &&& vaddr.aligned(
-            WORD_SIZE,
+            8,
         )
         // Memory and page table should not be updated
         &&& s1.mem === s2.mem
@@ -92,7 +88,7 @@ impl HardwareState {
         value: u64,
         res: MemoryResult<()>,
     ) -> bool {
-        &&& vaddr.aligned(WORD_SIZE)
+        &&& vaddr.aligned(8)
         // Page table should not be updated
         &&& s1.pt === s2.pt
         // Check mapping

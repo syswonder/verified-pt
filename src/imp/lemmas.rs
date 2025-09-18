@@ -2,7 +2,7 @@
 use vstd::prelude::*;
 
 use crate::common::{
-    addr::{PAddr, VAddr, WORD_SIZE},
+    addr::{PAddr, VAddr},
     frame::{Frame, FrameSize},
 };
 
@@ -57,23 +57,23 @@ pub proof fn lemma_map_eq_pair<K, V>(m1: Map<K, V>, m2: Map<K, V>)
     }
 }
 
-/// Lemma. VA alignment to FrameSize ensures alignment to WORD_SIZE.
-pub proof fn lemma_va_align_frame_size_must_align_word_size(vaddr: VAddr, fsize: FrameSize)
+/// Lemma. VA alignment to FrameSize ensures alignment to 8.
+pub proof fn lemma_va_align_frame_size_must_align_8(vaddr: VAddr, fsize: FrameSize)
     by (nonlinear_arith)
     requires
         vaddr.aligned(fsize.as_nat()),
     ensures
-        vaddr.aligned(WORD_SIZE),
+        vaddr.aligned(8),
 {
 }
 
-/// Lemma. PA alignment to FrameSize ensures alignment to WORD_SIZE.
-pub proof fn lemma_pa_align_frame_size_must_align_word_size(paddr: PAddr, fsize: FrameSize)
+/// Lemma. PA alignment to FrameSize ensures alignment to 8.
+pub proof fn lemma_pa_align_frame_size_must_align_8(paddr: PAddr, fsize: FrameSize)
     by (nonlinear_arith)
     requires
         paddr.aligned(fsize.as_nat()),
     ensures
-        paddr.aligned(WORD_SIZE),
+        paddr.aligned(8),
 {
 }
 
@@ -81,7 +81,7 @@ pub proof fn lemma_pa_align_frame_size_must_align_word_size(paddr: PAddr, fsize:
 pub proof fn lemma_paddr_neq_implies_pidx_neq(paddr1: PAddr, paddr2: PAddr)
     requires
         paddr1.0 < paddr2.0,
-        paddr2.aligned(WORD_SIZE),
+        paddr2.aligned(8),
     ensures
         paddr1.idx().0 < paddr2.idx().0,
 {
@@ -96,14 +96,14 @@ pub proof fn lemma_vaddr_in_vpage_implies_paddr_in_pframe(vaddr: VAddr, vbase: V
 {
 }
 
-/// Lemma. `a % WORD_SIZE == 0` and `b % WORD_SIZE == 0` implies `(a + b) % WORD_SIZE == 0`.
-pub proof fn lemma_sum_align_word_size(a: nat, b: nat)
+/// Lemma. `a % 8 == 0` and `b % 8 == 0` implies `(a + b) % 8 == 0`.
+pub proof fn lemma_sum_align_8(a: nat, b: nat)
     by (nonlinear_arith)
     requires
-        a % WORD_SIZE == 0,
-        b % WORD_SIZE == 0,
+        a % 8 == 0,
+        b % 8 == 0,
     ensures
-        (a + b) % WORD_SIZE == 0,
+        (a + b) % 8 == 0,
 {
 }
 
