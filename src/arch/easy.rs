@@ -1,18 +1,10 @@
-//! A toy page table implementation for testing.
+//! A toy page table entry implementation for testing.
 use vstd::prelude::*;
 
-use super::PageTableApi;
-use crate::imp::paging::pt_exec::PageTableExec;
-use crate::{
-    common::{
-        addr::{PAddr, PAddrExec, VAddrExec},
-        arch::{PTArchExec, PTArchLevelExec},
-        frame::{FrameExec, FrameSize, MemAttr},
-        pte::{ExecPTE, GhostPTE},
-        PagingResult,
-    },
-    spec::memory::PageTableMemExec,
-    imp::interface::PTConstantsExec,
+use crate::common::{
+    addr::{PAddr, PAddrExec},
+    frame::MemAttr,
+    pte::{ExecPTE, GhostPTE},
 };
 
 verus! {
@@ -226,77 +218,24 @@ impl ExecPTE<EasyGhostPTE> for EasyExecPTE {
     }
 }
 
+/// The 3-level easy architecture is specified as follows:
+///
+/// | Level | Index into PT | Entry Num |  Entry Type  | Frame Size |
+/// |-------|---------------|-----------|--------------|------------|
+/// | 1     | 38:30         | 512       | Table/Block  | 1G         |
+/// | 2     | 29:21         | 512       | Table/Block  | 2M         |
+/// | 3     | 20:12         | 512       | Page         | 4K         |
+pub fn easy_3level_arch() -> PTArchExec {
+    PTArchExec(
+        [
+            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size1G },
+            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size2M },
+            PTArchLevelExec { entry_count: 512, frame_size: FrameSize::Size4K },
+        ].to_vec(),
+    )
+}
+
+/// Page table of easy architecture.
+pub type EasyPageTable<M> = PageTable<M, EasyGhostPTE, EasyExecPTE>;
+
 } // verus!
-
-/// Easy Page Table Architecture: 3-level, each level 512 entries.
-fn easy_pt_arch() -> PTArchExec {
-    PTArchExec(vec![
-        PTArchLevelExec {
-            entry_count: 512,
-            frame_size: FrameSize::Size1G,
-        },
-        PTArchLevelExec {
-            entry_count: 512,
-            frame_size: FrameSize::Size2M,
-        },
-        PTArchLevelExec {
-            entry_count: 512,
-            frame_size: FrameSize::Size4K,
-        },
-    ])
-}
-
-/// Physical memory lower and upper bounds.
-const EASY_PMEM_LB: usize = 0b1000;
-const EASY_PMEM_UB: usize = 0b100000000;
-
-/// Easy Page Table Implementation.
-/// 
-/// The underlying page table memory can be any type that implements `PageTableMemExec`.
-pub struct EasyPageTable<M: PageTableMemExec>(PageTableExec<M, EasyGhostPTE, EasyExecPTE>);
-
-impl<M> PageTableApi for EasyPageTable<M> where M: PageTableMemExec {
-    fn new() -> Self {
-        let arch = easy_pt_arch();
-        Self(PageTableExec::new(
-            M::new_init(arch.clone()),
-            PTConstantsExec {
-                arch,
-                pmem_lb: PAddrExec(EASY_PMEM_LB),
-                pmem_ub: PAddrExec(EASY_PMEM_UB),
-            },
-        ))
-    }
-
-    fn root(&self) -> usize {
-        self.0.pt_mem.root().0
-    }
-
-    fn map(&mut self, vbase: usize, paddr: usize, size: usize, attr: MemAttr) -> PagingResult {
-        let size = if size == FrameSize::Size1G.as_usize() {
-            FrameSize::Size1G
-        } else if size == FrameSize::Size2M.as_usize() {
-            FrameSize::Size2M
-        } else {
-            FrameSize::Size4K
-        };
-        self.0.map(
-            VAddrExec(vbase),
-            FrameExec {
-                base: PAddrExec(paddr),
-                size,
-                attr,
-            },
-        )
-    }
-
-    fn unmap(&mut self, vaddr: usize) -> PagingResult {
-        self.0.unmap(VAddrExec(vaddr))
-    }
-
-    fn query(&self, vaddr: usize) -> PagingResult<(usize, usize, usize, MemAttr)> {
-        self.0
-            .query(VAddrExec(vaddr))
-            .map(|(vbase, frame)| (vbase.0, frame.base.0, frame.size.as_usize(), frame.attr))
-    }
-}
