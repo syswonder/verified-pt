@@ -4,10 +4,32 @@
 //! The implementation should refine the specification defined in `spec::memory::PageTableMem`.
 use vstd::prelude::*;
 
+extern crate alloc;
+
+use super::pool::FramePool;
 use crate::common::{addr::PAddrExec, arch::PTArchExec, frame::FrameSize};
-use crate::spec::memory::{PageTableMem, PageTableMemExec, TableExec};
+use crate::spec::memory::{PageTableMem, PageTableMemExec, Table};
+use alloc::{boxed::Box, vec::Vec};
 
 verus! {
+
+/// Describe a page table stored in physical memory.
+#[derive(Clone, Copy)]
+pub struct TableExec {
+    /// Base address of the table.
+    pub base: PAddrExec,
+    /// Size of the table.
+    pub size: FrameSize,
+    /// Level of the table.
+    pub level: usize,
+}
+
+impl TableExec {
+    /// View the concrete table as an abstract table.
+    pub open spec fn view(self) -> Table {
+        Table { base: self.base@, size: self.size, level: self.level as nat }
+    }
+}
 
 #[verifier::external_type_specification]
 pub struct ExFramePool(FramePool);
@@ -67,14 +89,14 @@ impl PageTableMemExec for PooledPageTableMem {
     /// Assumption: To satisfy the post-condition we need to assume the correctness of
     /// the memory allocator, which may be verified in the future work.
     #[verifier::external_body]
-    fn alloc_table(&mut self, level: usize) -> (res: TableExec) {
+    fn alloc_table(&mut self, level: usize) -> (res: (PAddrExec, FrameSize)) {
         let _size = self.arch.frame_size(level).as_usize();
         // TODO: only support 4k frame size for now
         let base = self.pool.alloc();
         let table = TableExec { base, size: FrameSize::Size4K, level };
         self.tables.push(table);
         println!("Allocate table at {:#x}", base.0);
-        table
+        (table.base, table.size)
     }
 
     /// Deallocate a table.
@@ -106,35 +128,3 @@ impl PageTableMemExec for PooledPageTableMem {
 }
 
 } // verus!
-
-/// An easy memory pool that uses a bitmap to track 4k physical frames.
-#[repr(C, align(4096))]
-pub struct FramePool {
-    /// Memory region.
-    pub mem: [u8; 0x100000],
-    /// Bitmap of the physical frames.
-    pub bitmap: [bool; 0x100],
-}
-
-impl FramePool {
-    /// Create a new frame pool.
-    pub fn new() -> Self {
-        Self {
-            bitmap: [false; 0x100],
-            mem: [0; 0x100000],
-        }
-    }
-
-    /// Allocate a 4k physical frame.
-    fn alloc(&mut self) -> PAddrExec {
-        let idx = self.bitmap.iter().position(|b| !b).unwrap();
-        self.bitmap[idx] = true;
-        PAddrExec(self.mem.as_ptr() as usize + idx as usize * 4096)
-    }
-
-    /// Deallocate a 4k physical frame.
-    fn dealloc(&mut self, addr: PAddrExec) {
-        let idx = (addr.0 - self.mem.as_ptr() as usize) / 4096;
-        self.bitmap[idx] = false;
-    }
-}
