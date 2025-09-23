@@ -15,22 +15,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
 
 [[package]]
-name = "builtin"
-version = "0.1.0"
-
-[[package]]
-name = "builtin_macros"
-version = "0.1.0"
-dependencies = [
- "prettyplease_verus",
- "proc-macro2",
- "quote",
- "syn",
- "syn_verus",
- "synstructure",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -55,14 +39,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prettyplease_verus"
-version = "0.1.15"
-dependencies = [
- "proc-macro2",
- "syn_verus",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -81,29 +57,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "state_machines_macros"
-version = "0.1.0"
-dependencies = [
- "indexmap",
- "proc-macro2",
- "quote",
- "syn_verus",
-]
-
-[[package]]
 name = "syn"
-version = "1.0.109"
+version = "2.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-ident",
-]
-
-[[package]]
-name = "syn_verus"
-version = "1.0.95"
+checksum = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -112,14 +69,13 @@ dependencies = [
 
 [[package]]
 name = "synstructure"
-version = "0.12.6"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f36bdaa60a83aca3921b5259d5400cbf5e90fc51931376a9bd4a0eb79aa7210f"
+checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
- "unicode-xid",
 ]
 
 [[package]]
@@ -129,16 +85,65 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb9e6ca4f869e1180728b7950e35922a7fc6397f7b641499e8f3ef06e50dc83"
 
 [[package]]
-name = "unicode-xid"
-version = "0.2.6"
+name = "verus_builtin"
+version = "0.0.0-2025-08-12-1837"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+checksum = "e9d00c22a221fbf8b3398002ebdd1c89017e5381c2f05d6933a3706d87e90e14"
+
+[[package]]
+name = "verus_builtin_macros"
+version = "0.0.0-2025-08-12-1837"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4725e5f5c417d90aa8ac92b47daea50b8494874390491b9a957e2f8ed3fe05d7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "synstructure",
+ "verus_prettyplease",
+ "verus_syn",
+]
+
+[[package]]
+name = "verus_prettyplease"
+version = "0.0.0-2025-08-12-1837"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f62091543498033a2d17682164c789de934c42bcdc8ff497fb381c995f1cad5"
+dependencies = [
+ "proc-macro2",
+ "verus_syn",
+]
+
+[[package]]
+name = "verus_state_machines_macros"
+version = "0.0.0-2025-08-12-1837"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "734a9a8e44ddb3cf61dd80de4aee6f3cf6f46db25ad0e0b381e11d0ee8f1e077"
+dependencies = [
+ "indexmap",
+ "proc-macro2",
+ "quote",
+ "verus_syn",
+]
+
+[[package]]
+name = "verus_syn"
+version = "0.0.0-2025-08-12-1837"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c30b28d965c1c0259f28a4813e1c393f126940a1051870ef75d668860a2fd0bb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
 
 [[package]]
 name = "vstd"
-version = "0.1.0"
+version = "0.0.0-2025-08-12-1837"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b5f531340ad04fc039853c28cfe984b7baa3982aba0d37dfac01406e4d9f10f"
 dependencies = [
- "builtin",
- "builtin_macros",
- "state_machines_macros",
+ "verus_builtin",
+ "verus_builtin_macros",
+ "verus_state_machines_macros",
 ]

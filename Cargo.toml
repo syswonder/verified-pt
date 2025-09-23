@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-vstd = { path = "/home/liujingx/os/verif/verus/source/vstd", default-features = false }
+vstd = { version = "0.0.0-2025-08-12-1837", default-features = false }
 bitflags = "2.1"
 
 [features]
