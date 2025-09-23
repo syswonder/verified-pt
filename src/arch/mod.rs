@@ -80,10 +80,10 @@ where
 
     /// Given a virtual address, returns the virtual base addree, physical address,
     /// frame size, and the attributes of the mapping.
-    pub fn query(&self, vaddr: usize) -> PagingResult<(usize, usize, usize, MemAttr)> {
+    pub fn query(&self, vaddr: usize) -> PagingResult<(usize, usize, FrameSize, MemAttr)> {
         self.0
             .query(VAddrExec(vaddr))
-            .map(|(vbase, frame)| (vbase.0, frame.base.0, frame.size.as_usize(), frame.attr))
+            .map(|(vbase, frame)| (vbase.0, frame.base.0, frame.size, frame.attr))
     }
 
     /// Updates the attributes of a mapping. Implements as unmap + map.
