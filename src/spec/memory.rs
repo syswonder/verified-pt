@@ -619,7 +619,14 @@ pub broadcast group group_pt_mem_lemmas {
 /// Specifiaction that executable page table memory should satisfy.
 pub trait PageTableMemExec: Sized {
     /// View as an abstract page table memory.
-    spec fn view(self) -> PageTableMem;
+    open spec fn view(self) -> PageTableMem {
+        // If the exec-mode page table memory implementation doesn't want to provide proof, 
+        // it could just use this default version, which will not affect functionality.
+        PageTableMem {
+            arch: PTArch(Seq::empty()),
+            tables: Seq::empty(),
+        }
+    }
 
     /// Physical address of the root page table.
     fn root(&self) -> (res: PAddrExec)

@@ -1,5 +1,5 @@
 [package]
-name = "hvisor-pt"
+name = "verified-pt"
 version = "0.1.0"
 edition = "2021"
 
