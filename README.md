@@ -124,6 +124,56 @@ This is established through **operation abstraction** and **invariant preservati
 
 The page table implementation is a Rust module that defines the page table management functions. It is **verified** against the page table specification.
 
+Implementation is wrapped in struct `arch::PageTable`, which provides methods for mapping, unmapping, and querying memory mappings.
+
+```rust
+/// A wrapper of `PageTableExec` for easier usage.
+///
+/// Provides a simple interface for `map`, `unmap`, `query`, and `protect` functions.
+pub struct PageTable<M, G, E>(PageTableExec<M, G, E>)
+where
+    M: PageTableMemExec,
+    G: GhostPTE,
+    E: ExecPTE<G>;
+
+impl<M, G, E> PageTable<M, G, E>
+where
+    M: PageTableMemExec,
+    G: GhostPTE,
+    E: ExecPTE<G>,
+{
+    /// Creates an empty page table.
+    pub fn new(arch: PTArchExec, pmem_lb: usize, pmem_ub: usize) -> Self {
+        ...
+    }
+
+    /// Maps a virtual address to a physical address.
+    pub fn map(
+        &mut self,
+        vbase: usize,
+        paddr: usize,
+        size: FrameSize,
+        attr: MemAttr,
+    ) -> PagingResult {
+        ...
+    }
+
+    /// Unmaps a virtual address.
+    pub fn unmap(&mut self, vbase: usize) -> PagingResult {
+        ...
+    }
+
+    /// Given a virtual address, returns the virtual base addree, physical address,
+    /// frame size, and the attributes of the mapping.
+    pub fn query(
+      &self, 
+      vaddr: usize,
+    ) -> PagingResult<(usize, usize, FrameSize, MemAttr)> {
+        ...
+    }
+}
+```
+
 Page table entries are represented as traits (`GhostPTE` for spec-mode and `ExecPTE` for exec-mode), allowing architecture-specific implementations (e.g., x86_64, RISC-V) to conform to a common interface.
 
 VMSAv8-64 architecture is currently supported by implementing the traits (feature `aarch64`). 
